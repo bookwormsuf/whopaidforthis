@@ -1,0 +1,34 @@
+# Sprints
+
+The initiative is cut into eight sprints. Each has a sub-spec in this folder. The master spec
+(`../spec/pinned-decisions.md`) is the source of truth; a sub-spec only adds what is specific to its
+sprint and points at the master spec sections it implements.
+
+| # | Sprint | You can test | Needs a 2nd person |
+|---|---|---|---|
+| 0 | [Accounts, keys, skeleton](00-accounts-keys-skeleton.md) | Bot answers `/help` from your laptop | No |
+| 1 | [Trip binding and users](01-trip-binding-and-users.md) | `/settrip` builds the whole Sheet, `/join` fills Users | No |
+| 2 | [Text expenses, just me](02-text-expenses-just-me.md) | "1200 yen ramen" becomes a Sheet row with the day's rate | No |
+| 3 | [First deployment](03-first-deployment.md) | Bot works with the laptop closed | No |
+| 4 | [Receipt photos, total only](04-receipt-photos-total-only.md) | A photo becomes an expense | No |
+| 5 | [Splitting and balances](05-splitting-and-balances.md) | Everyone / Choose people, equal, custom, `/balances`, `/settle` | Yes, ~10 min |
+| 6 | [Item claiming](06-item-claiming.md) | Tap items on a receipt, tax spread proportionally | Yes, ~10 min |
+| 7 | [Hardening and go-live](07-hardening-and-go-live.md) | Real group, real Sheet, friends joined | Yes, everyone |
+
+## How a sprint runs
+
+1. Open a Claude Code session in this repo and say "run sprint N".
+2. The agent reads `CLAUDE.md`, `CONTEXT.md`, the master spec, this sprint's sub-spec, and `STATUS.md`.
+3. It does any "before" checks, builds the "agent builds" list, runs `uv run pytest` and `uv run ruff check .`,
+   then runs `/review` against the sprint's changes and fixes what the review finds.
+4. It appends a work-log entry to `STATUS.md` and hands you the "after" checklist.
+5. You do the checklist in Telegram. Every item ticked → you say "sign off sprint N". The agent records
+   your sign-off in `STATUS.md`. Only then does the next sprint start.
+
+A sprint is **done** only when all three hold: tests pass, you ticked every checklist item, and
+`STATUS.md` has your sign-off entry. An agent saying "done" is not done.
+
+## Sub-spec shape
+
+Goal · In scope · Out of scope · Sprint pins · Before you start (you) · Agent builds · Tests required ·
+After: your checklist · Exit criteria.
