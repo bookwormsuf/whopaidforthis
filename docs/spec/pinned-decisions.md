@@ -20,9 +20,14 @@ Vocabulary: see `/CONTEXT.md`. Rationale for the two irreversible ones: `/docs/a
 - Groups with no binding get one reply, "Run /settrip first", to commands and are otherwise silent. There is no `ALLOWED_CHAT_IDS`; an unbound group is ignored.
 - Currency minor-unit table lives in code: 0 decimals for JPY, KRW; 2 for everything else supported. Supported currencies = the Frankfurter list.
 
+### 2a. Wording (added 2026-09-29 after the Sprint 1 checklist)
+
+- Users never see the word "bind". Re-running `/settrip` on a connected group asks `This group already has a Sheet. Switch to the new one?` with buttons `Switch Sheet` / `Keep current`. The final message is `Connected ✅ <trip name> · <T> → <H> · <tz>`. Code and docs may keep "binding" internally.
+
 ## 3. Users
 
-- `/join` (and `/start` in a group) upserts the sender into `Users` with `Joined = TRUE`. Anyone who merely sends a message is also upserted with `Joined = FALSE` (for names) but is **not** part of Everyone.
+- `/join` (and `/start` in a group) upserts the sender into `Users` with `Joined = TRUE`.
+- Joining others (added 2026-09-29): `/join` sent as a **reply** to another person's message joins that person (their ID comes from the replied-to message) and replies `Joined ✅ <their name>`. The `Connected ✅` message and every `Joined ✅` reply carry an `I'm in too` button (callback `join:<chat_id>`) that joins whoever taps it and edits the message to append their name to a "Joined so far" line; the button stays for others. `/join @username` is **not** supported because Telegram does not give bots the user ID behind a plain @mention. Anyone who merely sends a message is also upserted with `Joined = FALSE` (for names) but is **not** part of Everyone.
 - Everyone = users in this chat with `Joined = TRUE`, evaluated at the moment the button is pressed.
 - Name resolution for "split between me Amir and John" and "paid by Amir": case-insensitive match against username, first name, and full display name of joined users. Zero or several matches → the draft asks with buttons; never guess.
 
@@ -88,6 +93,7 @@ Pure functions in `app/services/splitting.py`, no I/O, property-tested.
 - Commit = a single `values.batchUpdate` appending, in this order within the request: Line Items rows, Splits rows, the Expenses row last. Every reader joins through Expenses; orphan Splits/Line Items rows are ignored.
 - IDs: Expense ID = the draft's ULID. Item ID = `"{expense_id}-{n:02d}"`.
 - Amounts are written as numbers in **major units** (yen as integer, SGD as 2-dp decimal) so the Sheet reads naturally; the code converts to minor units on read. Rate stored to 8 dp. Timestamps ISO 8601 with offset. Dates `YYYY-MM-DD`.
+- Telegram IDs are written as numbers and Joined as a real boolean (RAW input), so formula comparisons match.
 - Tabs and columns (headers exactly as written; the trip's currency codes replace `<T>` and `<H>` at `/settrip` time, e.g. "JPY Amount"):
   - `Trip`: Chat ID | Trip Name | Trip Currency | Home Currency | Timezone | Created At | Bot Version
   - `Users`: Telegram User ID | Username | Display Name | First Seen | Last Seen | Joined
@@ -99,14 +105,24 @@ Pure functions in `app/services/splitting.py`, no I/O, property-tested.
 - `Source Type` ∈ `text, receipt`. `Status` ∈ `confirmed, cancelled`. `Kind` ∈ `item, tax, service_charge, discount`. `Allocation Method` ∈ `claimed, everyone, proportional`. `Assigned User IDs` is a comma-joined list.
 - Dedup: on startup load every `(Chat ID, Message ID)` from Expenses into a set; check before commit; add after commit. Also guard the PTB update handler with `update.update_id` in a bounded LRU.
 
+### 10a. Readable layout (added 2026-09-29 after the Sprint 1 checklist)
+
+Applied by `/settrip` when the Sheet is created; data and header strings in §10 are unchanged.
+- Tab order as shown to humans: `Summary`, `Expenses`, `Splits`, `Line Items`, `Users`, `Exchange Rates`, `Trip`, `Read Me`. `Summary` is index 0 so it opens by default.
+- Hidden columns (via `hideColumns`; formulas still work, users can unhide): Summary `User ID`; Expenses `Expense ID`, `Chat ID`, `Message ID`, `Created By User ID`, `Payer User ID`; Splits `Expense ID`, `Participant User ID`; Line Items `Expense ID`, `Item ID`, `Assigned User IDs`; Users `Telegram User ID`; Trip `Chat ID`.
+- Number formats: `<T> Amount`/`Share <T>`/`Amount <T>` use `#,##0` when the trip currency has 0 decimals else `#,##0.00`; `<H>` columns `#,##0.00`; `Rate` `0.00000000`; `Transaction Date` and `Rate Date` as dates `yyyy-mm-dd`.
+- Summary block titles, in order, each a bold row above its block: `Who owes whom` (with the note row `Positive = should receive money · Negative = owes money`), `Totals`, `By category`, `By day`, `By payer`.
+- `Read Me` tab: one column, plain English, three lines per tab: what one row means, who writes it (the bot), and when to look at it. Ends with the line `Do not edit rows by hand; use /undo in Telegram.`
+
 ## 11. Summary tab
 
 Written once at `/settrip`, never rewritten. All formulas filter `Expenses!Status = "confirmed"` (joined via Expense ID for Splits). Blocks, top to bottom:
 
-1. Per person: Display Name | Paid <H> | Share <H> | Net <H> — `SUMIFS` over Expenses (paid) and a `SUMPRODUCT`/`QUERY` join over Splits (share). Net = Paid − Share.
+1. Per person: User ID (join key, may be hidden) | Display Name | Paid <H> | Share <H> | Net <H> — up to 20 rows; `SUMIFS` over Expenses (paid) and a `SUMPRODUCT`/`QUERY` join over Splits (share). Net = Paid − Share.
 2. Group totals: Total <T>, Total <H>, expense count.
 3. By category (`QUERY … group by Category`), by day (`group by Transaction Date`), by payer.
 Formulas must reference whole columns (`Expenses!A:W`) so appended rows are included.
+- Formulas that multiply arrays use header-free open ranges (`Splits!F2:F`); lookups may use full columns.
 
 ## 12. Commands
 

@@ -8,6 +8,8 @@ dependencies = [
     "pydantic>=2",
     "pydantic-settings>=2",
     "httpx",
+    "gspread>=6,<7",
+    "python-ulid",
 ]
 
 [dependency-groups]

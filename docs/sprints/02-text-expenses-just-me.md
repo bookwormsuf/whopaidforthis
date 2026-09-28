@@ -9,10 +9,18 @@ Master spec §4 (Frankfurter provider, cache, conversion for a single participan
 without name resolution), §8 (draft flow with `Just me` and `Cancel` only), §10 (commit, dedup),
 §12 commands `/recent`, `/today`, `/summary`, `/undo`.
 
+Plus three carry-overs from the Sprint 1 checklist, done **first** in this order (master spec §2a, §3, §10a):
+1. Sheet readability: Summary first, plumbing columns hidden, plain-English Summary blocks, number
+   formats, a `Read Me` tab.
+2. Wording: "Switch Sheet / Keep current" instead of "rebind"; "Connected ✅" instead of "Bound ✅".
+3. Joining others: an `I'm in too` button on join/connect messages, and `/join` sent as a reply to
+   someone's message joins that person.
+
 ## Out of scope
 Photos, other participants, splits, `/balances`, `/mine`, `/settle`, "paid by", "split between".
 
 ## Sprint pins
+- Carry-overs: execute master spec §2a (wording), §3 (join button and reply-to-join), §10a (readable layout) verbatim. `initialise_trip_sheet` applies §10a on creation; it must stay idempotent on an already-initialised Sheet.
 - The detected message shows only `[Just me] [Cancel]` in this sprint. `Everyone` and `Choose people` are added in Sprint 5, not rendered greyed out.
 - `Just me` goes straight to the preview (`[Confirm] [Cancel]`, no `Edit` yet since there is nothing to edit).
 - Frankfurter client uses `httpx.AsyncClient` with a 5 s timeout, 2 retries. `ExchangeRate` is stored in the `Exchange Rates` tab on first fetch; memory cache is a plain dict.
@@ -27,7 +35,8 @@ Photos, other participants, splits, `/balances`, `/mine`, `/settle`, "paid by", 
 - Read commands fetch the `Expenses` tab once per command; no background caching yet.
 
 ## Before you start (you)
-Nothing new. Sprint 1 must be signed off.
+Sprint 1 must be signed off. Create a fresh blank Sheet named `whopaid test trip 2` and share it with the
+service account as Editor, so you can see the new layout created from scratch in step 1 below.
 
 ## Agent builds
 `app/models/money.py`, `app/models/expense.py` (+ `ExpenseSplit`), `app/models/exchange_rate.py`, `app/services/exchange_rates.py` (`ExchangeRateProvider`, `FrankfurterProvider`, `CachedRates`), `app/services/expense_parser.py`, `app/services/drafts.py` (`Draft`, `DraftStore`, `InMemoryDraftStore`, `DraftService`), `app/bot/handlers/text_expense.py`, `app/bot/handlers/callbacks.py`, `app/bot/handlers/reads.py`, `app/bot/keyboards/draft.py`, `app/bot/formatting.py`, extensions to `google_sheets.py`, tests, README sections "Recording an expense", "Exchange rates".
@@ -36,7 +45,8 @@ Nothing new. Sprint 1 must be signed off.
 Brief §27 items: the six parse examples, JPY default, "I paid ¥4,850 for dinner", non-expense text is `None`, 13-word message is `None`; historical rate used not today's; weekend date stores the returned rate date; SGD original needs no conversion of shares; `Expense` refuses mismatched shares; duplicate `(chat, message)` does not commit; commit request order Line Items → Splits → Expenses; `/undo` writes status not delete; stale/foreign callback rejected; row formatting to Sheet values and back. Frankfurter and gspread mocked.
 
 ## After: your checklist
-1. `uv run python -m app`
+1. `uv run python -m app`. Send `/settrip <url of whopaid test trip 2>`. The prompt says "Switch Sheet / Keep current"; tap **Switch Sheet**, then JPY, SGD, Asia/Tokyo, Create. The final message says "Connected ✅ …" and has an **I'm in too** button. Tap it: you get "Joined ✅ <your name>".
+   Open the Sheet: `Summary` is the first tab and opens by default; its first block is "Who owes whom" with the note about positive and negative; no User ID column is visible; the `Read Me` tab is last. In `Expenses` the ID columns are hidden (a small arrow between column headers shows where).
 2. Send `1200 yen ramen`. A card appears with ¥1,200, an SGD amount, your name, today's date, the rate. Tap **Just me**, then **Confirm**. The card becomes `Saved ✅ …`.
 3. Open the Sheet: `Expenses` has one row, `Splits` has one row for you with the same amounts, `Exchange Rates` has one row.
 4. Send `I paid ¥4,850 for dinner`, `taxi 3200`, `750 coffee`, `S$12 grab`. Confirm each. Check the SGD one has Original Currency SGD and its SGD amount equals 12.00.
@@ -47,6 +57,6 @@ Brief §27 items: the six parse examples, JPY default, "I paid ¥4,850 for dinne
 9. Scroll up to the first saved card and try tapping where the buttons were: there are none. Send an expense, wait, then stop and restart the bot, then tap **Confirm** on that card: you get "expired, please send again".
 
 ## Exit criteria
-- [ ] All nine checklist steps pass
+- [ ] All nine checklist steps pass, including the carry-over checks in step 1
 - [ ] Tests, ruff green; `/review` findings addressed
 - [ ] `STATUS.md` entry with your sign-off
