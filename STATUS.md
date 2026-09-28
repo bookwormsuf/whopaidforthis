@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-09-29 (sprint 1 checklist passed, awaiting sign-off)
+Updated: 2026-09-29 (sprint 1 signed off)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -11,8 +11,8 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | Sprint | Spec | Build | Tests | Review | Manual checklist | Sign-off | Next action / owner |
 |---|---|---|---|---|---|---|---|
 | 0 Accounts, keys, skeleton | written | done | green (10) | 2026-09-29, findings fixed | 2026-09-29 | 2026-09-29 | Sprint 0 closed. Next: run sprint 1 / agent |
-| 1 Trip binding and users | written | done | green (112) | 2026-09-29, findings fixed | 2026-09-29, all six pass | – | Say "sign off sprint 1" / Sufyan |
-| 2 Text expenses, just me | written (+ carry-overs) | not started | – | – | – | – | after sprint 1 sign-off; Sufyan: create `whopaid test trip 2` Sheet |
+| 1 Trip binding and users | written | done | green (112) | 2026-09-29, findings fixed | 2026-09-29, all six pass | 2026-09-29 | Sprint 1 closed. Next: run sprint 2 / agent |
+| 2 Text expenses, just me | written (+ carry-overs) | not started | – | – | – | – | Run sprint 2 / agent (test trip 2 Sheet ready) |
 | 3 First deployment | written | not started | – | – | – | – | after sprint 2 |
 | 4 Receipt photos, total only | written | not started | – | – | – | – | after sprint 3 |
 | 5 Splitting and balances | written | not started | – | – | – | – | after sprint 4; needs tester B |
@@ -80,3 +80,9 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Feedback from Sufyan, pinned into the spec as §2a, §3 addition and §10a and added to the top of Sprint 2: no "rebind" wording; an `I'm in too` button and reply-to-join because `/join @username` cannot resolve an ID; Summary first with plumbing columns hidden, plain-English block titles, number formats and a Read Me tab.
 - Reviewed by / disposition: checklist verified by Sufyan; explicit sign-off phrase not yet given.
 - Next action / owner: "sign off sprint 1" / Sufyan; create `whopaid test trip 2` / Sufyan; run sprint 2 / agent.
+
+### 2026-09-29 — Sprint 1 sign-off
+
+- Performed by: Sufyan, recorded by Claude.
+- Disposition: Sufyan said "sign off sprint 1" after all six checklist steps passed. Sprint 1 closed. `whopaid test trip 2` Sheet created and shared for Sprint 2.
+- Next action / owner: run sprint 2 / agent.
