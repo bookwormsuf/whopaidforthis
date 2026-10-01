@@ -481,7 +481,7 @@ class SheetsLedgerStore:
         if line_items:
             line_items_ws = await _with_retries(spreadsheet.worksheet, "Line Items")
             for index, item in enumerate(line_items, start=1):
-                row = line_item_to_row(item, expense.expense_id, index, trip.trip_currency)
+                row = line_item_to_row(item, expense, index)
                 requests.append(
                     {
                         "appendCells": {

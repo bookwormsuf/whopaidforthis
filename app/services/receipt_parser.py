@@ -22,10 +22,12 @@ from typing import Literal, Protocol
 from zoneinfo import ZoneInfo
 
 import anthropic
+from pydantic import ValidationError
 
+from app.models.receipt import CandidateTotal, Receipt, ReceiptLineItem
 from app.models.trip import Trip
 from app.services.images import PreparedImage
-from app.services.llm_schemas import LineItemExtraction, ReceiptExtraction
+from app.services.llm_schemas import ReceiptExtraction
 
 logger = logging.getLogger(__name__)
 
@@ -62,9 +64,10 @@ read any number with any confidence, and a `notes` field explaining what's wrong
 
 
 class ReceiptUnreadable(Exception):
-    """The LLM call failed twice (schema-invalid or exception), or returned no
-    candidate totals at all. The caller shows "Couldn't read that receipt" with
-    `Try again` / `Enter amount manually`.
+    """The LLM call failed twice (schema-invalid, no parsed output, or exception), or
+    the reading failed validation into the domain `Receipt` (e.g. no candidate
+    totals). The caller shows "Couldn't read that receipt" with `Try again` /
+    `Enter amount manually`.
     """
 
 
@@ -102,6 +105,10 @@ class AnthropicReceiptReader:
                     "output_tokens": getattr(usage, "output_tokens", None),
                 },
             )
+        if response.parsed_output is None:
+            # A refusal or a max_tokens cut-off returns no parsed output rather than
+            # raising; treat it like invalid output so the one retry applies.
+            raise ValueError(f"no parsed output (stop_reason={response.stop_reason})")
         return response.parsed_output
 
     async def read(self, image: PreparedImage, *, trip: Trip) -> ReceiptExtraction:
@@ -138,7 +145,51 @@ class AnthropicReceiptReader:
                 raise ReceiptUnreadable() from second_error
 
 
-def line_item_sums(line_items: list[LineItemExtraction]) -> tuple[int, int]:
+def to_receipt(extraction: ReceiptExtraction, currency: str) -> Receipt:
+    """Validates a raw LLM reading into the domain `Receipt` (spec §7). `currency`
+    is the already-resolved trip or home currency (`resolve_receipt_currency`). An
+    unparseable printed date becomes `None`. Raises `ReceiptUnreadable` if the
+    reading is not a usable receipt (e.g. no candidate totals at all).
+    """
+    printed: datetime | None = None
+    if extraction.transaction_datetime:
+        try:
+            printed = datetime.fromisoformat(extraction.transaction_datetime)
+        except ValueError:
+            printed = None
+    try:
+        return Receipt(
+            merchant=extraction.merchant,
+            currency=currency,
+            transaction_datetime=printed,
+            line_items=[
+                ReceiptLineItem(
+                    description=item.description,
+                    quantity=item.quantity,
+                    unit_amount_minor=item.unit_amount_minor,
+                    amount_minor=item.amount_minor,
+                    kind=item.kind,
+                )
+                for item in extraction.line_items
+            ],
+            candidate_totals=[
+                CandidateTotal(
+                    label_as_printed=c.label_as_printed,
+                    amount_minor=c.amount_minor,
+                    is_grand_total_guess=c.is_grand_total_guess,
+                )
+                for c in extraction.candidate_totals
+            ],
+            description=extraction.description,
+            category=extraction.category,
+            confidence=extraction.confidence,
+            notes=extraction.notes,
+        )
+    except ValidationError as exc:
+        raise ReceiptUnreadable("reading is not a usable receipt") from exc
+
+
+def line_item_sums(line_items: list[ReceiptLineItem]) -> tuple[int, int]:
     """`(items_sum_minor, adjustments_sum_minor)`. Adjustments = tax + service_charge
     - discount (spec §7: `computed = items + tax + service - discount`).
     """
@@ -156,39 +207,33 @@ def line_item_sums(line_items: list[LineItemExtraction]) -> tuple[int, int]:
 class TotalDecision:
     status: Literal["confident", "ask"]
     chosen_total_minor: int | None
-    candidates: list  # list[app.services.llm_schemas.CandidateTotal], up to 3
+    candidates: list[CandidateTotal]  # up to 3 when asking
     computed_total_minor: int | None
 
 
-def select_total(extraction: ReceiptExtraction) -> TotalDecision:
+def select_total(receipt: Receipt) -> TotalDecision:
     """Spec §7 total-selection rule.
 
     `computed = items + tax + service - discount`. If exactly one candidate has
     `is_grand_total_guess` and `|candidate - computed| <= 5` minor units (or there
     are no line items at all), choose it. Otherwise ask, with up to 3 candidates
     (grand-total guesses first, then largest).
-
-    Raises `ReceiptUnreadable` if there are no candidate totals at all (per the
-    sprint 4 build note: an empty `candidate_totals` list means unreadable).
     """
-    if not extraction.candidate_totals:
-        raise ReceiptUnreadable("no candidate totals extracted")
-
     computed = None
-    if extraction.line_items:
-        items_sum, adjustments_sum = line_item_sums(extraction.line_items)
+    if receipt.line_items:
+        items_sum, adjustments_sum = line_item_sums(receipt.line_items)
         computed = items_sum + adjustments_sum
 
-    guesses = [c for c in extraction.candidate_totals if c.is_grand_total_guess]
+    guesses = [c for c in receipt.candidate_totals if c.is_grand_total_guess]
     if len(guesses) == 1:
         candidate = guesses[0]
         if computed is None or abs(candidate.amount_minor - computed) <= _CONFIDENT_TOLERANCE_MINOR:
             return TotalDecision(
-                "confident", candidate.amount_minor, extraction.candidate_totals, computed
+                "confident", candidate.amount_minor, receipt.candidate_totals, computed
             )
 
     ordered = sorted(
-        extraction.candidate_totals,
+        receipt.candidate_totals,
         key=lambda c: (not c.is_grand_total_guess, -c.amount_minor),
     )
     return TotalDecision("ask", None, ordered[:3], computed)
@@ -218,7 +263,7 @@ def reconcile(
 
 
 def resolve_transaction_date(
-    extraction: ReceiptExtraction, message_time: datetime, trip_timezone: str
+    receipt: Receipt, message_time: datetime, trip_timezone: str
 ) -> tuple[Literal["receipt", "message"], date]:
     """Printed date if present and within 30 days of the message time, else the
     message time in the trip timezone (spec §7).
@@ -226,12 +271,8 @@ def resolve_transaction_date(
     Returns `(date_source, transaction_date)`.
     """
     message_date = message_time.astimezone(ZoneInfo(trip_timezone)).date()
-    if extraction.transaction_datetime:
-        try:
-            printed = datetime.fromisoformat(extraction.transaction_datetime)
-        except ValueError:
-            return "message", message_date
-        printed_date = printed.date()
+    if receipt.transaction_datetime is not None:
+        printed_date = receipt.transaction_datetime.date()
         if abs((printed_date - message_date).days) <= 30:
             return "receipt", printed_date
     return "message", message_date

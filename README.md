@@ -80,7 +80,8 @@ merging in this sprint.
 
 Line items are extracted and stored in the Sheet's `Line Items` tab for your own reference,
 but aren't yet splittable by item — everyone pays an equal share of the receipt total this
-sprint (per-item claiming is a later sprint).
+sprint (per-item claiming is a later sprint). Item amounts are always shown in the trip
+currency; for a receipt paid in the home currency they are converted at that expense's rate.
 
 ## LLM API setup
 

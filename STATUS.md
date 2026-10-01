@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-10-01 (sprint 3 signed off, bot live on Fly.io)
+Updated: 2026-10-01 (sprint 4 built and reviewed, awaiting checklist)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -14,7 +14,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 1 Trip binding and users | written | done | green (112) | 2026-09-29, findings fixed | 2026-09-29, all six pass | 2026-09-29 | Sprint 1 closed. Next: run sprint 2 / agent |
 | 2 Text expenses, just me | written (+ carry-overs) | done | green (236) | 2026-09-29, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 2 closed. Next: run sprint 3 / agent |
 | 3 First deployment | written | done | green (247) | 2026-10-01, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 3 closed. Next: run sprint 4 / agent |
-| 4 Receipt photos, total only | written | done | green (283) | pending | – | – | /review then checklist |
+| 4 Receipt photos, total only | written (+ §7/§10 amendments) | done | green (298) | 2026-10-01, findings fixed | – | – | Checklist / Sufyan (see open question on step 7) |
 | 5 Splitting and balances | written | not started | – | – | – | – | after sprint 4; needs tester B |
 | 6 Item claiming | written | not started | – | – | – | – | after sprint 5; needs tester B |
 | 7 Hardening and go-live | written | not started | – | – | – | – | after sprint 6; needs all friends |
@@ -274,3 +274,52 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
     "receipt total is 238 higher" instead.
 - Reviewed by / disposition: not yet reviewed.
 - Next action / owner: `/review` on this sprint's changes, then the sprint 4 checklist / Sufyan.
+
+### 2026-10-01 — Sprint 4 review and fixes
+
+- Performed by: Claude (cloud session; work moved from the local machine to remote).
+- Scope and reason: `/review` (code-review skill, high effort) on the Sprint 4 commit, then
+  fixes, per `CLAUDE.md`.
+- Review findings, all confirmed by reading the code, all fixed:
+  1. An empty `candidate_totals` (what the prompt asks for on a blurry photo or a non-receipt)
+     raised inside draft creation and was reported as "Couldn't reach Google Sheets"; on
+     `Try again` it escaped the callback unanswered. Now an unreadable reading is caught when
+     validating into the domain `Receipt` and always shows the two-button card.
+  2. The manual-amount reply handler took every group reply to any bot message, silently
+     dropping replies such as `1200 yen ramen` sent as a reply to a bot card. The separate
+     handler is gone; `text_expense_handler` first checks whether the reply is for a draft
+     awaiting a manual amount, and otherwise parses the message as usual.
+  3. A caption with an amount (`¥3000 dinner`) kept the amount in the description. Captions now
+     use the same amount/currency rule as the text parser, shared via one `_locate_amount`
+     helper (also removing the copied block in `parse_amount_only`).
+  4. Line items from a home-currency receipt were written to `Amount <T>` as if their minor
+     units were trip-currency minor units. Decided with Sufyan: convert at the expense's rate,
+     half-even per item. Spec §10 amended.
+  5. `messages.parse` returning no parsed output (refusal, `max_tokens`) returned `None` to the
+     handlers and crashed them. It now triggers the one retry, then the unreadable path.
+  6. Telegram download and Pillow errors escaped both the photo handler and `Try again`. One
+     `read_receipt_photo` now turns every failure into an outcome the card can show.
+  7. The caption override was lost after `Try again` or `Enter amount manually`. The draft now
+     keeps `caption_override` through both paths.
+  8. A confident total within ±5 of the line-item sum still showed the reconciliation prompt.
+     Decided with Sufyan: it now goes straight to the card; the prompt remains for a total
+     picked from the buttons that differs. Spec §7 amended (this replaces the build entry's
+     "deviation" note about reconciliation).
+  9. The LLM read ran inline in a blocking handler, stalling every other update for its
+     duration, and `Try again` answered its callback only after the read. The photo handler and
+     a dedicated `retry` callback handler are now non-blocking; `Try again` answers immediately
+     and refuses a second press while a read is in flight.
+  10. The domain `Receipt` was never built, and `CandidateTotal`/`LineItemKind` were defined
+     twice. `receipt_parser.to_receipt` now validates every reading into `Receipt` (spec §7);
+     drafts, total selection and the keyboard use the domain types; the LLM schema's class is
+     renamed `CandidateTotalExtraction`.
+- Checks: `uv run pytest -q` 298 passed (15 new tests covering the paths above). `uv run ruff
+  check .`, `ruff format --check` and `uvx pre-commit run --all-files` clean. Still no real
+  photo or live Anthropic call; that is the checklist.
+- Open question for Sufyan before checklist step 7 ("Send the same photo twice quickly. Only one
+  draft appears."): dedup is keyed on the Telegram message ID (sprint pin), and sending a photo
+  twice produces two messages with different IDs, so two drafts will appear. Either the step
+  means a duplicated delivery of one message (which is deduped), or the pin needs a second key
+  such as Telegram's `file_unique_id`.
+- Reviewed by / disposition: findings fixed; awaiting Sufyan's checklist and sign-off.
+- Next action / owner: answer the step-7 question, deploy, run the sprint 4 checklist / Sufyan.
