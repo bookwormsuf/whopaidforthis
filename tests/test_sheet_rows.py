@@ -7,7 +7,12 @@ from decimal import Decimal
 
 from app.models.category import Category
 from app.models.expense import Expense, ExpenseSplit
-from app.services.sheet_rows import expense_to_row, row_to_expense_record, split_to_row
+from app.services.sheet_rows import (
+    expense_to_row,
+    row_to_expense_record,
+    row_to_split_record,
+    split_to_row,
+)
 
 _NOW = datetime.now(UTC).replace(microsecond=0)
 
@@ -122,3 +127,20 @@ def test_split_to_row_column_count_matches_header() -> None:
     )
     row = split_to_row(split, "01EXPENSE00000000000000000", "JPY", "SGD")
     assert len(row) == len(HEADERS["Splits"])
+
+
+def test_split_row_round_trips() -> None:
+    split = ExpenseSplit(
+        user_id=7,
+        username=None,
+        display_name="Bo",
+        share_trip_minor=1617,
+        share_home_minor=1310,
+        split_method="custom",
+    )
+    row = split_to_row(split, "01EXPENSE00000000000000000", "JPY", "SGD")
+    record = row_to_split_record(row, "JPY", "SGD")
+    assert record.expense_id == "01EXPENSE00000000000000000"
+    assert (record.user_id, record.username, record.display_name) == (7, None, "Bo")
+    assert (record.share_trip_minor, record.share_home_minor) == (1617, 1310)
+    assert record.split_method == "custom"

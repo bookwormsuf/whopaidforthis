@@ -162,6 +162,23 @@ async def undo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+async def _creator_name(deps, trip: Trip, expense: ExpenseRecord) -> str:
+    """The creator's name. The Expenses tab keeps only the payer's name, and since
+    "paid by" (sprint 5) the creator need not be the payer, so look them up in Users.
+    """
+    if expense.created_by_user_id == expense.payer_user_id:
+        return expense.payer_display_name
+    try:
+        users = await deps.ledger.list_users(trip)
+    except LedgerUnavailable:
+        logger.exception("undo_callback: could not read Users")
+        users = []
+    for user in users:
+        if user.user_id == expense.created_by_user_id:
+            return user.display_name
+    return "the person who added it"
+
+
 async def undo_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """`undo:{expense_id}:{yes|keep}`. Initiator-only: only the person who created
     the expense may press (checked against the expense's Created By, since only
@@ -205,10 +222,7 @@ async def undo_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     if presser.id != expense.created_by_user_id:
-        # The Expenses tab doesn't store the creator's display name separately from
-        # the payer's; this sprint the two are always the same person ("just me"
-        # text expenses only), so payer_display_name is the creator's name here.
-        await query.answer(f"Only {expense.payer_display_name} can undo this")
+        await query.answer(f"Only {await _creator_name(deps, trip, expense)} can undo this")
         return
 
     if expense.status == "cancelled":

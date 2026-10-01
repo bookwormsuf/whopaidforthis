@@ -28,6 +28,7 @@ from app.bot.conversations.settrip import (
     settrip_text_handler,
 )
 from app.bot.deps import Deps, get_deps
+from app.bot.handlers.balances import balances_command, mine_command, settle_command
 from app.bot.handlers.basic import help_command, start_command
 from app.bot.handlers.callbacks import join_button_callback
 from app.bot.handlers.join import UNBOUND_TEXT, join_command, lost_access_text
@@ -169,6 +170,9 @@ def build_application(token: str, deps: Deps) -> Application:
     application.add_handler(CommandHandler("today", today_command))
     application.add_handler(CommandHandler("summary", summary_command))
     application.add_handler(CommandHandler("undo", undo_command))
+    application.add_handler(CommandHandler("balances", balances_command))
+    application.add_handler(CommandHandler("mine", mine_command))
+    application.add_handler(CommandHandler("settle", settle_command))
     application.add_handler(CallbackQueryHandler(settrip_callback, pattern=r"^st:"))
     application.add_handler(CallbackQueryHandler(join_button_callback, pattern=r"^join:"))
     application.add_handler(CallbackQueryHandler(undo_callback, pattern=r"^undo:"))

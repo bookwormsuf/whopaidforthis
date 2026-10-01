@@ -4,11 +4,24 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from app.services.conversion import convert_minor
-from app.services.splitting import convert_shares, split_equal
+from app.services.conversion import both_amounts, convert_minor
+from app.services.splitting import (
+    SPLIT_SPEC_ADAPTER,
+    Custom,
+    Equal,
+    Items,
+    Percent,
+    SplitError,
+    convert_shares,
+    shares_in_both_currencies,
+    split_custom,
+    split_equal,
+    split_shares,
+)
 
 
 def test_split_equal_just_me() -> None:
@@ -88,3 +101,70 @@ def test_convert_shares_invariants(
     for pid, amount in shares.items():
         unrounded_value = Decimal(amount) * rate
         assert abs(Decimal(converted[pid]) - unrounded_value) <= 1
+
+
+def test_split_custom_exact_sum_gate() -> None:
+    assert split_custom({1: 4000, 2: 5000}, 9000) == {1: 4000, 2: 5000}
+    with pytest.raises(SplitError):
+        split_custom({1: 4000, 2: 4999}, 9000)
+    with pytest.raises(SplitError):
+        split_custom({1: 4000, 2: 5001}, 9000)
+    with pytest.raises(SplitError):
+        split_custom({1: 10000, 2: -1000}, 9000)
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [Equal(), Custom({1: 4000, 2: 5000}), Items({"e-01": [1, 2]}), Percent({1: 0.5, 2: 0.5})],
+)
+def test_split_spec_round_trips(spec) -> None:
+    dumped = SPLIT_SPEC_ADAPTER.dump_python(spec, mode="json")
+    assert dumped["kind"] == spec.kind
+    assert SPLIT_SPEC_ADAPTER.validate_python(dumped) == spec
+
+
+def test_split_shares_dispatches_on_spec() -> None:
+    assert split_shares(Equal(), 100, [1, 2, 3], payer_id=1) == {1: 33, 2: 34, 3: 33}
+    assert split_shares(Custom({1: 60, 2: 40}), 100, [1, 2], payer_id=1) == {1: 60, 2: 40}
+    with pytest.raises(SplitError):
+        split_shares(Items(), 100, [1, 2], payer_id=1)
+
+
+@given(
+    total_minor=st.integers(min_value=1, max_value=5_000_000),
+    participant_ids=st.lists(
+        st.integers(min_value=1, max_value=1000), min_size=1, max_size=10, unique=True
+    ),
+    rate=st.decimals(min_value="0.0001", max_value="200", places=6, allow_nan=False),
+    original_is_trip=st.booleans(),
+    custom=st.booleans(),
+    payer_in=st.booleans(),
+)
+def test_shares_in_both_currencies_sum_to_both_totals(
+    total_minor, participant_ids, rate, original_is_trip, custom, payer_in
+) -> None:
+    """Spec §5 invariant, for equal and custom splits, either original currency,
+    payer inside or outside the participants.
+    """
+    payer_id = participant_ids[0] if payer_in else 5000
+    if custom:
+        weights = {pid: index + 1 for index, pid in enumerate(participant_ids)}
+        spec = Custom(split_equal(total_minor, list(weights), payer_id))
+    else:
+        spec = Equal()
+    original = split_shares(spec, total_minor, participant_ids, payer_id)
+    original_ccy = "JPY" if original_is_trip else "SGD"
+    trip_total, home_total = both_amounts(total_minor, original_ccy, "JPY", "SGD", rate)
+    trip_shares, home_shares = shares_in_both_currencies(
+        original,
+        original_currency=original_ccy,
+        trip_currency="JPY",
+        home_currency="SGD",
+        trip_to_home_rate=rate,
+        trip_amount_minor=trip_total,
+        home_amount_minor=home_total,
+        payer_id=payer_id,
+    )
+    assert sum(trip_shares.values()) == trip_total
+    assert sum(home_shares.values()) == home_total
+    assert trip_shares.keys() == home_shares.keys() == set(participant_ids)

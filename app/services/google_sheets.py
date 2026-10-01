@@ -21,7 +21,7 @@ from gspread.utils import ValueInputOption, ValueRenderOption, rowcol_to_a1
 from gspread.worksheet import Worksheet
 
 from app.models.exchange_rate import ExchangeRate
-from app.models.expense import Expense, ExpenseRecord
+from app.models.expense import Expense, ExpenseRecord, SplitRecord
 from app.models.receipt import ReceiptLineItem
 from app.models.trip import Trip
 from app.models.user import TripUser
@@ -37,6 +37,7 @@ from app.services.sheet_rows import (
     expense_to_row,
     line_item_to_row,
     row_to_expense_record,
+    row_to_split_record,
     split_to_row,
 )
 from app.services.summary_formulas import summary_rows, title_cells
@@ -521,6 +522,19 @@ class SheetsLedgerStore:
         )
         return [
             row_to_expense_record(row, trip.trip_currency, trip.home_currency)
+            for row in rows[1:]
+            if _row_nonempty(row)
+        ]
+
+    async def list_splits(self, trip: Trip) -> list[SplitRecord]:
+        """Every Splits row; callers join through Expenses (orphans ignored, §10)."""
+        spreadsheet = await self._open(trip.sheet_id)
+        ws = await _with_retries(spreadsheet.worksheet, "Splits")
+        rows = await _with_retries(
+            ws.get_all_values, value_render_option=ValueRenderOption.unformatted
+        )
+        return [
+            row_to_split_record(row, trip.trip_currency, trip.home_currency)
             for row in rows[1:]
             if _row_nonempty(row)
         ]

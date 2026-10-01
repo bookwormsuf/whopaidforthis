@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from app.models.category import Category
-from app.services.expense_parser import parse_expense
+from app.services.expense_parser import CustomLine, parse_custom_line, parse_expense
 
 BOT = "whopaidforthisbot"
 
@@ -162,3 +162,35 @@ def test_dollar_sign_falls_back_to_usd_when_home_is_neither_sgd_nor_usd() -> Non
     result = parse_expense("$12 grab", "JPY", "EUR", BOT)
     assert result is not None
     assert result.error == "unsupported_currency"
+
+
+# The six trailing clauses (sprint 5): three "split <word> <names>", two "split
+# everyone/all", and "paid by", plus the two clauses in either order.
+@pytest.mark.parametrize(
+    ("text", "participants", "payer"),
+    [
+        ("6000 yen dinner split between me and Amir", "me and Amir", None),
+        ("6000 yen dinner split among me, Amir", "me, Amir", None),
+        ("6000 yen dinner split with Amir", "Amir", None),
+        ("6000 yen dinner split everyone", "everyone", None),
+        ("6000 yen dinner split all", "all", None),
+        ("6000 yen dinner paid by Amir", None, "Amir"),
+        ("6000 yen dinner paid by Amir split between me and Amir", "me and Amir", "Amir"),
+        ("6000 yen dinner split everyone paid by Amir", "everyone", "Amir"),
+    ],
+)
+def test_trailing_clauses(text: str, participants: str | None, payer: str | None) -> None:
+    result = parse_expense(text, "JPY", "SGD", BOT)
+    assert result is not None
+    assert (result.amount_minor, result.description) == (6000, "Dinner")
+    assert result.participants_text == participants
+    assert result.payer_text == payer
+
+
+def test_custom_line() -> None:
+    assert parse_custom_line("Amir 2000", "JPY", "SGD") == CustomLine("Amir", 2000, "JPY")
+    assert parse_custom_line("me ¥1,500", "JPY", "SGD") == CustomLine("me", 1500, "JPY")
+    assert parse_custom_line("Jo Tan: S$12.50", "JPY", "SGD") == CustomLine("Jo Tan", 1250, "SGD")
+    assert parse_custom_line("2000", "JPY", "SGD") is None  # no name
+    assert parse_custom_line("Amir", "JPY", "SGD") is None  # no amount
+    assert parse_custom_line("Amir 20 baht", "JPY", "SGD") is None  # not this trip's currency

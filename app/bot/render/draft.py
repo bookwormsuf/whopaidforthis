@@ -23,8 +23,17 @@ from app.bot.keyboards.receipt import (
     manual_amount_keyboard,
     reconcile_keyboard,
 )
+from app.bot.keyboards.split import (
+    custom_keyboard,
+    detected_keyboard,
+    participants_keyboard,
+    preview_keyboard,
+    resolve_name_keyboard,
+    split_method_keyboard,
+)
 from app.models.trip import Trip
-from app.services.drafts import Draft
+from app.services.drafts import Draft, draft_shares, original_total, person_for
+from app.services.splitting import Custom
 
 
 def _buttons(draft_id: str, *pairs: tuple[str, str]) -> InlineKeyboardMarkup:
@@ -48,6 +57,14 @@ def render_draft(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup | 
         return _render_reconcile(draft, trip)
     if draft.state == "manual_amount":
         return _render_manual_amount(draft, trip)
+    if draft.state == "resolve_name":
+        return _render_resolve_name(draft, trip)
+    if draft.state == "participants":
+        return _render_participants(draft, trip)
+    if draft.state == "split_method":
+        return _render_split_method(draft, trip)
+    if draft.state == "custom":
+        return _render_custom(draft, trip)
     if draft.state == "preview":
         return _render_preview(draft, trip)
     if draft.state == "rate_failed":
@@ -75,7 +92,7 @@ def _render_detected(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarku
             f"🧾 <b>{desc}</b>\n{amounts_line}\nPaid by {payer} · {date_str}\n\n"
             "Who should share this?"
         )
-        return text, _buttons(draft.draft_id, ("Just me", "justme"), ("Cancel", "cancel"))
+        return text, detected_keyboard(draft.draft_id)
 
     trip_str = fmt_money(draft.trip_amount_minor, trip.trip_currency)
     home_str = fmt_money(draft.home_amount_minor, trip.home_currency)
@@ -88,7 +105,7 @@ def _render_detected(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarku
         f"🧾 <b>{desc}</b>\n{amounts_line}\nPaid by {payer} · {date_str}\n{rate_line}\n\n"
         "Who should share this?"
     )
-    return text, _buttons(draft.draft_id, ("Just me", "justme"), ("Cancel", "cancel"))
+    return text, detected_keyboard(draft.draft_id)
 
 
 def _render_detected_receipt(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
@@ -107,7 +124,7 @@ def _render_detected_receipt(draft: Draft, trip: Trip) -> tuple[str, InlineKeybo
         f"🧾 {merchant_line}<b>{desc}</b>\n{amount}\nPaid by {payer} · "
         f"{date_str} ({date_source_str}){items_line}\n\nWho should share this?"
     )
-    return text, _buttons(draft.draft_id, ("Just me", "justme"), ("Cancel", "cancel"))
+    return text, detected_keyboard(draft.draft_id)
 
 
 def _render_choose_total(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
@@ -145,17 +162,97 @@ def _render_manual_amount(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboard
     return text, manual_amount_keyboard(draft.draft_id)
 
 
+def _header(draft: Draft, trip: Trip) -> str:
+    """`🧾 <b>Dinner</b> — ¥6,000 (S$48.60)` then `Paid by Ada`, shared by the
+    sharing-step cards.
+    """
+    amount = format_expense_amount(
+        trip, draft.currency, draft.trip_amount_minor, draft.home_amount_minor
+    )
+    return f"🧾 <b>{escape(draft.description)}</b> — {amount}\nPaid by {escape(draft.payer_name)}"
+
+
+def _names(draft: Draft, user_ids: list[int]) -> str:
+    return ", ".join(escape(person_for(draft, pid).display_name) for pid in user_ids)
+
+
+def _render_resolve_name(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    pending = draft.name_queue[0]
+    role = " (paid by)" if pending.role == "payer" else ""
+    text = f"{_header(draft, trip)}\n\nWho did you mean by '{escape(pending.token)}'?{role}"
+    return text, resolve_name_keyboard(draft, pending)
+
+
+def _render_participants(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    text = f"{_header(draft, trip)}\n\nWho shares this? Tap names, then Next."
+    return text, participants_keyboard(draft)
+
+
+def _render_split_method(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    text = (
+        f"{_header(draft, trip)}\nShared by {_names(draft, draft.participant_ids)}\n\n"
+        "How should it be split?"
+    )
+    return text, split_method_keyboard(draft.draft_id)
+
+
+def _render_custom(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    """Each person's amount, the running total and the remaining line (sprint 5 pin).
+    Amounts are in the currency the expense was entered in.
+    """
+    assert isinstance(draft.split, Custom)
+    amounts = draft.split.amounts_by_participant
+    total = original_total(draft, trip)
+    entered = sum(amounts.values())
+    remaining = total - entered
+    lines = [
+        f"{escape(person_for(draft, pid).display_name)} — "
+        + (fmt_money(amounts[pid], draft.currency) if pid in amounts else "–")
+        for pid in draft.participant_ids
+    ]
+    if remaining == 0:
+        remaining_line = f"Remaining: {fmt_money(0, draft.currency)} ✅"
+    else:
+        sign = "−" if remaining < 0 else ""
+        remaining_line = f"Remaining: {sign}{fmt_money(abs(remaining), draft.currency)} ❌"
+    parts = [
+        _header(draft, trip),
+        "",
+        "Reply to this message with one line per person, e.g. <code>Amir 2000</code>",
+        "",
+        *lines,
+        f"Total {fmt_money(entered, draft.currency)} of {fmt_money(total, draft.currency)}",
+        remaining_line,
+    ]
+    if draft.custom_error:
+        parts.append(f"⚠️ {escape(draft.custom_error, quote=False)}")
+    return "\n".join(parts), custom_keyboard(draft.draft_id, balanced=remaining == 0)
+
+
 def _render_preview(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    """Every participant's share, payer marked (sprint 5 pin). Shares show both
+    currencies, trip first, except for an expense entered in the home currency,
+    which shows the home currency only (spec §12).
+    """
     desc = escape(draft.description)
     payer = escape(draft.payer_name)
     amount = format_expense_amount(
         trip, draft.currency, draft.trip_amount_minor, draft.home_amount_minor
     )
-    # The share line shows a single amount, in whichever currency was entered --
-    # never the parenthetical pair (that's only on the title line above).
-    share_str = fmt_money(draft.amount_minor, draft.currency)
-    text = f"<b>{desc}</b> — {amount}\nPaid by {payer}\n\n{payer} — {share_str}"
-    return text, _buttons(draft.draft_id, ("Confirm", "confirm"), ("Cancel", "cancel"))
+    lines = []
+    for pid, (share_trip, share_home) in draft_shares(draft, trip).items():
+        name = escape(person_for(draft, pid).display_name)
+        marker = " 💳" if pid == draft.payer_id else ""
+        if draft.currency == trip.home_currency:
+            share = fmt_money(share_home, trip.home_currency)
+        else:
+            share = (
+                f"{fmt_money(share_trip, trip.trip_currency)} · "
+                f"{fmt_money(share_home, trip.home_currency)}"
+            )
+        lines.append(f"{name}{marker} — {share}")
+    text = f"<b>{desc}</b> — {amount}\nPaid by {payer}\n\n" + "\n".join(lines)
+    return text, preview_keyboard(draft.draft_id)
 
 
 def _render_rate_failed(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:

@@ -85,6 +85,20 @@ class Expense(BaseModel):
         return self
 
 
+class SplitRecord(BaseModel):
+    """One Splits-tab row, read back for balances (spec §12)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    expense_id: str
+    user_id: int
+    username: str | None
+    display_name: str
+    share_trip_minor: int
+    share_home_minor: int
+    split_method: SplitMethod
+
+
 class ExpenseRecord(BaseModel):
     """Expenses-tab columns only, no splits. Used by read commands."""
 
