@@ -16,6 +16,7 @@ from app.bot.formatting import (
     fmt_date_short,
     fmt_money,
     fmt_rate,
+    fmt_signed_money,
     format_expense_amount,
 )
 from app.bot.keyboards.items import items_keyboard
@@ -221,7 +222,7 @@ def _render_items(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
     """
     lines = [
         _header(draft, trip),
-        f"Unclaimed: {fmt_money(unclaimed_total(draft), draft.currency)}",
+        f"Unclaimed: {fmt_signed_money(unclaimed_total(draft), draft.currency)}",
     ]
     for item in draft.line_items:
         if item.kind == "item":
@@ -253,14 +254,14 @@ def _items_preview_lines(draft: Draft, trip: Trip) -> list[str]:
     for pid, (_share_trip, share_home) in shares.items():
         name = escape(person_for(draft, pid).display_name)
         marker = " 💳" if pid == draft.payer_id else ""
-        terms = f"items {fmt_money(split.subtotals.get(pid, 0), ccy)}"
+        terms = f"items {fmt_signed_money(split.subtotals.get(pid, 0), ccy)}"
         for kind, label in (("tax", "tax"), ("service_charge", "service")):
             if kind in split.adjustments:
                 terms += f" + {label} {fmt_money(split.adjustments[kind].get(pid, 0), ccy)}"
         if "discount" in split.adjustments:
             discount = -split.adjustments["discount"].get(pid, 0)
             terms += f" − discount {fmt_money(discount, ccy)}"
-        line = f"{name}{marker}: {terms} = {fmt_money(split.shares[pid], ccy)}"
+        line = f"{name}{marker}: {terms} = {fmt_signed_money(split.shares[pid], ccy)}"
         if ccy != trip.home_currency:
             line += f" · {fmt_money(share_home, trip.home_currency)}"
         lines.append(line)

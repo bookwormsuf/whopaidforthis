@@ -177,7 +177,8 @@ def split_items(
     """Spec §5 `split_items`: each claimable item is split equally (same remainder
     rule as `split_equal`) among its claimants; an item with no claimants goes to all
     participants. Each adjustment line is then allocated across participants in
-    proportion to their item subtotal, by the largest-remainder method. Raises
+    proportion to their item subtotal, by the largest-remainder method. A negative
+    item is taken off its claimants in proportion to their other items. Raises
     `SplitError` unless the shares add up to `total_minor` exactly -- never fixes a
     mismatch silently.
     """
@@ -186,21 +187,45 @@ def split_items(
     everyone = set(spec.everyone)
     subtotals = {uid: 0 for uid in participant_ids}
     assignments: dict[int, tuple[list[int], str]] = {}
-    for index, item in enumerate(line_items):
-        if item.kind != "item":
-            continue
+
+    def claimants_of(index: int) -> tuple[list[int], str]:
         key = str(index)
         claimants = list(dict.fromkeys(spec.claims.get(key, [])))
-        method = "claimed"
         if not claimants or key in everyone:
-            claimants, method = list(participant_ids), "everyone"
+            return list(participant_ids), "everyone"
+        return claimants, "claimed"
+
+    # Positive items first: each split equally between its claimants.
+    for index, item in enumerate(line_items):
+        if item.kind != "item" or item.amount_minor < 0:
+            continue
+        claimants, method = claimants_of(index)
         for uid, part in split_equal(item.amount_minor, claimants, payer_id).items():
             subtotals[uid] = subtotals.get(uid, 0) + part
         assignments[index] = (sorted(claimants), method)
 
-    if any(value < 0 for value in subtotals.values()):
-        raise SplitError("an item subtotal is negative")
-    weights = dict(subtotals)
+    # A negative item (an "Unlisted" correction when the lines came to more than
+    # the total) reduces its claimants in proportion to what their items cost, so a
+    # claimant with nothing else is not pushed below zero; with no such items
+    # between them it is split equally.
+    for index, item in enumerate(line_items):
+        if item.kind != "item" or item.amount_minor >= 0:
+            continue
+        claimants, method = claimants_of(index)
+        claim_weights = {uid: max(subtotals.get(uid, 0), 0) for uid in claimants}
+        if sum(claim_weights.values()) > 0:
+            parts = allocate_proportional(item.amount_minor, claim_weights, payer_id)
+        else:
+            parts = {
+                uid: -part
+                for uid, part in split_equal(-item.amount_minor, claimants, payer_id).items()
+            }
+        for uid, part in parts.items():
+            subtotals[uid] = subtotals.get(uid, 0) + part
+        assignments[index] = (sorted(claimants), method)
+
+    # Adjustments are spread over positive subtotals only.
+    weights = {uid: max(value, 0) for uid, value in subtotals.items()}
     weighted_ids = sorted(uid for uid, w in weights.items() if w > 0)
     adjustments: dict[AdjustmentKind, dict[int, int]] = {}
     shares = dict(subtotals)

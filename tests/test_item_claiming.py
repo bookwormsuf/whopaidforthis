@@ -328,3 +328,48 @@ async def test_caption_paid_by_sets_the_payer() -> None:
     card = await group.send_receipt(ADA, RESTAURANT, caption="paid by Bo")
     assert "Paid by Bo" in card.text
     assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
+
+
+async def test_negative_unlisted_from_fix_items_still_splits() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    # The lines come to ¥3,300; the user picks the printed ¥3,000.
+    receipt = _receipt([("Wagyu", 3300, "item")], 3300, 3000)
+    card = await group.send_receipt(ADA, receipt)
+    await group.press(ADA, card, "¥3,000")
+    await group.press(ADA, card, "Fix items")
+    assert _item_buttons(card) == ["1 Wagyu ¥3,300", "2 Unlisted −¥300"]
+    await group.press(ADA, card, "1 Wagyu ¥3,300")
+    await group.press(ADA, card, "Rest → everyone")
+    await group.press(ADA, card, "Done")
+    draft_id = card.draft_id
+    await group.press(ADA, card, "Confirm")
+    expense = group.ledger.expense_for(draft_id)
+    # The -300 comes off Ada, the only one with items; Bo pays nothing.
+    assert {s.user_id: s.share_trip_minor for s in expense.splits} == {ADA.id: 3000, BO.id: 0}
+
+
+async def test_rest_to_everyone_does_not_add_the_presser() -> None:
+    group = await FakeGroup.create(ADA, BO, CY)
+    card = await group.send_receipt(ADA, RESTAURANT)
+    await group.press(ADA, card, "Choose people")
+    await group.press(ADA, card, "Bo")
+    await group.press(ADA, card, "Cy")
+    await group.press(ADA, card, "✓ Ada")  # Ada paid but didn't eat
+    await group.press(ADA, card, "Next")
+    await group.press(ADA, card, "By items")
+    await group.press(ADA, card, "Rest → everyone")
+    draft = await group.deps.draft_service._drafts.get(card.draft_id)
+    assert ADA.id not in draft.participant_ids
+
+
+async def test_a_reply_that_claims_nothing_does_not_add_the_sender() -> None:
+    group = await FakeGroup.create(ADA, BO, CY)
+    card = await group.send_receipt(ADA, RESTAURANT, caption="split between me and bo")
+    await group.press(ADA, card, "By items")
+    await group.send(CY, "mine 9", reply_to=card)
+    await group.send(CY, "unclaim 1", reply_to=card)
+    draft = await group.deps.draft_service._drafts.get(card.draft_id)
+    assert CY.id not in draft.participant_ids
+    await group.send(CY, "mine 2", reply_to=card)
+    draft = await group.deps.draft_service._drafts.get(card.draft_id)
+    assert CY.id in draft.participant_ids

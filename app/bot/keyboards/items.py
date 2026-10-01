@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-from app.bot.formatting import fmt_money
+from app.bot.formatting import fmt_signed_money
 from app.services.drafts import (
     Draft,
     claimable_indices,
@@ -57,7 +57,7 @@ def item_button_text(draft: Draft, number: int, index: int, initials: dict[int, 
     description = item.description
     if len(description) > _MAX_DESCRIPTION_CHARS:
         description = description[: _MAX_DESCRIPTION_CHARS - 1] + "…"
-    text = f"{number} {description} {fmt_money(item.amount_minor, draft.currency)}"
+    text = f"{number} {description} {fmt_signed_money(item.amount_minor, draft.currency)}"
     if index in draft.everyone_items:
         return f"{text} · {EVERYONE_MARK}"
     claimants = draft.item_claims.get(index, ())
@@ -78,7 +78,7 @@ def items_keyboard(draft: Draft) -> InlineKeyboardMarkup:
         for number, index in enumerate(claimable_indices(draft), start=1)
     ]
     if unclaimed_indices(draft) and not draft.rest_everyone:
-        done = f"Done (unclaimed: {fmt_money(unclaimed_total(draft), draft.currency)})"
+        done = f"Done (unclaimed: {fmt_signed_money(unclaimed_total(draft), draft.currency)})"
     else:
         done = "Done"
     rows.append(

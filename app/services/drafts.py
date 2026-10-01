@@ -903,9 +903,9 @@ class DraftService:
             raise DraftError("By items is not available for this draft")
         return await self._to_items(draft)
 
-    async def _claimant(self, draft: Draft, presser_id: int) -> Draft:
-        """Checks the presser may claim (a joined user) and adds them to the
-        participants if absent (sprint 6 pin). Raises `DraftToast` otherwise.
+    async def _joined_presser(self, draft: Draft, presser_id: int) -> Draft:
+        """Checks the presser is a joined user (item buttons are open to them, spec
+        §8). Raises `DraftToast` otherwise. Does not add them to the participants.
         """
         if draft.state != "items":
             raise DraftError(f"cannot claim items in state {draft.state}")
@@ -914,9 +914,14 @@ class DraftService:
             draft = replace(draft, people=await self._joined_people(trip, draft))
             if presser_id not in {p.user_id for p in draft.people}:
                 raise DraftToast(NOT_JOINED_TEXT)
-        if presser_id not in draft.participant_ids:
-            draft = replace(draft, participant_ids=[*draft.participant_ids, presser_id])
         return draft
+
+    @staticmethod
+    def _as_participant(draft: Draft, user_id: int) -> Draft:
+        """Someone who claims an item takes part (sprint 6 pin)."""
+        if user_id in draft.participant_ids:
+            return draft
+        return replace(draft, participant_ids=[*draft.participant_ids, user_id])
 
     @staticmethod
     def _claim(draft: Draft, index: int, user_id: int, claimed: bool | None) -> Draft:
@@ -946,17 +951,21 @@ class DraftService:
         draft = await self._get_open(draft_id)
         if index not in claimable_indices(draft):
             raise DraftError("not a claimable item")
-        draft = await self._claimant(draft, presser_id)
-        updated = replace(self._claim(draft, index, presser_id, None), items_error=None)
+        draft = await self._joined_presser(draft, presser_id)
+        draft = self._claim(draft, index, presser_id, None)
+        if presser_id in draft.item_claims.get(index, ()):
+            draft = self._as_participant(draft, presser_id)
+        updated = replace(draft, items_error=None)
         await self._drafts.put(updated)
         return updated
 
     async def rest_to_everyone(self, draft_id: str, presser_id: int) -> Draft:
-        """`Rest → everyone`: every currently unclaimed item goes to all participants,
-        and anything left unclaimed later goes to everyone at `Done`.
+        """`Rest → everyone`: every currently unclaimed item goes to all current
+        participants, and anything left unclaimed later goes to everyone at `Done`.
+        Pressing it does not make the presser a participant.
         """
         draft = await self._get_open(draft_id)
-        draft = await self._claimant(draft, presser_id)
+        draft = await self._joined_presser(draft, presser_id)
         updated = replace(
             draft,
             everyone_items=draft.everyone_items | set(unclaimed_indices(draft)),
@@ -972,7 +981,7 @@ class DraftService:
         Unknown numbers or an unrecognised line are shown on the card.
         """
         draft = await self._get_open(draft_id)
-        draft = await self._claimant(draft, presser_id)
+        draft = await self._joined_presser(draft, presser_id)
         numbered = claimable_indices(draft)
         problems: list[str] = []
         for line in (raw.strip() for raw in text.splitlines()):
@@ -990,7 +999,9 @@ class DraftService:
             for n in numbers:
                 index = numbered[n - 1]
                 if verb == "mine":
-                    draft = self._claim(draft, index, presser_id, True)
+                    draft = self._as_participant(
+                        self._claim(draft, index, presser_id, True), presser_id
+                    )
                 elif verb == "unclaim":
                     draft = self._claim(draft, index, presser_id, False)
                 else:

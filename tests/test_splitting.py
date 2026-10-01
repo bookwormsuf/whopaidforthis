@@ -239,6 +239,13 @@ def test_unclaimed_item_goes_to_everyone() -> None:
     assert result.assignments == {0: ([1, 2, 3], "everyone")}
 
 
+def test_negative_item_comes_off_claimants_in_proportion() -> None:
+    items = [_li(2000), _li(1000), _li(-300)]
+    spec = Items(claims={"0": [1], "1": [2]})  # the -300 is unclaimed -> everyone
+    result = split_items(items, spec, [1, 2, 3], payer_id=1, total_minor=2700)
+    assert result.shares == {1: 1800, 2: 900, 3: 0}
+
+
 @given(
     item_amounts=st.lists(st.integers(min_value=0, max_value=50_000), min_size=1, max_size=12),
     adjustments=st.lists(
