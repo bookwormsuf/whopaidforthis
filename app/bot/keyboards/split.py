@@ -10,10 +10,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from app.services.drafts import Draft, PendingName, person_for
 from app.services.names import Person
 
-NOT_SURE_PARTICIPANT_LABEL = "Not sure, choose people"
-# The pinned `Not sure, choose people` does not fit a payer question; for a payer the
-# sender simply stays the payer.
-NOT_SURE_PAYER_LABEL = "Not sure, keep me as payer"
+NOT_SURE_LABEL = "Not sure, choose people"
 
 
 def _button(draft_id: str, label: str, action: str, arg: str = "-") -> InlineKeyboardButton:
@@ -100,7 +97,6 @@ def resolve_name_keyboard(draft: Draft, pending: PendingName) -> InlineKeyboardM
         for person in people
     ]
     rows = [candidates[i : i + 2] for i in range(0, len(candidates), 2)]
-    label = NOT_SURE_PAYER_LABEL if pending.role == "payer" else NOT_SURE_PARTICIPANT_LABEL
-    rows.append([_button(draft.draft_id, label, "unsure")])
+    rows.append([_button(draft.draft_id, NOT_SURE_LABEL, "unsure")])
     rows.append([_cancel(draft.draft_id)])
     return InlineKeyboardMarkup(rows)

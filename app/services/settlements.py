@@ -44,15 +44,21 @@ def compute_balances(
 ) -> dict[int, Balance]:
     """Balances per user from confirmed expenses only. Splits join through their
     Expense ID; a split whose expense is missing or cancelled is ignored (spec §10:
-    orphan rows are ignored). Users with no paid and no share do not appear.
+    orphan rows are ignored), and a repeated (expense, person) row counts once.
+    Users with no paid and no share do not appear. Nets sum to zero unless the
+    Sheet was edited by hand; `unbalanced_by` reports that.
     """
     confirmed = {e.expense_id: e for e in expenses if e.status == "confirmed"}
     paid: dict[int, int] = {}
     share: dict[int, int] = {}
     for expense in confirmed.values():
         paid[expense.payer_user_id] = paid.get(expense.payer_user_id, 0) + expense.home_amount_minor
+    seen: set[tuple[str, int]] = set()
     for split in splits:
-        if split.expense_id in confirmed:
+        # One share per person per expense: a repeated row is counted once.
+        key = (split.expense_id, split.user_id)
+        if split.expense_id in confirmed and key not in seen:
+            seen.add(key)
             share[split.user_id] = share.get(split.user_id, 0) + split.share_home_minor
     return {
         user_id: Balance(user_id, paid.get(user_id, 0), share.get(user_id, 0))
@@ -82,3 +88,11 @@ def settle(nets: Mapping[int, int]) -> list[Transfer]:
         if credits[creditor] == 0:
             del credits[creditor]
     return transfers
+
+
+def unbalanced_by(balances: Mapping[int, Balance]) -> int:
+    """How far the nets are from summing to zero; 0 for a consistent ledger. A
+    non-zero value means Splits rows were edited by hand (spec §10a: "Do not edit
+    rows by hand").
+    """
+    return sum(b.net_minor for b in balances.values())

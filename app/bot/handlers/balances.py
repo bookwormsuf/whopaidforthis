@@ -20,12 +20,16 @@ from app.bot.handlers.join import require_trip
 from app.models.expense import ExpenseRecord, SplitRecord
 from app.models.trip import Trip
 from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
-from app.services.settlements import Balance, compute_balances, settle
+from app.services.settlements import Balance, compute_balances, settle, unbalanced_by
 
 logger = logging.getLogger(__name__)
 
 NO_BALANCES_TEXT = "No expenses yet."
 ALL_SQUARE_TEXT = "All square 🎉"
+UNBALANCED_TEXT = (
+    "⚠️ The Sheet's shares don't add up to its expenses (off by {amount}). "
+    "Was a Splits or Expenses row edited by hand? Fix it, or /undo and re-send the expense."
+)
 SETTLE_HINT = "Settle with /settle"
 
 
@@ -114,6 +118,9 @@ async def balances_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     )
     lines = [f"<b>Balances</b> ({trip.home_currency})"]
     lines += [_balance_line(ledger.name(b.user_id), b, trip.home_currency) for b in ordered]
+    off_by = unbalanced_by(balances)
+    if off_by:
+        lines.append(UNBALANCED_TEXT.format(amount=fmt_money(abs(off_by), trip.home_currency)))
     lines.append(SETTLE_HINT)
     await message.reply_text("\n".join(lines), parse_mode="HTML")
 
@@ -159,6 +166,14 @@ async def settle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     message = update.effective_message
     assert message is not None
     balances = compute_balances(ledger.expenses, ledger.splits)
+    off_by = unbalanced_by(balances)
+    if off_by:
+        logger.warning("settle: nets off by %s minor units", off_by)
+        await message.reply_text(
+            UNBALANCED_TEXT.format(amount=fmt_money(abs(off_by), trip.home_currency)),
+            parse_mode="HTML",
+        )
+        return
     transfers = settle({uid: b.net_minor for uid, b in balances.items()})
     if not transfers:
         await message.reply_text(ALL_SQUARE_TEXT, parse_mode="HTML")

@@ -140,10 +140,11 @@ class _LocatedAmount:
 
 
 def _locate_amount(
-    words: list[str], trip_currency: str, home_currency: str
+    words: list[str], trip_currency: str, home_currency: str, bare_currency: str | None = None
 ) -> _LocatedAmount | None:
     """The one amount/currency-token rule (spec §4/§6), shared by `parse_expense`,
-    `parse_amount_only` and `parse_caption_description`.
+    `parse_amount_only`, `parse_caption_description` and `parse_custom_line`. A bare
+    number is in `bare_currency`, which defaults to the trip currency.
     """
     for index, word in enumerate(words):
         match = _WORD_AMOUNT_RE.match(word)
@@ -172,7 +173,7 @@ def _locate_amount(
 
         if currency_token == _UNSUPPORTED:
             return _LocatedAmount(0, _UNSUPPORTED, frozenset(consumed))
-        currency = currency_token if currency_token is not None else trip_currency
+        currency = currency_token if currency_token is not None else bare_currency or trip_currency
         decimals = decimals_for(currency)
         value = Decimal(number_str.replace(",", ""))
         amount_minor = int((value * (Decimal(10) ** decimals)).to_integral_value(ROUND_HALF_EVEN))
@@ -231,13 +232,16 @@ class CustomLine:
     currency: str
 
 
-def parse_custom_line(line: str, trip_currency: str, home_currency: str) -> CustomLine | None:
+def parse_custom_line(
+    line: str, trip_currency: str, home_currency: str, expense_currency: str
+) -> CustomLine | None:
     """`<name> <amount>` (either order), using the same amount/currency rule as
-    `parse_expense`. `None` if the line has no amount, no name, or a currency that
-    isn't the trip's or the home currency.
+    `parse_expense`, except that a bare number is in the expense's own currency
+    (`Me 6` on an S$12 expense is S$6). `None` if the line has no amount, no name,
+    or a currency that isn't the trip's or the home currency.
     """
     words = line.strip().split()
-    located = _locate_amount(words, trip_currency, home_currency)
+    located = _locate_amount(words, trip_currency, home_currency, expense_currency)
     if located is None or located.currency == _UNSUPPORTED:
         return None
     name_text = " ".join(w for i, w in enumerate(words) if i not in located.consumed).strip()

@@ -68,6 +68,7 @@ def test_balances_from_fixture_ledger_match_hand_computed() -> None:
         _split("e2", 3, 1500),
         _split("e3", 1, 5000),
         _split("orphan", 1, 999),  # no Expenses row: ignored (spec §10)
+        _split("e2", 3, 1500),  # a repeated row: counted once
     ]
     balances = compute_balances(expenses, splits)
     assert balances == {

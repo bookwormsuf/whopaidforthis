@@ -333,12 +333,13 @@ async def test_unknown_name_not_sure_goes_to_choose_people() -> None:
     assert card.buttons == ["✓ Ada", "Bo", "Next", "Cancel"]
 
 
-async def test_unknown_payer_not_sure_keeps_sender() -> None:
+async def test_unknown_payer_not_sure_keeps_sender_and_chooses_people() -> None:
     group = await FakeGroup.create(ADA, BO)
-    card = await group.send(ADA, "6000 yen dinner paid by Zed")
+    card = await group.send(ADA, "6000 yen dinner paid by Zed split between me and bo")
     assert "(paid by)" in card.text
-    await group.press(ADA, card, "Not sure, keep me as payer")
-    assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
+    assert "Not sure, choose people" in card.buttons
+    await group.press(ADA, card, "Not sure, choose people")
+    assert card.buttons == ["✓ Ada", "✓ Bo", "Next", "Cancel"]
     assert "Paid by Ada" in card.text
 
 
@@ -434,6 +435,37 @@ async def test_home_currency_custom_split() -> None:
     expense = group.ledger.expense_for(draft_id)
     assert {s.user_id: s.share_home_minor for s in expense.splits} == {ADA.id: 1000, BO.id: 2000}
     assert sum(s.share_trip_minor for s in expense.splits) == expense.trip_amount_minor
+
+
+async def test_home_currency_custom_split_with_bare_numbers() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    card = await group.send(ADA, "S$12 grab")
+    await group.press(ADA, card, "Everyone")
+    await group.press(ADA, card, "Custom")
+    await group.send(ADA, "Me 6\nBo 6", reply_to=card)
+    card = group.cards[card.message_id]
+    assert "Remaining: S$0.00 ✅" in card.text
+    assert card.buttons == ["Confirm", "Cancel"]
+
+
+async def test_settle_warns_when_sheet_shares_do_not_add_up() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    card = await group.send(ADA, "6000 yen dinner split everyone")
+    await group.press(ADA, card, "Equally")
+    draft_id = await _confirm(group, ADA, card)
+    # Simulate a hand edit: drop Bo's Splits row.
+    expense = group.ledger.expense_for(draft_id)
+    bo_split = next(s for s in expense.splits if s.user_id == BO.id)
+    real = group.ledger.list_splits
+
+    async def edited(trip):
+        return [s for s in await real(trip) if s.user_id != bo_split.user_id]
+
+    group.ledger.list_splits = edited
+    settle = await group.command(ADA, settle_command)
+    assert settle.startswith("⚠️ The Sheet's shares don't add up") and "S$24.30" in settle
+    balances = await group.command(ADA, balances_command)
+    assert "⚠️" in balances
 
 
 async def test_custom_amount_in_the_other_currency_is_rejected() -> None:

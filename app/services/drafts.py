@@ -719,7 +719,7 @@ class DraftService:
         for line in (raw.strip() for raw in text.splitlines()):
             if not line:
                 continue
-            parsed = parse_custom_line(line, trip.trip_currency, trip.home_currency)
+            parsed = parse_custom_line(line, trip.trip_currency, trip.home_currency, draft.currency)
             if parsed is None:
                 problems.append(f"Couldn't read '{line}'")
                 continue
@@ -792,18 +792,19 @@ class DraftService:
         return await self._advance_names(replace(draft, name_queue=rest))
 
     async def name_unsure(self, draft_id: str, presser_id: int) -> Draft:
-        """`Not sure`: for a participant, the participants card with whoever was
-        already resolved (and the initiator) selected; for the payer, the payer
-        stays the sender and the remaining names are still asked.
+        """`Not sure, choose people`: the participants card, with the initiator and
+        whoever was already resolved selected (everyone, for "split everyone").
+        Asked about the payer, the payer stays the sender; any names still queued
+        are dropped, since the person now picks participants by hand.
         """
         draft = await self._get_active(draft_id, presser_id)
         if draft.state != "resolve_name" or not draft.name_queue:
             raise DraftError(f"cannot answer Not sure from state {draft.state}")
-        pending = draft.name_queue[0]
-        if pending.role == "payer":
-            return await self._advance_names(replace(draft, name_queue=draft.name_queue[1:]))
         trip = await self._trip_for(draft)
-        selected = [draft.initiator_id, *draft.resolved_participant_ids]
+        if draft.participants_clause == "everyone":
+            selected = [p.user_id for p in draft.people]
+        else:
+            selected = [draft.initiator_id, *draft.resolved_participant_ids]
         return await self._to_participants(draft, trip, selected)
 
     # -- Receipt flow (sprint 4, spec §7/§8) ---------------------------------

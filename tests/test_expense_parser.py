@@ -188,9 +188,14 @@ def test_trailing_clauses(text: str, participants: str | None, payer: str | None
 
 
 def test_custom_line() -> None:
-    assert parse_custom_line("Amir 2000", "JPY", "SGD") == CustomLine("Amir", 2000, "JPY")
-    assert parse_custom_line("me ¥1,500", "JPY", "SGD") == CustomLine("me", 1500, "JPY")
-    assert parse_custom_line("Jo Tan: S$12.50", "JPY", "SGD") == CustomLine("Jo Tan", 1250, "SGD")
-    assert parse_custom_line("2000", "JPY", "SGD") is None  # no name
-    assert parse_custom_line("Amir", "JPY", "SGD") is None  # no amount
-    assert parse_custom_line("Amir 20 baht", "JPY", "SGD") is None  # not this trip's currency
+    def parse(line: str, expense_currency: str = "JPY") -> CustomLine | None:
+        return parse_custom_line(line, "JPY", "SGD", expense_currency)
+
+    assert parse("Amir 2000") == CustomLine("Amir", 2000, "JPY")
+    assert parse("me ¥1,500") == CustomLine("me", 1500, "JPY")
+    assert parse("Jo Tan: S$12.50") == CustomLine("Jo Tan", 1250, "SGD")
+    # A bare number is in the expense's own currency.
+    assert parse("Me 6", expense_currency="SGD") == CustomLine("Me", 600, "SGD")
+    assert parse("2000") is None  # no name
+    assert parse("Amir") is None  # no amount
+    assert parse("Amir 20 baht") is None  # not this trip's currency
