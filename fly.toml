@@ -12,7 +12,7 @@
 # ever"), and `fly scale count 1` (checklist step 8) as the repair step if that drifts.
 app = "whopaid-bot"
 primary_region = "sin"
-kill_timeout = 10
+kill_timeout = "10s"
 kill_signal = "SIGTERM"
 
 [build]
