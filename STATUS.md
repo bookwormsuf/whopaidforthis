@@ -14,7 +14,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 1 Trip binding and users | written | done | green (112) | 2026-09-29, findings fixed | 2026-09-29, all six pass | 2026-09-29 | Sprint 1 closed. Next: run sprint 2 / agent |
 | 2 Text expenses, just me | written (+ carry-overs) | done | green (236) | 2026-09-29, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 2 closed. Next: run sprint 3 / agent |
 | 3 First deployment | written | done | green (247) | 2026-10-01, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 3 closed. Next: run sprint 4 / agent |
-| 4 Receipt photos, total only | written (+ §7/§10 amendments) | done | green (298) | 2026-10-01, findings fixed | – | – | Checklist / Sufyan (see open question on step 7) |
+| 4 Receipt photos, total only | written (+ §7/§10 amendments) | done | green (298) | 2026-10-01, findings fixed | – | – | Deploy, then checklist / Sufyan |
 | 5 Splitting and balances | written | not started | – | – | – | – | after sprint 4; needs tester B |
 | 6 Item claiming | written | not started | – | – | – | – | after sprint 5; needs tester B |
 | 7 Hardening and go-live | written | not started | – | – | – | – | after sprint 6; needs all friends |
@@ -316,10 +316,8 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Checks: `uv run pytest -q` 298 passed (15 new tests covering the paths above). `uv run ruff
   check .`, `ruff format --check` and `uvx pre-commit run --all-files` clean. Still no real
   photo or live Anthropic call; that is the checklist.
-- Open question for Sufyan before checklist step 7 ("Send the same photo twice quickly. Only one
-  draft appears."): dedup is keyed on the Telegram message ID (sprint pin), and sending a photo
-  twice produces two messages with different IDs, so two drafts will appear. Either the step
-  means a duplicated delivery of one message (which is deduped), or the pin needs a second key
-  such as Telegram's `file_unique_id`.
+- Checklist step 7 ("Send the same photo twice quickly. Only one draft appears."): Sufyan
+  confirmed it means one message delivered twice, which the message-ID dedup already handles.
+  Sending the same image as two separate messages still gives two drafts, by design.
 - Reviewed by / disposition: findings fixed; awaiting Sufyan's checklist and sign-off.
-- Next action / owner: answer the step-7 question, deploy, run the sprint 4 checklist / Sufyan.
+- Next action / owner: deploy, run the sprint 4 checklist / Sufyan.
