@@ -335,3 +335,17 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Checks: workflow YAML parses; not yet run on GitHub (it first runs when this merges).
 - Next action / owner: add the secret / Sufyan; merge, watch the run, then the sprint 4
   checklist from step 2 / Sufyan.
+
+### 2026-10-01 — Sprint 4 checklist: duplicate total buttons
+
+- Performed by: Sufyan (Telegram), Claude (fix).
+- Checklist step 1 passed: deploy from GitHub Actions, `/help` shows the new version.
+- Step 3 found a bug: a receipt printing one total on three lines got "Which is the final
+  total?" with three identical buttons. Candidates are now merged by amount; a single distinct
+  amount is used without asking, and still gets the reconciliation prompt if it is more than 5
+  off the line items. The reader prompt now says a tax printed as already included is not a
+  `tax` line item (counting it made the line items exceed the total). Spec §7 amended.
+- Checks: `uv run pytest -q` 302 passed; ruff clean.
+- Next action / owner: merge and deploy, then resend that receipt and continue the checklist /
+  Sufyan.
+

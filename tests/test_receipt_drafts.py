@@ -409,3 +409,40 @@ async def test_home_currency_line_items_written_in_trip_currency() -> None:
     assert row[4] == 1543.0
     assert row[1] == f"{committed.draft_id}-01"
     assert row[5:] == ["", "unassigned", "item"]
+
+
+async def test_single_total_far_from_items_asks_to_reconcile() -> None:
+    """Only one total printed, but the line items are well off it (e.g. an included
+    tax read as an extra tax line): no total question, but the reconciliation prompt.
+    """
+    service, ledger, trip = await _setup()
+    receipt = _receipt(
+        line_items=[
+            {"description": "Sushi", "quantity": 1, "amount_minor": 1000, "kind": "item"},
+            {"description": "Tax (incl.)", "quantity": 1, "amount_minor": 90, "kind": "tax"},
+        ],
+        candidate_totals=[
+            {"label_as_printed": "合計", "amount_minor": 1000, "is_grand_total_guess": True},
+            {"label_as_printed": "現金計", "amount_minor": 1000, "is_grand_total_guess": True},
+        ],
+        description="Sushi",
+        category="food",
+        confidence=0.9,
+    )
+    draft = await service.start_from_receipt(
+        chat_id=-100,
+        message_id=10,
+        photo_file_id="f",
+        initiator_id=42,
+        initiator_name="Ada",
+        initiator_username="ada",
+        trip=trip,
+        receipt=receipt,
+        transaction_date=date(2026, 9, 20),
+        date_source="receipt",
+    )
+    assert draft.state == "reconcile"
+    assert draft.amount_minor == 1000
+    proceeded = await service.use_total_anyway(draft.draft_id, presser_id=42)
+    assert proceeded.state == "detected"
+    assert proceeded.amount_minor == 1000
