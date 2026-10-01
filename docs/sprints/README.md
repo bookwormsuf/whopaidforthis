@@ -28,6 +28,13 @@ sprint and points at the master spec sections it implements.
 A sprint is **done** only when all three hold: tests pass, you ticked every checklist item, and
 `STATUS.md` has your sign-off entry. An agent saying "done" is not done.
 
+**Decision 2026-10-01: Sprints 5 and 6 run without a second tester.** No second person is
+available before the trip. For those two sprints the agent writes automated multi-user tests
+(two or more fake Telegram users pressing buttons, claiming items, and settling) in place of the
+two-person checklist steps. Sufyan still does every single-person step against the deployed bot.
+The deferred two-person checks are carried into Sprint 7 and done with the real group on day one,
+so Sprint 7's checklist must list them explicitly.
+
 ## Sub-spec shape
 
 Goal · In scope · Out of scope · Sprint pins · Before you start (you) · Agent builds · Tests required ·
