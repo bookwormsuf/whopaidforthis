@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-10-01 (sprint 4 built and reviewed, awaiting checklist)
+Updated: 2026-10-01 (sprint 4 signed off)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -14,7 +14,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 1 Trip binding and users | written | done | green (112) | 2026-09-29, findings fixed | 2026-09-29, all six pass | 2026-09-29 | Sprint 1 closed. Next: run sprint 2 / agent |
 | 2 Text expenses, just me | written (+ carry-overs) | done | green (236) | 2026-09-29, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 2 closed. Next: run sprint 3 / agent |
 | 3 First deployment | written | done | green (247) | 2026-10-01, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 3 closed. Next: run sprint 4 / agent |
-| 4 Receipt photos, total only | written (+ §7/§10 amendments) | done | green (298) | 2026-10-01, findings fixed | – | – | Deploy, then checklist / Sufyan |
+| 4 Receipt photos, total only | written (+ §7/§10 amendments) | done | green (302) | 2026-10-01, findings fixed | 2026-10-01, all eight pass | 2026-10-01 | Sprint 4 closed. Next: run sprint 5 / agent |
 | 5 Splitting and balances | written | not started | – | – | – | – | after sprint 4; needs tester B |
 | 6 Item claiming | written | not started | – | – | – | – | after sprint 5; needs tester B |
 | 7 Hardening and go-live | written | not started | – | – | – | – | after sprint 6; needs all friends |
@@ -348,4 +348,22 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Checks: `uv run pytest -q` 302 passed; ruff clean.
 - Next action / owner: merge and deploy, then resend that receipt and continue the checklist /
   Sufyan.
+
+### 2026-10-01 — Sprint 4 live run and checklist
+
+- Performed by: Sufyan (Telegram, Sheets, Anthropic Console), Claude (fix and deploys).
+- Deploys now run from GitHub Actions on every merge to `main`; `/help` showed each new version.
+- Step 3 found duplicate total buttons (fixed and deployed, see the entry above); the receipt
+  was resent and saved at the printed total.
+- All eight steps passed (deploy, clear receipt with Expenses/Splits/Line Items rows, total
+  choice, unreadable receipt with manual amount, non-receipt, caption, duplicate delivery
+  covered by the automated test as agreed, Anthropic usage in cents).
+- Reviewed by / disposition: checklist verified by Sufyan.
+
+### 2026-10-01 — Sprint 4 sign-off
+
+- Performed by: Sufyan, recorded by Claude.
+- Disposition: Sufyan said "sign off sprint 4". Sprint 4 closed.
+- Next action / owner: run sprint 5 (splitting and balances; automated multi-user tests in place
+  of a second tester, per the 2026-10-01 decision) / agent.
 
