@@ -18,6 +18,7 @@ from app.bot.formatting import (
     fmt_rate,
     format_expense_amount,
 )
+from app.bot.keyboards.items import items_keyboard
 from app.bot.keyboards.receipt import (
     choose_total_keyboard,
     manual_amount_keyboard,
@@ -32,8 +33,18 @@ from app.bot.keyboards.split import (
     split_method_keyboard,
 )
 from app.models.trip import Trip
-from app.services.drafts import Draft, draft_shares, original_total, person_for
-from app.services.splitting import Custom
+from app.services.drafts import (
+    MAX_CLAIMABLE_ITEMS,
+    Draft,
+    by_items_available,
+    claimable_indices,
+    draft_items_split,
+    draft_shares,
+    original_total,
+    person_for,
+    unclaimed_total,
+)
+from app.services.splitting import Custom, Items
 
 
 def _buttons(draft_id: str, *pairs: tuple[str, str]) -> InlineKeyboardMarkup:
@@ -65,6 +76,8 @@ def render_draft(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup | 
         return _render_split_method(draft, trip)
     if draft.state == "custom":
         return _render_custom(draft, trip)
+    if draft.state == "items":
+        return _render_items(draft, trip)
     if draft.state == "preview":
         return _render_preview(draft, trip)
     if draft.state == "rate_failed":
@@ -189,11 +202,69 @@ def _render_participants(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardM
 
 
 def _render_split_method(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    too_many = ""
+    if draft.items_allowed and len(claimable_indices(draft)) > MAX_CLAIMABLE_ITEMS:
+        too_many = "\nToo many items to split individually"
     text = (
         f"{_header(draft, trip)}\nShared by {_names(draft, draft.participant_ids)}\n\n"
-        "How should it be split?"
+        f"How should it be split?{too_many}"
     )
-    return text, split_method_keyboard(draft.draft_id)
+    return text, split_method_keyboard(draft.draft_id, by_items_available(draft))
+
+
+_ADJUSTMENT_LABELS = {"tax": "Tax", "service_charge": "Service", "discount": "Discount"}
+
+
+def _render_items(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    """The item card (spec §9): running "Unclaimed" in the header, adjustment lines
+    listed in the text (they are never buttons).
+    """
+    lines = [
+        _header(draft, trip),
+        f"Unclaimed: {fmt_money(unclaimed_total(draft), draft.currency)}",
+    ]
+    for item in draft.line_items:
+        if item.kind == "item":
+            continue
+        amount = abs(item.amount_minor)
+        sign = "−" if item.kind == "discount" else ""
+        lines.append(
+            f"{_ADJUSTMENT_LABELS[item.kind]}: {escape(item.description)} "
+            f"{sign}{fmt_money(amount, draft.currency)} (shared in proportion)"
+        )
+    lines += [
+        "",
+        "Everyone taps what they had; tap a shared dish each. Or reply "
+        "<code>mine 1,4</code>, <code>split 5 everyone</code>, <code>unclaim 2</code>.",
+    ]
+    if draft.items_error:
+        lines.append(f"⚠️ {escape(draft.items_error, quote=False)}")
+    return "\n".join(lines), items_keyboard(draft)
+
+
+def _items_preview_lines(draft: Draft, trip: Trip) -> list[str]:
+    """Per person `items ¥a + tax ¥b − discount ¥c = ¥d` (sprint 6 pin), then the
+    home amount of their share. Service charge shows as its own `+ service` term.
+    """
+    split = draft_items_split(draft, trip)
+    shares = draft_shares(draft, trip)
+    ccy = draft.currency
+    lines = []
+    for pid, (_share_trip, share_home) in shares.items():
+        name = escape(person_for(draft, pid).display_name)
+        marker = " 💳" if pid == draft.payer_id else ""
+        terms = f"items {fmt_money(split.subtotals.get(pid, 0), ccy)}"
+        for kind, label in (("tax", "tax"), ("service_charge", "service")):
+            if kind in split.adjustments:
+                terms += f" + {label} {fmt_money(split.adjustments[kind].get(pid, 0), ccy)}"
+        if "discount" in split.adjustments:
+            discount = -split.adjustments["discount"].get(pid, 0)
+            terms += f" − discount {fmt_money(discount, ccy)}"
+        line = f"{name}{marker}: {terms} = {fmt_money(split.shares[pid], ccy)}"
+        if ccy != trip.home_currency:
+            line += f" · {fmt_money(share_home, trip.home_currency)}"
+        lines.append(line)
+    return lines
 
 
 def _render_custom(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
@@ -239,6 +310,10 @@ def _render_preview(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup
     amount = format_expense_amount(
         trip, draft.currency, draft.trip_amount_minor, draft.home_amount_minor
     )
+    if isinstance(draft.split, Items):
+        lines = _items_preview_lines(draft, trip)
+        text = f"<b>{desc}</b> — {amount}\nPaid by {payer}\n\n" + "\n".join(lines)
+        return text, preview_keyboard(draft.draft_id)
     lines = []
     for pid, (share_trip, share_home) in draft_shares(draft, trip).items():
         name = escape(person_for(draft, pid).display_name)

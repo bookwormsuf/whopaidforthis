@@ -5,7 +5,7 @@ Spec references: pinned-decisions §10.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from typing import Protocol
 
@@ -66,7 +66,11 @@ class LedgerStore(Protocol):
     # -- Sprint 2: expenses, rates, dedup -----------------------------------
 
     async def append_expense(
-        self, trip: Trip, expense: Expense, line_items: Sequence[ReceiptLineItem] = ()
+        self,
+        trip: Trip,
+        expense: Expense,
+        line_items: Sequence[ReceiptLineItem] = (),
+        assignments: Mapping[int, tuple[list[int], str]] | None = None,
     ) -> None: ...
 
     async def list_expenses(self, trip: Trip) -> list[ExpenseRecord]: ...
@@ -137,6 +141,7 @@ class InMemoryLedgerStore:
         self._expense_order: dict[str, list[str]] = {}
         self._rates: dict[str, dict[tuple[str, str, date], ExchangeRate]] = {}
         self._line_items: dict[str, list[ReceiptLineItem]] = {}
+        self._assignments: dict[str, dict[int, tuple[list[int], str]]] = {}
         self.get_binding_calls = 0
 
     async def get_binding(self, chat_id: int) -> Trip | None:
@@ -172,7 +177,11 @@ class InMemoryLedgerStore:
     # -- Sprint 2: expenses, rates, dedup -----------------------------------
 
     async def append_expense(
-        self, trip: Trip, expense: Expense, line_items: Sequence[ReceiptLineItem] = ()
+        self,
+        trip: Trip,
+        expense: Expense,
+        line_items: Sequence[ReceiptLineItem] = (),
+        assignments: Mapping[int, tuple[list[int], str]] | None = None,
     ) -> None:
         expenses = self._expenses.setdefault(trip.sheet_id, {})
         order = self._expense_order.setdefault(trip.sheet_id, [])
@@ -180,10 +189,15 @@ class InMemoryLedgerStore:
         order.append(expense.expense_id)
         if line_items:
             self._line_items[expense.expense_id] = list(line_items)
+            self._assignments[expense.expense_id] = dict(assignments or {})
 
     def line_items_for(self, expense_id: str) -> list[ReceiptLineItem]:
         """Test helper: the line items passed to `append_expense` for an expense."""
         return self._line_items.get(expense_id, [])
+
+    def assignments_for(self, expense_id: str) -> dict[int, tuple[list[int], str]]:
+        """Test helper: line-item index -> (assigned user IDs, allocation method)."""
+        return self._assignments.get(expense_id, {})
 
     def expense_for(self, expense_id: str) -> Expense | None:
         """Test helper: the full `Expense` (with splits) passed to `append_expense`."""

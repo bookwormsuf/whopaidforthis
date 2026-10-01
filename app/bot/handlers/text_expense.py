@@ -17,7 +17,7 @@ from telegram.ext import ContextTypes, filters
 from app.bot.deps import get_deps
 from app.bot.formatting import unsupported_currency_text
 from app.bot.handlers.photo_expense import handle_manual_amount_reply, read_receipt_photo
-from app.bot.handlers.split import handle_custom_split_reply
+from app.bot.handlers.split import handle_custom_split_reply, handle_item_reply
 from app.bot.render.draft import render_draft
 from app.models.user import TripUser
 from app.services.drafts import (
@@ -82,8 +82,11 @@ async def text_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     # through and parses as usual.
     if await handle_manual_amount_reply(update, context):
         return
-    # Likewise a reply to a custom-split card carries `<name> <amount>` lines.
+    # Likewise a reply to a custom-split card carries `<name> <amount>` lines, and a
+    # reply to an item card carries `mine 1,4`-style shortcuts.
     if await handle_custom_split_reply(update, context):
+        return
+    if await handle_item_reply(update, context):
         return
 
     try:
@@ -255,6 +258,21 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             draft = await deps.draft_service.finish_custom(draft_id, presser.id)
         elif action == "edit":
             draft = await deps.draft_service.edit(draft_id, presser.id)
+        elif action == "byitems":
+            draft = await deps.draft_service.choose_by_items(draft_id, presser.id)
+        elif action == "item":
+            try:
+                index = int(_arg)
+            except ValueError:
+                await answer()
+                return
+            draft = await deps.draft_service.toggle_item(draft_id, presser.id, index)
+        elif action == "rest":
+            draft = await deps.draft_service.rest_to_everyone(draft_id, presser.id)
+        elif action == "done":
+            draft = await deps.draft_service.items_done(draft_id, presser.id)
+        elif action == "fix":
+            draft = await deps.draft_service.fix_items(draft_id, presser.id)
         else:
             await answer()
             return

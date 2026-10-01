@@ -210,6 +210,7 @@ async def test_reconcile_state_renders_numbers() -> None:
     assert "¥2,618" in text  # total
     assert "¥138" in text  # difference
     assert [b.text for row in markup.inline_keyboard for b in row] == [
+        "Fix items",
         "Use total anyway",
         "Cancel",
     ]
@@ -409,6 +410,10 @@ async def test_home_currency_line_items_written_in_trip_currency() -> None:
     assert row[4] == 1543.0
     assert row[1] == f"{committed.draft_id}-01"
     assert row[5:] == ["", "unassigned", "item"]
+    claimed = line_item_to_row(
+        ledger.line_items_for(committed.draft_id)[0], expense, 1, [42, 7], "claimed"
+    )
+    assert claimed[5:] == ["42,7", "claimed", "item"]
 
 
 async def test_single_total_far_from_items_asks_to_reconcile() -> None:

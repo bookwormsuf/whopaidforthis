@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -469,10 +469,16 @@ class SheetsLedgerStore:
         return {"values": [self._cell(value) for value in row]}
 
     async def append_expense(
-        self, trip: Trip, expense: Expense, line_items: Sequence[ReceiptLineItem] = ()
+        self,
+        trip: Trip,
+        expense: Expense,
+        line_items: Sequence[ReceiptLineItem] = (),
+        assignments: Mapping[int, tuple[list[int], str]] | None = None,
     ) -> None:
         """One `spreadsheets.batchUpdate` with `appendCells` requests, in order Line
         Items, Splits, Expenses last (spec §10; sprint 4 adds Line Items rows).
+        `assignments` (line-item index -> user IDs and allocation method) comes from
+        an itemised split; without it the rows say `unassigned`.
         """
         spreadsheet = await self._open(trip.sheet_id)
         splits_ws = await _with_retries(spreadsheet.worksheet, "Splits")
@@ -482,7 +488,8 @@ class SheetsLedgerStore:
         if line_items:
             line_items_ws = await _with_retries(spreadsheet.worksheet, "Line Items")
             for index, item in enumerate(line_items, start=1):
-                row = line_item_to_row(item, expense, index)
+                assigned, method = (assignments or {}).get(index - 1, ([], "unassigned"))
+                row = line_item_to_row(item, expense, index, assigned, method)
                 requests.append(
                     {
                         "appendCells": {

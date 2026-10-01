@@ -32,7 +32,11 @@ from app.models.receipt import Receipt
 from app.models.trip import Trip
 from app.models.user import TripUser
 from app.services.drafts import Draft, DraftError, DuplicateMessage
-from app.services.expense_parser import parse_amount_only, parse_caption_description
+from app.services.expense_parser import (
+    parse_amount_only,
+    parse_caption_clauses,
+    parse_caption_description,
+)
 from app.services.images import ImageTooLarge, prepare_image
 from app.services.ledger_store import (
     LEDGER_UNAVAILABLE_TEXT,
@@ -147,10 +151,13 @@ async def photo_expense_handler(update: Update, context: ContextTypes.DEFAULT_TY
     message_time = message.date or now
 
     caption_override: tuple[str, Category] | None = None
+    participants_text = payer_text = None
     if message.caption:
+        bot_username = context.bot.username or ""
         caption_override = parse_caption_description(
-            message.caption, trip.trip_currency, trip.home_currency, context.bot.username or ""
+            message.caption, trip.trip_currency, trip.home_currency, bot_username
         )
+        participants_text, payer_text = parse_caption_clauses(message.caption, bot_username)
 
     outcome = await read_receipt_photo(deps, trip, context.bot, largest.file_id, message_time)
     if outcome.status == "too_large":
@@ -171,6 +178,8 @@ async def photo_expense_handler(update: Update, context: ContextTypes.DEFAULT_TY
         initiator_username=joined_user.username,
         trip=trip,
         caption_override=caption_override,
+        participants_text=participants_text,
+        payer_text=payer_text,
     )
     try:
         if outcome.status == "unreadable":

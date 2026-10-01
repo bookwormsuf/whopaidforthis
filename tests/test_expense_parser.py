@@ -10,7 +10,12 @@ from __future__ import annotations
 import pytest
 
 from app.models.category import Category
-from app.services.expense_parser import CustomLine, parse_custom_line, parse_expense
+from app.services.expense_parser import (
+    CustomLine,
+    parse_custom_line,
+    parse_expense,
+    parse_item_command,
+)
 
 BOT = "whopaidforthisbot"
 
@@ -199,3 +204,14 @@ def test_custom_line() -> None:
     assert parse("2000") is None  # no name
     assert parse("Amir") is None  # no amount
     assert parse("Amir 20 baht") is None  # not this trip's currency
+
+
+def test_item_commands() -> None:
+    assert parse_item_command("mine 1,4") == ("mine", [1, 4])
+    assert parse_item_command("Mine 1, 4 5") == ("mine", [1, 4, 5])
+    assert parse_item_command("unclaim 2") == ("unclaim", [2])
+    assert parse_item_command("split 5 everyone") == ("everyone", [5])
+    assert parse_item_command("split 5") is None
+    assert parse_item_command("mine 1 everyone") is None
+    assert parse_item_command("mine") is None
+    assert parse_item_command("1200 yen ramen") is None

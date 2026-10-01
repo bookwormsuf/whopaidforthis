@@ -8,6 +8,7 @@ here must match `app.services.sheet_layout.HEADERS` exactly.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -94,14 +95,21 @@ def row_to_split_record(row: list[object], trip_currency: str, home_currency: st
     )
 
 
-def line_item_to_row(item: ReceiptLineItem, expense: Expense, item_index: int) -> list[object]:
+def line_item_to_row(
+    item: ReceiptLineItem,
+    expense: Expense,
+    item_index: int,
+    assigned_user_ids: Sequence[int] = (),
+    allocation_method: str = "unassigned",
+) -> list[object]:
     """One row for the `Line Items` tab, column order per §10.
 
-    This sprint (sprint 4) always writes `Assigned User IDs` empty and
-    `Allocation Method = "unassigned"` -- item claiming is Sprint 6. Items are in the
-    receipt's currency (`expense.original_currency`); `Amount <T>` is the trip
-    currency, so an item from a home-currency receipt is converted at the expense's
-    own rate (rounded half-even, per item).
+    `Assigned User IDs` is comma-joined; `Allocation Method` is `claimed`,
+    `everyone` or `proportional` for an itemised split (sprint 6), and `unassigned`
+    for a receipt split equally or by custom amounts. Items are in the receipt's
+    currency (`expense.original_currency`); `Amount <T>` is the trip currency, so an
+    item from a home-currency receipt is converted at the expense's own rate
+    (rounded half-even, per item).
     """
     trip_amount_minor, _home = both_amounts(
         item.amount_minor,
@@ -116,8 +124,8 @@ def line_item_to_row(item: ReceiptLineItem, expense: Expense, item_index: int) -
         item.description,
         item.quantity,
         _amount_number(trip_amount_minor, expense.trip_currency),
-        "",
-        "unassigned",
+        ",".join(str(uid) for uid in assigned_user_ids),
+        allocation_method,
         item.kind,
     ]
 
