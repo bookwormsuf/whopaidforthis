@@ -132,7 +132,15 @@ return 409 and both go deaf.
 
 ### Updating
 
-Run `./scripts/deploy.sh` again. Confirm `/help` in the test group shows the new version.
+Merging to `main` deploys automatically: `.github/workflows/deploy.yml` runs ruff and the
+tests, then the same deploy as `./scripts/deploy.sh` (remote build, `--ha=false`). Watch it in
+the repo's **Actions** tab; **Run workflow** there redeploys `main` by hand. Confirm `/help` in
+the test group shows the new version. `./scripts/deploy.sh` from a laptop still works too.
+
+The workflow needs one repo secret, `FLY_API_TOKEN`: a deploy token for this app only. Create
+it in the Fly dashboard (the app → **Tokens** → create a deploy token, or `fly tokens create
+deploy` on a laptop) and save it in GitHub under Settings → Secrets and variables → Actions →
+New repository secret. If the token leaks, revoke it in the same Fly page and make a new one.
 
 ### Stopping after the trip
 
