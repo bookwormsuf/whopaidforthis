@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-10-01 (sprint 2 signed off)
+Updated: 2026-10-01 (sprint 3 signed off, bot live on Fly.io)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -13,8 +13,8 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 0 Accounts, keys, skeleton | written | done | green (10) | 2026-09-29, findings fixed | 2026-09-29 | 2026-09-29 | Sprint 0 closed. Next: run sprint 1 / agent |
 | 1 Trip binding and users | written | done | green (112) | 2026-09-29, findings fixed | 2026-09-29, all six pass | 2026-09-29 | Sprint 1 closed. Next: run sprint 2 / agent |
 | 2 Text expenses, just me | written (+ carry-overs) | done | green (236) | 2026-09-29, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 2 closed. Next: run sprint 3 / agent |
-| 3 First deployment | written | done | green (247) | 2026-10-01, findings fixed | – | – | Do the sprint 3 checklist / Sufyan |
-| 4 Receipt photos, total only | written | not started | – | – | – | – | after sprint 3 |
+| 3 First deployment | written | done | green (247) | 2026-10-01, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 3 closed. Next: run sprint 4 / agent |
+| 4 Receipt photos, total only | written | not started | – | – | – | – | Run sprint 4 / agent |
 | 5 Splitting and balances | written | not started | – | – | – | – | after sprint 4; needs tester B |
 | 6 Item claiming | written | not started | – | – | – | – | after sprint 5; needs tester B |
 | 7 Hardening and go-live | written | not started | – | – | – | – | after sprint 6; needs all friends |
@@ -173,7 +173,19 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   kept since nothing asked for its removal and it's still correct.
 - Not done: none of the "After: your checklist" steps (Fly login, launch, deploy, live run) —
   those need Sufyan's Fly login per the sprint doc.
-- Reviewed by / disposition: agent build, then agent self-review against findings handed back by
-  the coordinator (not an independent `/review` run); still awaiting Sufyan's checklist.
-- Next action / owner: run `/review` on this sprint's changes (per CLAUDE.md, "End every sprint
-  with `/review`... before handing over the manual checklist"), then the sprint 3 checklist / Sufyan.
+- Reviewed by / disposition: `/review` run with four Opus axes (standards, spec, architecture, divergent); findings fixed as listed above. Awaiting Sufyan's checklist.
+- Next action / owner: sprint 3 checklist / Sufyan.
+
+### 2026-10-01 — Sprint 3 live run and checklist
+
+- Performed by: Sufyan (Fly.io CLI, Telegram), Claude (commits).
+- Sprint 3 was committed before the checklist because `scripts/deploy.sh` refuses a dirty tree.
+- `fly launch --copy-config` rewrote `fly.toml` with identical settings but stripped the comments; the commented version was restored (with Fly's `"10s"` form for `kill_timeout`) and committed before the first deploy.
+- All nine steps passed: login, launch as `whopaid-bot` in `sin`, secrets imported by name only, deploy, one machine `started`, `whopaid started` in logs, `/help` and an expense confirmed from a phone with the laptop closed and the row present in the Sheet, one machine listed, a trivial README commit redeployed and `/help` showing the new short SHA.
+- Reviewed by / disposition: checklist verified by Sufyan.
+
+### 2026-10-01 — Sprint 3 sign-off
+
+- Performed by: Sufyan, recorded by Claude.
+- Disposition: Sufyan said "sign off sprint 3". Sprint 3 closed. From here on testing is against the Fly machine; the local bot must stay stopped.
+- Next action / owner: run sprint 4 (receipt photos, total only) / agent.
