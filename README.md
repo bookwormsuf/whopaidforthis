@@ -2,7 +2,7 @@
 
 Telegram group expense tracker for trips. Records into a shared Google Sheet, converts amounts
 to the home currency at the day's rate, splits receipts among participants, and tells you who
-owes whom.
+owes whom. Runs on Fly.io; see Deployment below.
 
 ## Setup
 
