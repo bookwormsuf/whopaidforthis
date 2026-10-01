@@ -25,7 +25,7 @@ HELP_TEXT = (
     "/help — this message\n\n"
     "You can also just type an amount and a description, like "
     "<code>1200 yen ramen</code>, or send a photo of a receipt.\n\n"
-    "Only /join, /settrip, /cancel, /start and /help work so far — the rest is coming."
+    "/mine, /balances and /settle are coming in a later sprint."
 )
 
 

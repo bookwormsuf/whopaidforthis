@@ -74,11 +74,30 @@ def rebind_keyboard(session_id: str) -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton(
-                    "Yes, rebind", callback_data=_callback(session_id, "rebind", "yes")
+                    "Switch Sheet", callback_data=_callback(session_id, "rebind", "yes")
                 ),
                 InlineKeyboardButton(
                     "Keep current", callback_data=_callback(session_id, "rebind", "no")
                 ),
             ]
         ]
+    )
+
+
+def joined_button(chat_id: int, joined_count: int = 0) -> InlineKeyboardButton:
+    """The "I'm in too" button (spec §3), reused on Connected ✅ and Joined ✅
+    messages. Label gets a counter once `joined_count` >= 1: "I'm in too (2 joined)".
+    """
+    label = "I'm in too" if joined_count < 1 else f"I'm in too ({joined_count} joined)"
+    return InlineKeyboardButton(label, callback_data=f"join:{chat_id}:tap")
+
+
+def everyones_in_button(chat_id: int) -> InlineKeyboardButton:
+    """Closes joining for this message (spec §3); any joined user may press it."""
+    return InlineKeyboardButton("Everyone's in", callback_data=f"join:{chat_id}:done")
+
+
+def joined_keyboard(chat_id: int, joined_count: int = 0) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[joined_button(chat_id, joined_count), everyones_in_button(chat_id)]]
     )

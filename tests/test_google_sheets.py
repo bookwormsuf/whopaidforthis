@@ -3,16 +3,30 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+import re
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
 
+from app.models.category import Category
+from app.models.exchange_rate import ExchangeRate
+from app.models.expense import Expense, ExpenseSplit
 from app.models.trip import Trip
 from app.services.google_sheets import SheetsLedgerStore, _with_retries
 from app.services.ledger_store import LedgerUnavailable
 from app.services.sheet_layout import TAB_ORDER
+
+_A1_RE = re.compile(r"^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$")
+
+
+def _col_letters_to_index(letters: str) -> int:
+    index = 0
+    for ch in letters:
+        index = index * 26 + (ord(ch) - ord("A") + 1)
+    return index - 1
 
 
 def _api_error(status_code: int) -> APIError:
@@ -22,11 +36,16 @@ def _api_error(status_code: int) -> APIError:
     return APIError(response)
 
 
+_next_gid = iter(range(1, 100000))
+
+
 class FakeWorksheet:
     def __init__(self, title: str, rows: list[list[object]] | None = None) -> None:
         self.title = title
         self.rows: list[list[object]] = rows or []
         self.frozen_rows: int | None = None
+        self.id = next(_next_gid)
+        self.get_all_values_calls: list[object] = []
 
     def get_values(self, range_name: str | None = None) -> list[list[object]]:
         if range_name == "A1:Z1":
@@ -35,7 +54,8 @@ class FakeWorksheet:
             return [self.rows[1]] if len(self.rows) > 1 else []
         return self.rows
 
-    def get_all_values(self) -> list[list[object]]:
+    def get_all_values(self, value_render_option: object = None) -> list[list[object]]:
+        self.get_all_values_calls.append(value_render_option)
         return self.rows
 
     def update(
@@ -44,16 +64,27 @@ class FakeWorksheet:
         range_name: str | None = None,
         value_input_option: object = None,
     ) -> None:
-        if range_name == "A2":
-            while len(self.rows) < 2:
-                self.rows.append([])
-            self.rows[1] = values[0]
+        if range_name is None:
+            for i, row in enumerate(values):
+                if i < len(self.rows):
+                    self.rows[i] = row
+                else:
+                    self.rows.append(row)
             return
-        for i, row in enumerate(values):
-            if i < len(self.rows):
-                self.rows[i] = row
-            else:
-                self.rows.append(row)
+        match = _A1_RE.match(range_name)
+        if not match:
+            raise ValueError(f"FakeWorksheet.update: unsupported range {range_name!r}")
+        col_letters, row_str = match.group(1), match.group(2)
+        row_index = int(row_str)
+        col_index = _col_letters_to_index(col_letters)
+        while len(self.rows) < row_index:
+            self.rows.append([])
+        row = self.rows[row_index - 1]
+        for offset, value in enumerate(values[0]):
+            target_col = col_index + offset
+            while len(row) <= target_col:
+                row.append("")
+            row[target_col] = value
 
     def freeze(self, rows: int | None = None, cols: int | None = None) -> None:
         self.frozen_rows = rows
@@ -67,6 +98,32 @@ class FakeSpreadsheet:
         self._worksheets = {ws.title: ws for ws in worksheets}
         self.created_order: list[str] = []
         self.deleted: list[str] = []
+        self.batch_update_calls: list[dict] = []
+
+    def batch_update(self, body: dict) -> None:
+        self.batch_update_calls.append(body)
+        for request in body.get("requests", []):
+            append = request.get("appendCells")
+            if append is None:
+                continue
+            ws = self._worksheet_by_id(append["sheetId"])
+            for row in append["rows"]:
+                values = []
+                for cell in row["values"]:
+                    entered = cell["userEnteredValue"]
+                    if "boolValue" in entered:
+                        values.append(entered["boolValue"])
+                    elif "numberValue" in entered:
+                        values.append(entered["numberValue"])
+                    else:
+                        values.append(entered["stringValue"])
+                ws.rows.append(values)
+
+    def _worksheet_by_id(self, sheet_id: int) -> FakeWorksheet:
+        for ws in self._worksheets.values():
+            if ws.id == sheet_id:
+                return ws
+        raise KeyError(sheet_id)
 
     def worksheets(self) -> list[FakeWorksheet]:
         return list(self._worksheets.values())
@@ -210,6 +267,8 @@ async def test_initialise_trip_sheet_creates_in_order_and_cleans_sheet1() -> Non
 
     assert existing_users.frozen_rows is None  # never touched
     for tab in expected_created:
+        if tab == "Read Me":
+            continue  # a plain-text tab; not frozen
         assert spreadsheet._worksheets[tab].frozen_rows == 1
 
     assert spreadsheet._worksheets["Trip"].rows[1] == [
@@ -418,3 +477,418 @@ async def test_concurrent_get_binding_creates_bindings_tab_exactly_once(
 
     assert results == [None, None]
     assert control.created_order.count("Bindings") == 1
+
+
+async def test_initialise_trip_sheet_applies_layout_batch_update_every_run() -> None:
+    store = _store()
+    spreadsheet = FakeSpreadsheet([])
+    store._open = AsyncMock(return_value=spreadsheet)  # type: ignore[method-assign]
+    trip = Trip(
+        chat_id=-100,
+        sheet_id="sheet-id-1234567890",
+        name="Japan Trip",
+        trip_currency="JPY",
+        home_currency="SGD",
+        timezone="Asia/Tokyo",
+        created_at=datetime.now(UTC),
+    )
+
+    await store.initialise_trip_sheet(trip)
+    await store.initialise_trip_sheet(trip)
+
+    assert len(spreadsheet.batch_update_calls) == 2  # re-applied harmlessly each run
+    first_requests = spreadsheet.batch_update_calls[0]["requests"]
+    assert any("updateSheetProperties" in r for r in first_requests)
+    assert any("updateDimensionProperties" in r for r in first_requests)
+    assert any("repeatCell" in r for r in first_requests)
+
+
+async def test_initialise_trip_sheet_creates_read_me_tab_with_content() -> None:
+    store = _store()
+    spreadsheet = FakeSpreadsheet([])
+    store._open = AsyncMock(return_value=spreadsheet)  # type: ignore[method-assign]
+    trip = Trip(
+        chat_id=-100,
+        sheet_id="sheet-id-1234567890",
+        name="Japan Trip",
+        trip_currency="JPY",
+        home_currency="SGD",
+        timezone="Asia/Tokyo",
+        created_at=datetime.now(UTC),
+    )
+
+    await store.initialise_trip_sheet(trip)
+
+    read_me = spreadsheet._worksheets["Read Me"]
+    assert read_me.rows[-1] == ["Do not edit rows by hand; use /undo in Telegram."]
+
+    # Idempotent: content is not rewritten (and would be harmless if it were).
+    read_me.rows.append(["custom note"])
+    await store.initialise_trip_sheet(trip)
+    assert read_me.rows[-1] == ["custom note"]
+
+
+def _trip_jpy_sgd() -> Trip:
+    return Trip(
+        chat_id=-100,
+        sheet_id="sheet-id-1234567890",
+        name="Japan Trip",
+        trip_currency="JPY",
+        home_currency="SGD",
+        timezone="Asia/Tokyo",
+        created_at=datetime.now(UTC),
+    )
+
+
+def _expense() -> Expense:
+    return Expense(
+        expense_id="01EXPENSE00000000000000000",
+        created_at=datetime.now(UTC),
+        transaction_date=date(2026, 9, 20),
+        chat_id=-100,
+        message_id=7,
+        created_by_user_id=1,
+        payer_user_id=1,
+        payer_username="ada",
+        payer_display_name="Ada Lovelace",
+        description="Ramen",
+        merchant=None,
+        category=Category.FOOD,
+        original_amount_minor=1200,
+        original_currency="JPY",
+        trip_currency="JPY",
+        home_currency="SGD",
+        trip_amount_minor=1200,
+        home_amount_minor=10,
+        rate=Decimal("0.0081"),
+        rate_date=date(2026, 9, 19),
+        source_type="text",
+        split_method="equal",
+        status="confirmed",
+        cancelled_at=None,
+        notes=None,
+        splits=[
+            ExpenseSplit(
+                user_id=1,
+                username="ada",
+                display_name="Ada Lovelace",
+                share_trip_minor=1200,
+                share_home_minor=10,
+                split_method="equal",
+            )
+        ],
+    )
+
+
+def _expenses_and_splits_worksheets() -> tuple[FakeWorksheet, FakeWorksheet]:
+    from app.services.sheet_layout import headers_for
+
+    headers = headers_for("JPY", "SGD")
+    return (
+        FakeWorksheet("Expenses", rows=[headers["Expenses"]]),
+        FakeWorksheet("Splits", rows=[headers["Splits"]]),
+    )
+
+
+async def test_append_expense_writes_splits_then_expenses_with_correct_sheet_ids() -> None:
+    store = _store()
+    expenses_ws, splits_ws = _expenses_and_splits_worksheets()
+    spreadsheet = FakeSpreadsheet([expenses_ws, splits_ws])
+    store._open = AsyncMock(return_value=spreadsheet)  # type: ignore[method-assign]
+
+    trip = _trip_jpy_sgd()
+    expense = _expense()
+    await store.append_expense(trip, expense)
+
+    assert len(spreadsheet.batch_update_calls) == 1
+    requests = spreadsheet.batch_update_calls[0]["requests"]
+    append_sheet_ids = [r["appendCells"]["sheetId"] for r in requests]
+    assert append_sheet_ids == [splits_ws.id, expenses_ws.id]  # Splits before Expenses
+
+    assert len(splits_ws.rows) == 2  # header + one split row
+    assert splits_ws.rows[1][0] == expense.expense_id
+    assert len(expenses_ws.rows) == 2
+    assert expenses_ws.rows[1][0] == expense.expense_id
+    assert expenses_ws.rows[1][20] == "confirmed"  # Status column
+
+
+async def test_list_expenses_round_trips() -> None:
+    store = _store()
+    expenses_ws, splits_ws = _expenses_and_splits_worksheets()
+    spreadsheet = FakeSpreadsheet([expenses_ws, splits_ws])
+    store._open = AsyncMock(return_value=spreadsheet)  # type: ignore[method-assign]
+
+    trip = _trip_jpy_sgd()
+    expense = _expense()
+    await store.append_expense(trip, expense)
+
+    records = await store.list_expenses(trip)
+    assert len(records) == 1
+    assert records[0].expense_id == expense.expense_id
+    assert records[0].status == "confirmed"
+
+
+async def test_list_expenses_includes_message_id_for_dedup() -> None:
+    """DraftService now owns the dedup lazy-load via list_expenses (item 14); there
+    is no dedicated list_message_keys method any more.
+    """
+    store = _store()
+    expenses_ws, splits_ws = _expenses_and_splits_worksheets()
+    spreadsheet = FakeSpreadsheet([expenses_ws, splits_ws])
+    store._open = AsyncMock(return_value=spreadsheet)  # type: ignore[method-assign]
+
+    trip = _trip_jpy_sgd()
+    await store.append_expense(trip, _expense())
+
+    records = await store.list_expenses(trip)
+    assert [r.message_id for r in records] == [7]
+
+
+async def test_cancel_expense_updates_row_not_delete() -> None:
+    store = _store()
+    expenses_ws, splits_ws = _expenses_and_splits_worksheets()
+    spreadsheet = FakeSpreadsheet([expenses_ws, splits_ws])
+    store._open = AsyncMock(return_value=spreadsheet)  # type: ignore[method-assign]
+
+    trip = _trip_jpy_sgd()
+    expense = _expense()
+    await store.append_expense(trip, expense)
+
+    ok = await store.cancel_expense(
+        trip, expense.expense_id, datetime(2026, 9, 21, tzinfo=UTC), "Cancelled via /undo by Ada"
+    )
+    assert ok is True
+    assert len(expenses_ws.rows) == 2  # never deleted
+    assert expenses_ws.rows[1][20] == "cancelled"
+    assert expenses_ws.rows[1][21] == "2026-09-21T00:00:00+00:00"
+    assert expenses_ws.rows[1][22] == "Cancelled via /undo by Ada"
+
+
+async def test_cancel_expense_unknown_id_returns_false() -> None:
+    store = _store()
+    expenses_ws, splits_ws = _expenses_and_splits_worksheets()
+    spreadsheet = FakeSpreadsheet([expenses_ws, splits_ws])
+    store._open = AsyncMock(return_value=spreadsheet)  # type: ignore[method-assign]
+
+    trip = _trip_jpy_sgd()
+    ok = await store.cancel_expense(trip, "nope", datetime.now(UTC), "note")
+    assert ok is False
+
+
+async def test_find_rate_and_save_rate() -> None:
+    store = _store()
+    rates_ws = FakeWorksheet(
+        "Exchange Rates",
+        rows=[["Requested Date", "Rate Date", "From", "To", "Rate", "Provider", "Retrieved At"]],
+    )
+    spreadsheet = FakeSpreadsheet([rates_ws])
+    store._open = AsyncMock(return_value=spreadsheet)  # type: ignore[method-assign]
+
+    trip = _trip_jpy_sgd()
+    assert await store.find_rate(trip, "JPY", "SGD", date(2026, 9, 20)) is None
+
+    rate = ExchangeRate(
+        base="JPY",
+        quote="SGD",
+        requested_date=date(2026, 9, 20),
+        rate_date=date(2026, 9, 18),
+        rate=Decimal("0.0081"),
+        provider="frankfurter",
+        retrieved_at=datetime.now(UTC),
+    )
+    await store.save_rate(trip, rate)
+
+    found = await store.find_rate(trip, "JPY", "SGD", date(2026, 9, 20))
+    assert found is not None
+    assert found.rate == Decimal("0.0081")
+
+    # find_rate is a plain lookup by requested date only (item 15): the rate-date
+    # cache-key rule now lives solely in RateService's in-memory cache, not here.
+    assert await store.find_rate(trip, "JPY", "SGD", date(2026, 9, 18)) is None
+
+
+async def test_list_expenses_reads_with_unformatted_value_render_option() -> None:
+    """Numbers must be requested unformatted (raw int/float, or comma-free strings),
+    never Sheets' locale-formatted display text -- otherwise "1,200" can't be parsed.
+    """
+    from gspread.utils import ValueRenderOption
+
+    store = _store()
+    expenses_ws, splits_ws = _expenses_and_splits_worksheets()
+    spreadsheet = FakeSpreadsheet([expenses_ws, splits_ws])
+    store._open = AsyncMock(return_value=spreadsheet)  # type: ignore[method-assign]
+    trip = _trip_jpy_sgd()
+    await store.append_expense(trip, _expense())
+
+    await store.list_expenses(trip)
+
+    assert expenses_ws.get_all_values_calls == [ValueRenderOption.unformatted]
+
+
+async def test_list_expenses_parses_int_and_float_amounts() -> None:
+    """A fake worksheet returning raw int (JPY) and float (SGD) amounts, as the
+    unformatted render option would, parses correctly without any comma-stripping.
+    """
+    store = _store()
+    from app.services.sheet_layout import headers_for
+
+    headers = headers_for("JPY", "SGD")
+    row = [None] * len(headers["Expenses"])
+    row[0] = "01EXPENSE00000000000000000"
+    row[1] = datetime.now(UTC).isoformat()
+    row[2] = "2026-09-20"
+    row[3] = -100
+    row[4] = 7
+    row[5] = 1
+    row[6] = 1
+    row[7] = "ada"
+    row[8] = "Ada Lovelace"
+    row[9] = "Ramen"
+    row[10] = ""
+    row[11] = "food"
+    row[12] = 1200  # raw int, as unformatted JPY amount
+    row[13] = "JPY"
+    row[14] = 1200  # raw int
+    row[15] = 9.72  # raw float, as unformatted SGD amount
+    row[16] = 0.0081
+    row[17] = "2026-09-19"
+    row[18] = "text"
+    row[19] = "equal"
+    row[20] = "confirmed"
+    row[21] = ""
+    row[22] = ""
+
+    expenses_ws = FakeWorksheet("Expenses", rows=[headers["Expenses"], row])
+    splits_ws = FakeWorksheet("Splits", rows=[headers["Splits"]])
+    spreadsheet = FakeSpreadsheet([expenses_ws, splits_ws])
+    store._open = AsyncMock(return_value=spreadsheet)  # type: ignore[method-assign]
+    trip = _trip_jpy_sgd()
+
+    records = await store.list_expenses(trip)
+
+    assert len(records) == 1
+    assert records[0].trip_amount_minor == 1200
+    assert records[0].home_amount_minor == 972
+
+
+async def test_list_expenses_parses_comma_formatted_string_amounts() -> None:
+    """Even if a fake/misconfigured worksheet returned formatted text like "1,200"
+    (what the *default* render option would give for a large JPY amount), the store
+    must still parse it -- proving the fix doesn't silently depend on formatting.
+    """
+    store = _store()
+    from app.services.sheet_layout import headers_for
+
+    headers = headers_for("JPY", "SGD")
+    row = [None] * len(headers["Expenses"])
+    row[0] = "01EXPENSE00000000000000000"
+    row[1] = datetime.now(UTC).isoformat()
+    row[2] = "2026-09-20"
+    row[3] = -100
+    row[4] = 7
+    row[5] = 1
+    row[6] = 1
+    row[7] = "ada"
+    row[8] = "Ada Lovelace"
+    row[9] = "Big Dinner"
+    row[10] = ""
+    row[11] = "food"
+    row[12] = "1,200"
+    row[13] = "JPY"
+    row[14] = "1,200"
+    row[15] = "9.72"
+    row[16] = "0.0081"
+    row[17] = "2026-09-19"
+    row[18] = "text"
+    row[19] = "equal"
+    row[20] = "confirmed"
+    row[21] = ""
+    row[22] = ""
+
+    expenses_ws = FakeWorksheet("Expenses", rows=[headers["Expenses"], row])
+    splits_ws = FakeWorksheet("Splits", rows=[headers["Splits"]])
+    spreadsheet = FakeSpreadsheet([expenses_ws, splits_ws])
+    store._open = AsyncMock(return_value=spreadsheet)  # type: ignore[method-assign]
+    trip = _trip_jpy_sgd()
+
+    records = await store.list_expenses(trip)
+
+    assert len(records) == 1
+    assert records[0].trip_amount_minor == 1200
+    assert records[0].home_amount_minor == 972
+
+
+async def test_expense_exists() -> None:
+    store = _store()
+    expenses_ws, splits_ws = _expenses_and_splits_worksheets()
+    spreadsheet = FakeSpreadsheet([expenses_ws, splits_ws])
+    store._open = AsyncMock(return_value=spreadsheet)  # type: ignore[method-assign]
+    trip = _trip_jpy_sgd()
+    expense = _expense()
+
+    assert await store.expense_exists(trip, expense.expense_id) is False
+    await store.append_expense(trip, expense)
+    assert await store.expense_exists(trip, expense.expense_id) is True
+    assert await store.expense_exists(trip, "not-a-real-id") is False
+
+
+async def test_get_binding_raises_trip_sheet_inaccessible_on_403_and_caches() -> None:
+    """A binding row exists, but the trip Sheet it points to now 403s (unshared or
+    deleted): get_binding raises TripSheetInaccessible, not LedgerUnavailable, and
+    caches that outcome so a second call makes no further Google call at all.
+    """
+    from app.services.ledger_store import TripSheetInaccessible
+
+    store = _store()
+    bindings_ws = FakeWorksheet(
+        "Bindings",
+        rows=[
+            ["Chat ID", "Sheet ID", "Bound At"],
+            [-100, "trip-sheet-id", "2026-01-01T00:00:00+00:00"],
+        ],
+    )
+    control = FakeSpreadsheet([bindings_ws])
+    call_log: list[str] = []
+
+    async def fake_open(sheet_id: str):
+        call_log.append(sheet_id)
+        if sheet_id == "control-sheet-id":
+            return control
+        raise LedgerUnavailable("Could not reach Google Sheets", status=403)
+
+    store._open = fake_open  # type: ignore[method-assign]
+
+    with pytest.raises(TripSheetInaccessible) as exc_info:
+        await store.get_binding(-100)
+    assert exc_info.value.sheet_id == "trip-sheet-id"
+    calls_after_first = len(call_log)
+    assert calls_after_first == 2  # control, then the trip sheet that 403s
+
+    with pytest.raises(TripSheetInaccessible):
+        await store.get_binding(-100)
+    assert len(call_log) == calls_after_first  # fully served from the cache
+
+
+async def test_get_binding_raises_trip_sheet_inaccessible_on_permission_error() -> None:
+    """The same path via the builtin PermissionError (no HTTP status attached)."""
+    from app.services.ledger_store import TripSheetInaccessible
+
+    store = _store()
+    bindings_ws = FakeWorksheet(
+        "Bindings",
+        rows=[
+            ["Chat ID", "Sheet ID", "Bound At"],
+            [-100, "trip-sheet-id", "2026-01-01T00:00:00+00:00"],
+        ],
+    )
+    control = FakeSpreadsheet([bindings_ws])
+
+    async def fake_open(sheet_id: str):
+        if sheet_id == "control-sheet-id":
+            return control
+        raise LedgerUnavailable("Could not reach Google Sheets") from PermissionError()
+
+    store._open = fake_open  # type: ignore[method-assign]
+
+    with pytest.raises(TripSheetInaccessible):
+        await store.get_binding(-100)

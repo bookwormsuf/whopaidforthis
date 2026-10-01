@@ -10,19 +10,29 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import gspread
 from gspread.exceptions import APIError, SpreadsheetNotFound
-from gspread.utils import ValueInputOption
+from gspread.utils import ValueInputOption, ValueRenderOption, rowcol_to_a1
 from gspread.worksheet import Worksheet
 
+from app.models.exchange_rate import ExchangeRate
+from app.models.expense import Expense, ExpenseRecord
 from app.models.trip import Trip
 from app.models.user import TripUser
-from app.services.ledger_store import LedgerUnavailable, merge_user
-from app.services.sheet_layout import TAB_ORDER, headers_for
-from app.services.summary_formulas import summary_rows
+from app.services.ledger_store import LedgerUnavailable, TripSheetInaccessible, merge_user
+from app.services.sheet_layout import (
+    DISPLAY_ORDER,
+    TAB_ORDER,
+    headers_for,
+    layout_requests,
+    read_me_lines,
+)
+from app.services.sheet_rows import expense_to_row, row_to_expense_record, split_to_row
+from app.services.summary_formulas import summary_rows, title_cells
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +86,28 @@ def _is_already_exists_error(exc: LedgerUnavailable) -> bool:
         return False
     message = cause.error.get("message", "") if isinstance(cause.error, dict) else str(cause)
     return "already exists" in str(message).lower()
+
+
+def _summary_title_bold_requests(summary_sheet_id: int) -> list[dict]:
+    """Bold formatting for the Summary tab's block title cells (spec §10a, part v)."""
+    requests: list[dict] = []
+    for row, col in title_cells():
+        requests.append(
+            {
+                "repeatCell": {
+                    "range": {
+                        "sheetId": summary_sheet_id,
+                        "startRowIndex": row - 1,
+                        "endRowIndex": row,
+                        "startColumnIndex": col - 1,
+                        "endColumnIndex": col,
+                    },
+                    "cell": {"userEnteredFormat": {"textFormat": {"bold": True}}},
+                    "fields": "userEnteredFormat.textFormat.bold",
+                }
+            }
+        )
+    return requests
 
 
 def _row_nonempty(row: list[Any] | None) -> bool:
@@ -132,6 +164,7 @@ class SheetsLedgerStore:
         self._client: gspread.Client | None = None
         self._binding_cache: dict[int, Trip] = {}
         self._not_bound_cache: dict[int, datetime] = {}
+        self._inaccessible_cache: dict[int, tuple[str, datetime]] = {}
         self._spreadsheet_cache: dict[str, gspread.Spreadsheet] = {}
         self._bindings_ws: Worksheet | None = None
         self._locks: dict[str, asyncio.Lock] = {}
@@ -224,6 +257,12 @@ class SheetsLedgerStore:
         not_bound_at = self._not_bound_cache.get(chat_id)
         if not_bound_at is not None and datetime.now(UTC) - not_bound_at < _NOT_BOUND_TTL:
             return None
+        inaccessible = self._inaccessible_cache.get(chat_id)
+        if inaccessible is not None:
+            cached_sheet_id, cached_at = inaccessible
+            if datetime.now(UTC) - cached_at < _NOT_BOUND_TTL:
+                raise TripSheetInaccessible(cached_sheet_id)
+            del self._inaccessible_cache[chat_id]
 
         control = await self._open(self._control_sheet_id)
         bindings_ws = await self._get_or_create_bindings_tab(control)
@@ -236,10 +275,25 @@ class SheetsLedgerStore:
         if sheet_id is None:
             self._not_bound_cache[chat_id] = datetime.now(UTC)
             return None
-        trip = await self._read_trip_tab(sheet_id, chat_id)
+
+        try:
+            trip = await self._read_trip_tab(sheet_id, chat_id)
+        except LedgerUnavailable as exc:
+            # A 403/404 (or the underlying PermissionError/SpreadsheetNotFound,
+            # which _with_retries translates without a status) means the binding
+            # itself is stale -- the Sheet exists as a row here but can't be opened
+            # any more -- distinct from a transient/backend LedgerUnavailable.
+            is_access_error = exc.status in (403, 404) or isinstance(
+                exc.__cause__, _NOT_OPENABLE_EXC
+            )
+            if is_access_error:
+                self._inaccessible_cache[chat_id] = (sheet_id, datetime.now(UTC))
+                raise TripSheetInaccessible(sheet_id) from exc
+            raise
         if trip is not None:
             self._binding_cache[chat_id] = trip
             self._not_bound_cache.pop(chat_id, None)
+            self._inaccessible_cache.pop(chat_id, None)
         return trip
 
     async def save_binding(self, trip: Trip) -> None:
@@ -264,6 +318,7 @@ class SheetsLedgerStore:
                 await _with_retries(bindings_ws.append_row, values)
         self._binding_cache[trip.chat_id] = trip
         self._not_bound_cache.pop(trip.chat_id, None)
+        self._inaccessible_cache.pop(trip.chat_id, None)
 
     async def _read_trip_tab(self, sheet_id: str, chat_id: int) -> Trip | None:
         spreadsheet = await self._open(sheet_id)
@@ -298,14 +353,16 @@ class SheetsLedgerStore:
                 ws = await _with_retries(spreadsheet.add_worksheet, title=tab, rows=1000, cols=26)
                 existing[tab] = ws
                 await self._write_tab_contents(ws, tab, trip, headers)
-                await _with_retries(ws.freeze, rows=1)
+                if tab != "Read Me":
+                    await _with_retries(ws.freeze, rows=1)
                 continue
 
             first_row = await _with_retries(ws.get_values, "A1:Z1")
             if _row_nonempty(first_row[0] if first_row else None):
-                continue  # idempotent: never touch a tab that already has a header row
+                continue  # idempotent: never touch a tab that already has content
             await self._write_tab_contents(ws, tab, trip, headers)
-            await _with_retries(ws.freeze, rows=1)
+            if tab != "Read Me":
+                await _with_retries(ws.freeze, rows=1)
 
         # Unlike headers, the Trip fact row is always refreshed: a rebind must be able
         # to update it (spec §2, "rebind" pin), never leaving stale facts behind.
@@ -317,12 +374,23 @@ class SheetsLedgerStore:
             if not any(_row_nonempty(row) for row in values):
                 await _with_retries(spreadsheet.del_worksheet, sheet1)
 
+        # Readable layout (spec §10a): tab order, hidden columns, number formats.
+        # Idempotent to re-apply, so this always runs, even on an already-set-up Sheet.
+        sheet_ids_by_title = {title: existing[title].id for title in DISPLAY_ORDER}
+        requests = layout_requests(sheet_ids_by_title, trip.trip_currency, trip.home_currency)
+        requests += _summary_title_bold_requests(sheet_ids_by_title["Summary"])
+        if requests:
+            await _with_retries(spreadsheet.batch_update, {"requests": requests})
+
     async def _write_tab_contents(
         self, ws: Worksheet, tab: str, trip: Trip, headers: dict[str, list[str]]
     ) -> None:
         if tab == "Summary":
             rows = summary_rows(trip.trip_currency, trip.home_currency)
             await _with_retries(ws.update, rows, value_input_option=ValueInputOption.user_entered)
+        elif tab == "Read Me":
+            lines = read_me_lines(trip.trip_currency, trip.home_currency)
+            await _with_retries(ws.update, [[line] for line in lines])
         else:
             await _with_retries(ws.update, [headers[tab]])
 
@@ -347,7 +415,9 @@ class SheetsLedgerStore:
     async def upsert_user(self, trip: Trip, user: TripUser, joined: bool | None) -> TripUser:
         async with self._lock_for(trip.sheet_id):
             ws = await self._users_worksheet(trip.sheet_id)
-            rows = await _with_retries(ws.get_all_values)
+            rows = await _with_retries(
+                ws.get_all_values, value_render_option=ValueRenderOption.unformatted
+            )
             existing: TripUser | None = None
             row_index: int | None = None
             for index, row in enumerate(rows[1:], start=2):
@@ -370,8 +440,154 @@ class SheetsLedgerStore:
 
     async def list_users(self, trip: Trip, joined_only: bool = False) -> list[TripUser]:
         ws = await self._users_worksheet(trip.sheet_id)
-        rows = await _with_retries(ws.get_all_values)
+        rows = await _with_retries(
+            ws.get_all_values, value_render_option=ValueRenderOption.unformatted
+        )
         users = [_row_to_user(row) for row in rows[1:] if _row_nonempty(row)]
         if joined_only:
             return [user for user in users if user.joined]
         return users
+
+    # -- Expenses, splits, rates (Sprint 2) ------------------------------------
+
+    def _cell(self, value: object) -> dict[str, Any]:
+        if isinstance(value, bool):
+            return {"userEnteredValue": {"boolValue": value}}
+        if isinstance(value, (int, float)):
+            return {"userEnteredValue": {"numberValue": float(value)}}
+        return {"userEnteredValue": {"stringValue": str(value)}}
+
+    def _row_to_cells(self, row: list[Any]) -> dict[str, Any]:
+        return {"values": [self._cell(value) for value in row]}
+
+    async def append_expense(self, trip: Trip, expense: Expense) -> None:
+        """One `spreadsheets.batchUpdate` with `appendCells` requests, in order Line
+        Items (none this sprint), Splits, Expenses last (spec §10, amended).
+        """
+        spreadsheet = await self._open(trip.sheet_id)
+        splits_ws = await _with_retries(spreadsheet.worksheet, "Splits")
+        expenses_ws = await _with_retries(spreadsheet.worksheet, "Expenses")
+
+        requests: list[dict[str, Any]] = []
+        for split in expense.splits:
+            row = split_to_row(split, expense.expense_id, trip.trip_currency, trip.home_currency)
+            requests.append(
+                {
+                    "appendCells": {
+                        "sheetId": splits_ws.id,
+                        "rows": [self._row_to_cells(row)],
+                        "fields": "userEnteredValue",
+                    }
+                }
+            )
+        requests.append(
+            {
+                "appendCells": {
+                    "sheetId": expenses_ws.id,
+                    "rows": [self._row_to_cells(expense_to_row(expense))],
+                    "fields": "userEnteredValue",
+                }
+            }
+        )
+        await _with_retries(spreadsheet.batch_update, {"requests": requests})
+
+    async def list_expenses(self, trip: Trip) -> list[ExpenseRecord]:
+        spreadsheet = await self._open(trip.sheet_id)
+        ws = await _with_retries(spreadsheet.worksheet, "Expenses")
+        rows = await _with_retries(
+            ws.get_all_values, value_render_option=ValueRenderOption.unformatted
+        )
+        return [
+            row_to_expense_record(row, trip.trip_currency, trip.home_currency)
+            for row in rows[1:]
+            if _row_nonempty(row)
+        ]
+
+    async def expense_exists(self, trip: Trip, expense_id: str) -> bool:
+        spreadsheet = await self._open(trip.sheet_id)
+        ws = await _with_retries(spreadsheet.worksheet, "Expenses")
+        rows = await _with_retries(
+            ws.get_all_values, value_render_option=ValueRenderOption.unformatted
+        )
+        headers = headers_for(trip.trip_currency, trip.home_currency)["Expenses"]
+        id_col = headers.index("Expense ID")
+        return any(
+            _row_nonempty(row) and len(row) > id_col and str(row[id_col]) == expense_id
+            for row in rows[1:]
+        )
+
+    async def cancel_expense(
+        self, trip: Trip, expense_id: str, cancelled_at: datetime, note_suffix: str
+    ) -> bool:
+        """Row update, never deletion (spec §12, `/undo`)."""
+        spreadsheet = await self._open(trip.sheet_id)
+        ws = await _with_retries(spreadsheet.worksheet, "Expenses")
+        rows = await _with_retries(
+            ws.get_all_values, value_render_option=ValueRenderOption.unformatted
+        )
+        headers = headers_for(trip.trip_currency, trip.home_currency)["Expenses"]
+        id_col = headers.index("Expense ID")
+        status_col = headers.index("Status")
+        headers.index("Cancelled At")
+        notes_col = headers.index("Notes")
+
+        row_index: int | None = None
+        existing_notes = ""
+        for index, row in enumerate(rows[1:], start=2):
+            if row and len(row) > id_col and str(row[id_col]) == expense_id:
+                row_index = index
+                existing_notes = row[notes_col] if len(row) > notes_col else ""
+                break
+        if row_index is None:
+            return False
+
+        new_notes = f"{existing_notes} {note_suffix}".strip() if existing_notes else note_suffix
+        await _with_retries(
+            ws.update,
+            [["cancelled", cancelled_at.isoformat(), new_notes]],
+            f"{rowcol_to_a1(row_index, status_col + 1)}:{rowcol_to_a1(row_index, notes_col + 1)}",
+            value_input_option=ValueInputOption.raw,
+        )
+        return True
+
+    async def find_rate(
+        self, trip: Trip, base: str, quote: str, requested_date: date
+    ) -> ExchangeRate | None:
+        """Plain lookup by requested date; the rate-date-as-cache-key rule (spec §4)
+        lives only in `RateService`'s in-memory cache, not here.
+        """
+        spreadsheet = await self._open(trip.sheet_id)
+        ws = await _with_retries(spreadsheet.worksheet, "Exchange Rates")
+        rows = await _with_retries(
+            ws.get_all_values, value_render_option=ValueRenderOption.unformatted
+        )
+        for row in rows[1:]:
+            if not _row_nonempty(row):
+                continue
+            row_requested = date.fromisoformat(str(row[0]))
+            if row_requested != requested_date or str(row[2]) != base or str(row[3]) != quote:
+                continue
+            return ExchangeRate(
+                base=str(row[2]),
+                quote=str(row[3]),
+                requested_date=row_requested,
+                rate_date=date.fromisoformat(str(row[1])),
+                rate=Decimal(str(row[4])),
+                provider=str(row[5]),
+                retrieved_at=datetime.fromisoformat(str(row[6])),
+            )
+        return None
+
+    async def save_rate(self, trip: Trip, rate: ExchangeRate) -> None:
+        spreadsheet = await self._open(trip.sheet_id)
+        ws = await _with_retries(spreadsheet.worksheet, "Exchange Rates")
+        row = [
+            rate.requested_date.isoformat(),
+            rate.rate_date.isoformat(),
+            rate.base,
+            rate.quote,
+            float(rate.rate),
+            rate.provider,
+            rate.retrieved_at.isoformat(),
+        ]
+        await _with_retries(ws.append_row, row, value_input_option=ValueInputOption.raw)

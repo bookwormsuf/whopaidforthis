@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-09-29 (sprint 1 signed off)
+Updated: 2026-10-01 (sprint 2 signed off)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -12,8 +12,8 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 |---|---|---|---|---|---|---|---|
 | 0 Accounts, keys, skeleton | written | done | green (10) | 2026-09-29, findings fixed | 2026-09-29 | 2026-09-29 | Sprint 0 closed. Next: run sprint 1 / agent |
 | 1 Trip binding and users | written | done | green (112) | 2026-09-29, findings fixed | 2026-09-29, all six pass | 2026-09-29 | Sprint 1 closed. Next: run sprint 2 / agent |
-| 2 Text expenses, just me | written (+ carry-overs) | not started | – | – | – | – | Run sprint 2 / agent (test trip 2 Sheet ready) |
-| 3 First deployment | written | not started | – | – | – | – | after sprint 2 |
+| 2 Text expenses, just me | written (+ carry-overs) | done | green (236) | 2026-09-29, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 2 closed. Next: run sprint 3 / agent |
+| 3 First deployment | written | not started | – | – | – | – | Run sprint 3 / agent |
 | 4 Receipt photos, total only | written | not started | – | – | – | – | after sprint 3 |
 | 5 Splitting and balances | written | not started | – | – | – | – | after sprint 4; needs tester B |
 | 6 Item claiming | written | not started | – | – | – | – | after sprint 5; needs tester B |
@@ -86,3 +86,31 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Performed by: Sufyan, recorded by Claude.
 - Disposition: Sufyan said "sign off sprint 1" after all six checklist steps passed. Sprint 1 closed. `whopaid test trip 2` Sheet created and shared for Sprint 2.
 - Next action / owner: run sprint 2 / agent.
+
+### 2026-09-29 — Sprint 2 build and review
+
+- Performed by: Claude (Fable 5.1) orchestrating a Sonnet build agent and four Opus review agents. No separate verifier pass this sprint: every fixed finding was confirmed by two or more axes or by reading the cited code.
+- Scope and reason: Sprint 2 per `docs/sprints/02-text-expenses-just-me.md`: the three carry-overs (wording, join button and reply-to-join, readable Sheet layout), then Money/conversion, Frankfurter rate provider with two-level cache, deterministic text parser, drafts with `Just me`, atomic commit to Sheets, dedup, `/recent`, `/today`, `/summary`, `/undo`.
+- Evidence / outputs: 46 files staged, not committed; 221 tests, ruff and pre-commit clean. Frankfurter v1 endpoint verified live by the build agent. Not run against real Telegram or Sheets.
+- Review (`/review`, four axes) fixed: reads used the Sheet's formatted text so ¥1,000+ crashed every read command (now unformatted values); hiding Summary column A would have hidden every block title (User ID moved to a hidden last column; category/day/payer tables side by side so they cannot overlap); `repeatCell` ranges exceeded the tab size; `$` was refused instead of meaning the home currency; the joined-so-far edit used plain text instead of HTML; home shares split directly instead of derived from trip shares; usernames blank in the Sheet; identity rate when trip and home currency match; JSON parse errors from Frankfurter not wrapped; Confirm could double-write after a lost acknowledgement (now `committing` state and an existence check); draft ids added to error logs. Structure: Draft made source-neutral for receipts, rendering moved to `app/bot/render`, dedup and rate caching each in one place, shared expense-line formatter. Dropped below threshold or judged fine: double-tap on Confirm (PTB processes updates sequentially), `append_expense` signature shape, wording nits.
+- Spec amendments: §4 (verified URL, identity rate, `$` rule, largest-remainder reconciliation of converted shares), §3 (sending an expense joins the sender), §6 (the six brief examples written in), §10 (commit via `spreadsheets.batchUpdate` + `appendCells`), §10a and §11 (Summary layout, dates as text), §12 (amount order).
+- Deviations kept: converted-share reconciliation uses largest-remainder rather than round-robin (round-robin can move a share more than one minor unit; pinned in §4).
+- Reviewed by / disposition: agent review only; awaiting Sufyan's nine-step checklist and sign-off.
+- Next action / owner: checklist / Sufyan; then "sign off sprint 2".
+
+### 2026-10-01 — Sprint 2 live run and checklist
+
+- Performed by: Sufyan (Telegram and Sheets), Claude and the build agent (fixes).
+- First live `/settrip` to the new Sheet failed with "Couldn't reach Google Sheets": the group's old Sheet had been un-shared in Sprint 1 step 6, and reading its Trip tab during the switch prompt raised a 403 that was treated as an outage. Fixed: a bound Sheet that returns 403/404 is reported as `TripSheetInaccessible` (cached 60 s); `/settrip` now asks "This group's current Sheet can't be opened any more. Switch to the new one?"; other commands reply that the bot lost access to the Sheet.
+- Feedback pinned into §3 and built: the `I'm in too` button shows a counter (`I'm in too (N joined)`) and an `Everyone's in` button that removes the prompt and appends "Latecomers can type /join."; a bot restart losing an in-progress `/settrip` ("This setup expired") is by design, state is in memory until Sprint 3.
+- Feedback pinned into §12 and built: an expense entered in the home currency is shown in the home currency only (card, shares, Saved line, `/recent`, `/today`, `/undo`); the trip-currency equivalent is still stored. Trip-currency expenses keep the `¥X (S$Y)` form.
+- Checklist note: sending the four step-4 examples in one message produced one expense with the first amount and the rest as its title. Candidate for Sprint 7 hardening: refuse a message with more than one amount.
+- Checks: `uv run pytest` 236 passed; ruff, ruff format and pre-commit clean after each fix.
+- Second run: all nine checklist steps passed (connect with Switch Sheet, readable Summary and hidden IDs, text expenses with the day's rate, Sheet rows, SGD expense, silence on chatter, read commands, `/undo`, Cancel, stale buttons and expired draft after restart).
+- Reviewed by / disposition: checklist verified by Sufyan.
+
+### 2026-10-01 — Sprint 2 sign-off
+
+- Performed by: Sufyan, recorded by Claude.
+- Disposition: Sufyan said "sign off sprint 2" after all nine checklist steps passed. Sprint 2 closed.
+- Next action / owner: run sprint 3 (first deployment to Fly.io) / agent.

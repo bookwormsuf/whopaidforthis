@@ -13,14 +13,26 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from app.bot.deps import get_deps
+from app.bot.keyboards.settrip import joined_keyboard
 from app.models.trip import Trip
 from app.models.user import TripUser
-from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
+from app.services.ledger_store import (
+    LEDGER_UNAVAILABLE_TEXT,
+    LedgerUnavailable,
+    TripSheetInaccessible,
+)
 
 logger = logging.getLogger(__name__)
 
 UNBOUND_TEXT = "Run /settrip first"
 UNAVAILABLE_TEXT = "Couldn't reach Google Sheets, try /join again."
+
+
+def lost_access_text(email: str) -> str:
+    return (
+        f"I've lost access to this group's Sheet. Share it with <code>{escape(email)}</code> "
+        "as Editor again, or run /settrip with a new Sheet."
+    )
 
 
 async def require_trip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Trip | None:
@@ -31,6 +43,12 @@ async def require_trip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Tr
     message = update.effective_message
     try:
         trip = await deps.ledger.get_binding(chat.id)
+    except TripSheetInaccessible:
+        if message is not None:
+            await message.reply_text(
+                lost_access_text(deps.service_account_email), parse_mode="HTML"
+            )
+        return None
     except LedgerUnavailable:
         logger.exception("require_trip: could not read the current binding")
         if message is not None:
@@ -44,6 +62,9 @@ async def require_trip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Tr
 
 
 async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`/join`. Sent as a reply to another (non-bot) user's message, joins that user
+    instead of the sender (spec §3, "joining others").
+    """
     trip = await require_trip(update, context)
     if trip is None:
         return
@@ -51,11 +72,21 @@ async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user = update.effective_user
     message = update.effective_message
     assert user is not None and message is not None
-    tg_user = TripUser.from_telegram_user(user, datetime.now(UTC))
+
+    target = user
+    reply_to = message.reply_to_message
+    if reply_to is not None and reply_to.from_user is not None and not reply_to.from_user.is_bot:
+        target = reply_to.from_user
+
+    tg_user = TripUser.from_telegram_user(target, datetime.now(UTC))
     try:
         joined_user = await deps.ledger.upsert_user(trip, tg_user, joined=True)
     except LedgerUnavailable:
         logger.exception("join: could not upsert user")
         await message.reply_text(UNAVAILABLE_TEXT, parse_mode="HTML")
         return
-    await message.reply_text(f"Joined ✅ {escape(joined_user.display_name)}", parse_mode="HTML")
+    await message.reply_text(
+        f"Joined ✅ {escape(joined_user.display_name)}",
+        parse_mode="HTML",
+        reply_markup=joined_keyboard(trip.chat_id),
+    )

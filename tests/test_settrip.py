@@ -13,6 +13,7 @@ from app.bot.deps import Deps
 from app.models.trip import Trip
 from app.services.currencies import StaticCurrencyCatalog
 from app.services.ledger_store import InMemoryLedgerStore, LedgerUnavailable
+from tests.helpers import make_deps
 
 SHEET_ID = "1AbCdEfGhIjKlMnOpQrStUvWxYz1234567890"
 
@@ -35,11 +36,9 @@ def test_extract_sheet_id_rejects_garbage() -> None:
 
 
 def _deps(ledger: InMemoryLedgerStore | None = None) -> Deps:
-    return Deps(
-        ledger=ledger or InMemoryLedgerStore(),
+    return make_deps(
+        ledger or InMemoryLedgerStore(),
         currencies=StaticCurrencyCatalog(frozenset({"JPY", "SGD", "THB"})),
-        service_account_email="whopaid-bot@example.iam.gserviceaccount.com",
-        bot_version="test",
     )
 
 
@@ -101,12 +100,7 @@ async def test_settrip_unshared_sheet_via_real_sheets_ledger_store_sends_exact_e
     client.open_by_key = MagicMock(side_effect=PermissionError())
     store._get_client = AsyncMock(return_value=client)  # type: ignore[method-assign]
 
-    deps = Deps(
-        ledger=store,
-        currencies=StaticCurrencyCatalog(frozenset({"JPY", "SGD"})),
-        service_account_email="whopaid-bot@example.iam.gserviceaccount.com",
-        bot_version="test",
-    )
+    deps = make_deps(store)
     context = _context(deps)
     context.args = [SHEET_ID]
     update = _command_update()
@@ -206,9 +200,10 @@ async def test_settrip_happy_path_binds_trip() -> None:
 
     confirm_update.callback_query.edit_message_text.assert_awaited_once()
     (text,), kwargs = confirm_update.callback_query.edit_message_text.call_args
-    assert text.startswith("Bound ✅ Japan Trip")
+    assert text.startswith("Connected ✅ Japan Trip")
     assert "JPY → SGD" in text
     assert "Asia/Tokyo" in text
+    assert kwargs["reply_markup"] is not None
 
     trip = await ledger.get_binding(-100)
     assert trip is not None
@@ -309,7 +304,7 @@ async def test_settrip_rebind_prompt_when_already_bound_and_accessible() -> None
 
     update.effective_message.reply_text.assert_awaited_once()
     (text,), kwargs = update.effective_message.reply_text.call_args
-    assert text == "This group is already bound to a Sheet. Rebind?"
+    assert text == "This group already has a Sheet. Switch to the new one?"
 
 
 async def test_settrip_other_currency_waits_for_text_then_validates() -> None:
@@ -367,3 +362,34 @@ def test_awaiting_settrip_text_filter_true_only_when_session_awaits_text() -> No
         chat=SimpleNamespace(id=-100), from_user=SimpleNamespace(id=2)
     )
     assert filt.filter(other_user_message) is False
+
+
+async def test_settrip_prompts_switch_when_current_sheet_is_inaccessible() -> None:
+    """The chat has a binding, but its current Sheet 403s: /settrip still runs the
+    access check on the NEW sheet first, then shows the Switch prompt with the
+    "can't be opened any more" wording (live-run fix, 2026-09-29).
+    """
+    ledger = InMemoryLedgerStore(inaccessible_sheet_ids=frozenset({"old-inaccessible-sheet-id"}))
+    await ledger.save_binding(
+        Trip(
+            chat_id=-100,
+            sheet_id="old-inaccessible-sheet-id",
+            name="Old Trip",
+            trip_currency="JPY",
+            home_currency="SGD",
+            timezone="Asia/Tokyo",
+            created_at=datetime.now(UTC),
+        )
+    )
+    deps = _deps(ledger)
+    context = _context(deps)
+    context.args = [SHEET_ID]
+    update = _command_update()
+
+    await settrip.settrip_command(update, context)
+
+    update.effective_message.reply_text.assert_awaited_once()
+    (text,), kwargs = update.effective_message.reply_text.call_args
+    assert text == "This group's current Sheet can't be opened any more. Switch to the new one?"
+    assert kwargs["reply_markup"] is not None
+    assert len(deps.settrip_sessions._sessions) == 1

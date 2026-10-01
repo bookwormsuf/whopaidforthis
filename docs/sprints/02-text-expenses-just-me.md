@@ -49,7 +49,7 @@ Brief §27 items: the six parse examples, JPY default, "I paid ¥4,850 for dinne
    Open the Sheet: `Summary` is the first tab and opens by default; its first block is "Who owes whom" with the note about positive and negative; no User ID column is visible; the `Read Me` tab is last. In `Expenses` the ID columns are hidden (a small arrow between column headers shows where).
 2. Send `1200 yen ramen`. A card appears with ¥1,200, an SGD amount, your name, today's date, the rate. Tap **Just me**, then **Confirm**. The card becomes `Saved ✅ …`.
 3. Open the Sheet: `Expenses` has one row, `Splits` has one row for you with the same amounts, `Exchange Rates` has one row.
-4. Send `I paid ¥4,850 for dinner`, `taxi 3200`, `750 coffee`, `S$12 grab`. Confirm each. Check the SGD one has Original Currency SGD and its SGD amount equals 12.00.
+4. Send `I paid ¥4,850 for dinner`, `taxi 3200`, `750 coffee`, `S$12 grab`. The `S$12 grab` card reads `Grab — S$12.00` (home currency only, no yen, per the 2026-10-01 amount-order change). Confirm each. Check the SGD one has Original Currency SGD and its SGD amount equals 12.00.
 5. Send `lol that ramen was so good`. The bot must stay silent.
 6. Send `/recent`, `/today`, `/summary`. Numbers match the Sheet.
 7. Send `/undo`, tap **Yes, cancel it**. In the Sheet the last row's Status is `cancelled`; `/summary` no longer counts it.

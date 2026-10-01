@@ -48,6 +48,39 @@ def default_timezone_for(code: str) -> str | None:
     return TIMEZONE_DEFAULTS.get(code.upper())
 
 
+CURRENCY_SYMBOLS: dict[str, str] = {
+    "JPY": "¥",
+    "SGD": "S$",
+    "KRW": "₩",
+    "THB": "฿",
+    "EUR": "€",
+    "GBP": "£",
+    "USD": "US$",
+    "MYR": "RM",
+    "IDR": "Rp",
+    "AUD": "A$",
+    "HKD": "HK$",
+    "TWD": "NT$",
+    "CNY": "CN¥",
+    "VND": "₫",
+    "PHP": "₱",
+    "INR": "₹",
+    "CHF": "CHF ",
+    "NZD": "NZ$",
+    "CAD": "C$",
+}
+
+
+def symbol_for(code: str) -> str:
+    """The display symbol for a currency code, e.g. "¥", "S$". Fallback "<CODE> "."""
+    return CURRENCY_SYMBOLS.get(code.upper(), f"{code.upper()} ")
+
+
+# Resolved contextually by the parser (`app.services.expense_parser`), not to a
+# fixed code here: spec §4, "$ maps to the home currency when home is SGD or USD,
+# else USD."
+HOME_OR_USD = "HOME_OR_USD"
+
 CURRENCY_ALIASES: dict[str, str] = {
     "yen": "JPY",
     "¥": "JPY",
@@ -57,7 +90,7 @@ CURRENCY_ALIASES: dict[str, str] = {
     "฿": "THB",
     "€": "EUR",
     "£": "GBP",
-    "$": "USD",
+    "$": HOME_OR_USD,
     "s$": "SGD",
     "sgd": "SGD",
     "rm": "MYR",

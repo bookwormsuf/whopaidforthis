@@ -21,6 +21,7 @@ from app.bot.deps import get_deps
 from app.bot.keyboards.settrip import (
     confirm_keyboard,
     home_currency_keyboard,
+    joined_keyboard,
     rebind_keyboard,
     timezone_keyboard,
     trip_currency_keyboard,
@@ -29,7 +30,11 @@ from app.bot.session_state import SettripSession, SettripSessionStore
 from app.models.trip import Trip
 from app.models.user import display_name_for
 from app.services.currencies import default_timezone_for
-from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
+from app.services.ledger_store import (
+    LEDGER_UNAVAILABLE_TEXT,
+    LedgerUnavailable,
+    TripSheetInaccessible,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,13 +93,23 @@ async def settrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     trip_name = chat.title or "Trip"
+    rebind_prompt: str | None = None
     try:
         existing_trip = await deps.ledger.get_binding(chat.id)
+        if existing_trip is not None:
+            rebind_prompt = "This group already has a Sheet. Switch to the new one?"
+    except TripSheetInaccessible:
+        # Bound, but the current Sheet can no longer be opened: same rebind flow,
+        # different prompt (spec: live-run fix, 2026-09-29).
+        rebind_prompt = (
+            "This group's current Sheet can't be opened any more. Switch to the new one?"
+        )
     except LedgerUnavailable:
         logger.exception("settrip: could not read the current binding")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
         return
-    if existing_trip is not None:
+
+    if rebind_prompt is not None:
         session = deps.settrip_sessions.create(
             chat_id=chat.id,
             initiator_id=user.id,
@@ -104,7 +119,7 @@ async def settrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             step="rebind",
         )
         sent = await message.reply_text(
-            "This group is already bound to a Sheet. Rebind?",
+            rebind_prompt,
             reply_markup=rebind_keyboard(session.session_id),
             parse_mode="HTML",
         )
@@ -219,10 +234,12 @@ async def _create_trip(
         return
     deps.settrip_sessions.delete(session.session_id)
     text = (
-        f"Bound ✅ {escape(trip.name)} · {escape(trip.trip_currency)} → "
+        f"Connected ✅ {escape(trip.name)} · {escape(trip.trip_currency)} → "
         f"{escape(trip.home_currency)} · {escape(trip.timezone)}"
     )
-    await query.edit_message_text(text, parse_mode="HTML")
+    await query.edit_message_text(
+        text, parse_mode="HTML", reply_markup=joined_keyboard(trip.chat_id)
+    )
 
 
 def _retry_keyboard(session_id: str) -> InlineKeyboardMarkup:

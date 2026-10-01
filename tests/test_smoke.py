@@ -17,12 +17,12 @@ from app.bot.deps import Deps
 from app.bot.handlers.basic import HELP_TEXT, help_command
 from app.config.settings import Settings, load_settings
 from app.logging_setup import JsonFormatter
-from app.services.currencies import StaticCurrencyCatalog
 from app.services.ledger_store import (
     LEDGER_UNAVAILABLE_TEXT,
     InMemoryLedgerStore,
     LedgerUnavailable,
 )
+from tests.helpers import make_deps
 
 REQUIRED_ENV_VARS = (
     "TELEGRAM_BOT_TOKEN",
@@ -33,12 +33,7 @@ REQUIRED_ENV_VARS = (
 
 
 def _fake_deps() -> Deps:
-    return Deps(
-        ledger=InMemoryLedgerStore(),
-        currencies=StaticCurrencyCatalog(frozenset({"JPY", "SGD"})),
-        service_account_email="whopaid-bot@example.iam.gserviceaccount.com",
-        bot_version="test",
-    )
+    return make_deps(InMemoryLedgerStore())
 
 
 def _clear_required_env(monkeypatch: pytest.MonkeyPatch) -> None:

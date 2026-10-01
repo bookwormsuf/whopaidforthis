@@ -15,6 +15,7 @@ from telegram.ext import ContextTypes
 
 from app.bot.deps import get_deps
 from app.models.user import TripUser
+from app.services.ledger_store import LedgerUnavailable, TripSheetInaccessible
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,14 @@ async def upsert_seen_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if not deps.seen_users.should_upsert(chat.id, user.id, now):
             return
 
-        trip = await deps.ledger.get_binding(chat.id)
+        try:
+            trip = await deps.ledger.get_binding(chat.id)
+        except (TripSheetInaccessible, LedgerUnavailable) as exc:
+            # Expected operational states (unbound Sheet unshared, backend hiccup),
+            # not bugs: log at INFO with no traceback, so this doesn't spam WARNING
+            # on every message in an affected chat.
+            logger.info("seen-user upsert skipped: %s", type(exc).__name__)
+            return
         if trip is None:
             return
 

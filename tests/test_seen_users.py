@@ -9,17 +9,12 @@ from unittest.mock import MagicMock
 from app.bot.deps import Deps
 from app.bot.handlers import seen_users
 from app.models.trip import Trip
-from app.services.currencies import StaticCurrencyCatalog
 from app.services.ledger_store import InMemoryLedgerStore
+from tests.helpers import make_deps
 
 
 def _deps(ledger: InMemoryLedgerStore) -> Deps:
-    return Deps(
-        ledger=ledger,
-        currencies=StaticCurrencyCatalog(frozenset({"JPY", "SGD"})),
-        service_account_email="whopaid-bot@example.iam.gserviceaccount.com",
-        bot_version="test",
-    )
+    return make_deps(ledger)
 
 
 def _update(chat_id: int, user_id: int) -> MagicMock:
@@ -98,3 +93,30 @@ async def test_seen_user_never_raises_on_missing_deps() -> None:
     context.application.bot_data = {}
 
     await seen_users.upsert_seen_user(_update(-1, 5), context)  # must not raise
+
+
+async def test_seen_user_logs_info_without_traceback_on_trip_sheet_inaccessible(
+    caplog,
+) -> None:
+    ledger = InMemoryLedgerStore(inaccessible_sheet_ids=frozenset({"sheet-id-1234567890"}))
+    trip = Trip(
+        chat_id=-1,
+        sheet_id="sheet-id-1234567890",
+        name="Trip",
+        trip_currency="JPY",
+        home_currency="SGD",
+        timezone="Asia/Tokyo",
+        created_at=datetime.now(UTC),
+    )
+    await ledger.save_binding(trip)
+    deps = _deps(ledger)
+    context = MagicMock()
+    context.application.bot_data = {"deps": deps}
+
+    with caplog.at_level("INFO", logger="app.bot.handlers.seen_users"):
+        await seen_users.upsert_seen_user(_update(-1, 5), context)
+
+    records = [r for r in caplog.records if "seen-user upsert skipped" in r.message]
+    assert len(records) == 1
+    assert records[0].levelname == "INFO"
+    assert records[0].exc_info is None  # no traceback logged

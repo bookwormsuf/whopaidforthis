@@ -7,6 +7,8 @@ handlers get instances of them off `Deps`.
 
 from __future__ import annotations
 
+from collections import OrderedDict
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
@@ -14,6 +16,7 @@ from ulid import ULID
 
 _SESSION_TTL = timedelta(minutes=30)
 _SEEN_USER_REFRESH_INTERVAL = timedelta(hours=1)
+_RECENT_UPDATES_MAX_SIZE = 1000
 
 
 @dataclass(frozen=True)
@@ -97,3 +100,47 @@ class SeenUsersThrottle:
 
     def mark(self, chat_id: int, user_id: int, now: datetime) -> None:
         self._last_upsert.setdefault(chat_id, {})[user_id] = now
+
+
+class RecentUpdates:
+    """Bounded LRU of `update.update_id`, guarding the text-expense handler against a
+    replayed Telegram update (spec §10, "Also guard the PTB update handler...").
+    """
+
+    def __init__(self, max_size: int = _RECENT_UPDATES_MAX_SIZE) -> None:
+        self._max_size = max_size
+        self._seen: OrderedDict[int, None] = OrderedDict()
+
+    def seen(self, update_id: int) -> bool:
+        return update_id in self._seen
+
+    def add(self, update_id: int) -> None:
+        if update_id in self._seen:
+            self._seen.move_to_end(update_id)
+            return
+        self._seen[update_id] = None
+        if len(self._seen) > self._max_size:
+            self._seen.popitem(last=False)
+
+
+class Dedup:
+    """Per-chat `(chat_id, message_id)` dedup set, lazily loaded from the ledger's
+    Expenses tab on first use per chat (spec §10).
+    """
+
+    def __init__(self) -> None:
+        self._seen: dict[int, set[int]] = {}
+        self._loaded_chats: set[int] = set()
+
+    def is_loaded(self, chat_id: int) -> bool:
+        return chat_id in self._loaded_chats
+
+    def load_many(self, chat_id: int, message_ids: Iterable[int]) -> None:
+        self._seen.setdefault(chat_id, set()).update(message_ids)
+        self._loaded_chats.add(chat_id)
+
+    def seen(self, chat_id: int, message_id: int) -> bool:
+        return message_id in self._seen.get(chat_id, set())
+
+    def add(self, chat_id: int, message_id: int) -> None:
+        self._seen.setdefault(chat_id, set()).add(message_id)

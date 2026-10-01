@@ -27,18 +27,20 @@ Vocabulary: see `/CONTEXT.md`. Rationale for the two irreversible ones: `/docs/a
 ## 3. Users
 
 - `/join` (and `/start` in a group) upserts the sender into `Users` with `Joined = TRUE`.
-- Joining others (added 2026-09-29): `/join` sent as a **reply** to another person's message joins that person (their ID comes from the replied-to message) and replies `Joined ✅ <their name>`. The `Connected ✅` message and every `Joined ✅` reply carry an `I'm in too` button (callback `join:<chat_id>`) that joins whoever taps it and edits the message to append their name to a "Joined so far" line; the button stays for others. `/join @username` is **not** supported because Telegram does not give bots the user ID behind a plain @mention. Anyone who merely sends a message is also upserted with `Joined = FALSE` (for names) but is **not** part of Everyone.
+- Joining others (added 2026-09-29): `/join` sent as a **reply** to another person's message joins that person (their ID comes from the replied-to message) and replies `Joined ✅ <their name>`. The `Connected ✅` message and every `Joined ✅` reply carry an `I'm in too` button (callback `join:<chat_id>`) that joins whoever taps it and edits the message to append their name to a "Joined so far" line. The button label shows a counter after the first tap: `I'm in too (2 joined)`. A second button `Everyone's in` (any joined user may press it) removes the keyboard and appends the line `Everyone's in. Latecomers can type /join.` Callback `join:<chat_id>:done`. `/join @username` is **not** supported because Telegram does not give bots the user ID behind a plain @mention. Anyone who merely sends a message is also upserted with `Joined = FALSE` (for names) but is **not** part of Everyone.
 - Everyone = users in this chat with `Joined = TRUE`, evaluated at the moment the button is pressed.
 - Name resolution for "split between me Amir and John" and "paid by Amir": case-insensitive match against username, first name, and full display name of joined users. Zero or several matches → the draft asks with buttons; never guess.
+- Sending an expense joins the sender (upsert `Joined = TRUE`) so the payer is always a trip user.
 
 ## 4. Currencies, rates, conversion
 
-- Provider abstraction `ExchangeRateProvider.get_rate(base, quote, on_date) -> ExchangeRate(rate, rate_date, provider, retrieved_at)`. First implementation: Frankfurter, `GET https://api.frankfurter.dev/{date}?from={base}&to={quote}`, no key. Use the `date` in the response as `rate_date`.
-- Cache: the `Exchange Rates` tab plus an in-memory dict. Lookup order: memory → tab → provider. Cache key `(rate_date, base, quote)`; also record the requested date so a weekend lookup is a hit next time.
+- Provider abstraction `ExchangeRateProvider.get_rate(base, quote, on_date) -> ExchangeRate(rate, rate_date, provider, retrieved_at)`. First implementation: Frankfurter, `GET https://api.frankfurter.dev/v1/{date}?from={base}&to={quote}`, no key (verified 2026-09-29; `base`/`symbols` also accepted). Use the `date` in the response as `rate_date`.
+- Cache: the `Exchange Rates` tab plus an in-memory dict, keyed per trip. Lookup order: memory → tab → provider. Cache key `(rate_date, base, quote)`; also record the requested date so a weekend lookup is a hit next time.
+- Identity rate: when the trip currency equals the home currency, the rate is `1` (provider `identity`), returned without calling the provider or the ledger.
 - A rate for "today" that is not yet published (Frankfurter updates ~16:00 CET) resolves to the previous business day. Accept it; no provisional re-fetch.
 - Provider failure: the draft is not saved. Reply "Couldn't fetch the exchange rate, try again in a minute" with a `Retry` button on the draft.
-- Original currency must be trip or home currency. Text parser: `yen|¥|jpy` → trip currency when trip is JPY; `sgd|s$|\$` → home currency when home is SGD; bare number → trip currency. Generalise via a per-currency alias table. Anything else → "I can only record <TRIP> or <HOME> for this trip."
-- Conversion order for a **trip-currency** expense: shares in trip minor units → reconcile → `home_amount = round_half_even(trip_amount × rate)` → each `share_home = round_half_even(share_trip × rate)` → reconcile share_home to home_amount using the remainder rule (§5). For a **home-currency** expense: shares in home minor units directly; `trip_amount` and `share_trip` are informational, converted with the same rate and reconciled the same way.
+- Original currency must be trip or home currency. Text parser: `yen|¥|jpy` → trip currency when trip is JPY; `sgd|s$` → home currency when home is SGD; `$` → home currency when home is SGD or USD, else USD; bare number → trip currency. Generalise via a per-currency alias table. Anything else → "I can only record <TRIP> or <HOME> for this trip."
+- Conversion order for a **trip-currency** expense: shares in trip minor units → reconcile → `home_amount = round_half_even(trip_amount × rate)` → each `share_home = round_half_even(share_trip × rate)` → reconcile share_home to home_amount with the largest-remainder method (§5), ties by ascending User ID, payer last. Plain round-robin is not used here because it can move a share more than one minor unit from its exact value. For a **home-currency** expense: shares in home minor units directly; `trip_amount` and `share_trip` are informational, converted with the same rate and reconciled the same way.
 - Balances, `/balances`, `/settle`, Summary net figures: **home currency only**. Trip-currency figures are shown alongside where cheap, never used for settlement.
 
 ## 5. Splitting and rounding
@@ -56,7 +58,14 @@ Pure functions in `app/services/splitting.py`, no I/O, property-tested.
 - Deterministic, no LLM. Regex grammar over the message after stripping the bot mention. Recognised: amount with optional thousands separators and currency token before or after; optional leading "I paid"/"paid"; "for <desc>"; trailing `split (between|among|with) <names>` or `split everyone` or `split all`; trailing `paid by <name>`; "me" resolves to the sender.
 - A message is an expense candidate only if an amount is found **and** the message is ≤ 12 words. Otherwise the bot stays silent.
 - Description = leftover words, trimmed, title-cased; empty description → "Expense". Category from a keyword table (`taxi|uber|grab|train|jr|metro|bus` → transport, `ramen|dinner|lunch|breakfast|sushi|food|snack` → food, `coffee|beer|drinks|bar|sake` → drinks, `hotel|airbnb|ryokan` → accommodation, `ticket|museum|onsen|entry` → activities, `konbini|7-eleven|lawson|familymart|supermarket` → groceries, `shop|uniqlo|donki|mall` → shopping), default `other`.
-- Parse failure examples that must stay silent: "lol that ramen was so good", "who's paying for dinner". Must parse: all six examples in the brief.
+- Parse failure examples that must stay silent: "lol that ramen was so good", "who's paying for dinner". Must parse, for a JPY/SGD trip (the six examples from the original brief, kept here because the brief is not in the repo):
+  1. `1200 yen ramen` → ¥1,200, "Ramen", food
+  2. `I paid ¥4,850 for dinner` → ¥4,850, "Dinner", food
+  3. `taxi 3200` → ¥3,200, "Taxi", transport
+  4. `750 coffee` → ¥750, "Coffee", drinks
+  5. `¥6000 dinner split between me Amir and John` → ¥6,000, "Dinner", participants clause `me Amir and John` (resolved from Sprint 5)
+  6. `¥2400 taxi split everyone` → ¥2,400, "Taxi", participants clause `everyone`
+  Plus `S$12 grab` → S$12.00 original SGD, "Grab", transport.
 
 ## 7. Receipt reading (LLM)
 
@@ -90,7 +99,7 @@ Pure functions in `app/services/splitting.py`, no I/O, property-tested.
 ## 10. Persistence (Google Sheets)
 
 - `LedgerStore` interface with a `SheetsLedgerStore` implementation. All Sheets calls run in `asyncio.to_thread`. Retries: 3 with exponential backoff on 429/5xx; then the draft stays in `preview` with a `Retry save` button and an error line.
-- Commit = a single `values.batchUpdate` appending, in this order within the request: Line Items rows, Splits rows, the Expenses row last. Every reader joins through Expenses; orphan Splits/Line Items rows are ignored.
+- Commit = one spreadsheets.batchUpdate containing appendCells requests in this order: Line Items rows, Splits rows, the Expenses row last. A single batchUpdate is applied atomically. Every reader joins through Expenses; orphan Splits/Line Items rows are ignored.
 - IDs: Expense ID = the draft's ULID. Item ID = `"{expense_id}-{n:02d}"`.
 - Amounts are written as numbers in **major units** (yen as integer, SGD as 2-dp decimal) so the Sheet reads naturally; the code converts to minor units on read. Rate stored to 8 dp. Timestamps ISO 8601 with offset. Dates `YYYY-MM-DD`.
 - Telegram IDs are written as numbers and Joined as a real boolean (RAW input), so formula comparisons match.
@@ -109,24 +118,25 @@ Pure functions in `app/services/splitting.py`, no I/O, property-tested.
 
 Applied by `/settrip` when the Sheet is created; data and header strings in §10 are unchanged.
 - Tab order as shown to humans: `Summary`, `Expenses`, `Splits`, `Line Items`, `Users`, `Exchange Rates`, `Trip`, `Read Me`. `Summary` is index 0 so it opens by default.
-- Hidden columns (via `hideColumns`; formulas still work, users can unhide): Summary `User ID`; Expenses `Expense ID`, `Chat ID`, `Message ID`, `Created By User ID`, `Payer User ID`; Splits `Expense ID`, `Participant User ID`; Line Items `Expense ID`, `Item ID`, `Assigned User IDs`; Users `Telegram User ID`; Trip `Chat ID`.
-- Number formats: `<T> Amount`/`Share <T>`/`Amount <T>` use `#,##0` when the trip currency has 0 decimals else `#,##0.00`; `<H>` columns `#,##0.00`; `Rate` `0.00000000`; `Transaction Date` and `Rate Date` as dates `yyyy-mm-dd`.
-- Summary block titles, in order, each a bold row above its block: `Who owes whom` (with the note row `Positive = should receive money · Negative = owes money`), `Totals`, `By category`, `By day`, `By payer`.
+- Hidden columns (via `hideColumns`; formulas still work, users can unhide): Summary `User ID` (the LAST column of the per-person block, item 2 below); Expenses `Expense ID`, `Chat ID`, `Message ID`, `Created By User ID`, `Payer User ID`; Splits `Expense ID`, `Participant User ID`; Line Items `Expense ID`, `Item ID`, `Assigned User IDs`; Users `Telegram User ID`; Trip `Chat ID`.
+- `Transaction Date` and `Rate Date` are stored as plain text `yyyy-mm-dd`, not real Sheets date serials -- that sorts and groups correctly as text, so they carry no DATE number format.
+- Number formats (every other one unbounded downward, no `endRowIndex`, so appended rows are always covered): `<T> Amount`/`Share <T>`/`Amount <T>` use `#,##0` when the trip currency has 0 decimals else `#,##0.00`; `<H>` columns `#,##0.00`; `Rate` `0.00000000`.
+- Summary layout (also see §11): per-person block columns are `A Display Name | B Paid <H> | C Share <H> | D Net <H> | E User ID` (User ID last, hidden). Block titles, each a bold cell above its block: `Who owes whom` (row 1, with the note row `Positive = should receive money · Negative = owes money`) above the per-person block; `Totals` (column A) sharing one row with `By category` (column G), `By day` (column J), and `By payer` (column M) -- each of those three has its title cell then its `QUERY` directly below, so their dynamic row growth (2 columns wide each) never collides with the next block.
 - `Read Me` tab: one column, plain English, three lines per tab: what one row means, who writes it (the bot), and when to look at it. Ends with the line `Do not edit rows by hand; use /undo in Telegram.`
 
 ## 11. Summary tab
 
-Written once at `/settrip`, never rewritten. All formulas filter `Expenses!Status = "confirmed"` (joined via Expense ID for Splits). Blocks, top to bottom:
+Written once at `/settrip`, never rewritten. All formulas filter `Expenses!Status = "confirmed"` (joined via Expense ID for Splits). Blocks (see §10a for exact cell positions):
 
-1. Per person: User ID (join key, may be hidden) | Display Name | Paid <H> | Share <H> | Net <H> — up to 20 rows; `SUMIFS` over Expenses (paid) and a `SUMPRODUCT`/`QUERY` join over Splits (share). Net = Paid − Share.
-2. Group totals: Total <T>, Total <H>, expense count.
-3. By category (`QUERY … group by Category`), by day (`group by Transaction Date`), by payer.
+1. Per person ("Who owes whom"): Display Name | Paid <H> | Share <H> | Net <H> | User ID (join key, last column, hidden) — up to 20 rows; `SUMIFS` over Expenses (paid) and a `SUMPRODUCT`/`QUERY` join over Splits (share). Net = Paid − Share.
+2. Group totals ("Totals", column A/B): Total <T>, Total <H>, expense count.
+3. By category / by day / by payer (`QUERY … group by` Category / Transaction Date / Payer): side by side in separate column groups (G, J, M) starting on the same row as the "Totals" title, each 2 columns wide with a 1-column gap before the next group.
 Formulas must reference whole columns (`Expenses!A:W`) so appended rows are included.
 - Formulas that multiply arrays use header-free open ranges (`Splits!F2:F`); lookups may use full columns.
 
 ## 12. Commands
 
-`/start` (in group = `/join`; in private = help), `/help`, `/join`, `/settrip`, `/summary`, `/today`, `/mine`, `/recent` (last 5, oldest first), `/balances`, `/settle`, `/undo`. All read commands filter by chat id and `confirmed`. `/today` uses the trip timezone. Every reply is one compact message, HTML parse mode, amounts formatted with symbol and thousands separators, home currency first.
+`/start` (in group = `/join`; in private = help), `/help`, `/join`, `/settrip`, `/summary`, `/today`, `/mine`, `/recent` (last 5, oldest first), `/balances`, `/settle`, `/undo`. All read commands filter by chat id and `confirmed`. `/today` uses the trip timezone. Every reply is one compact message, HTML parse mode, amounts formatted with symbol and thousands separators. Amount order: per-expense lines show trip currency then home (`¥1,200 · S$10.42`); totals and balances show home currency first. An expense entered in the home currency is shown in the home currency only; the trip-currency equivalent is stored but not displayed.
 
 - `/balances`: per joined user, Paid / Share / Net in home currency; trip-currency equivalents in a second line at the expense-weighted rate are **not** shown (they would be misleading). Just home currency.
 - `/settle`: greedy debtor/creditor matching in home minor units: sort debtors and creditors by magnitude, repeatedly transfer `min(debt, credit)` from largest debtor to largest creditor. Produces at most n−1 transfers. Documented in README as near-minimal, not guaranteed minimal.
