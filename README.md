@@ -64,3 +64,44 @@ uv run pytest
 uv run ruff check .
 uvx pre-commit run --all-files
 ```
+
+## Deployment
+
+The bot runs on Fly.io as one machine, long-polling Telegram. **Stop the local bot before
+deploying, and never run both at once** — two pollers on the same bot token make Telegram
+return 409 and both go deaf.
+
+1. `fly auth login` (opens a browser; you already have flyctl installed).
+2. `fly launch --no-deploy --copy-config --name whopaid-bot --region sin`. Answer **No** to
+   Postgres, Redis and any other add-on.
+   If Fly says the name is taken, accept the name it suggests (or use `whopaid-bot-<4 chars>`);
+   `--copy-config` writes it into `fly.toml`, and every later command uses that name.
+3. `./scripts/set-fly-secrets.sh` . It prints the variable names it set, never the values.
+4. `./scripts/deploy.sh`. Wait for "deployed successfully".
+5. `fly status`. Exactly one machine, state `started`.
+6. `fly logs`. You see `whopaid started`.
+7. Close your laptop. From your phone, send `/help` and `500 coffee` in the test group, confirm
+   it. Reopen the laptop; the Sheet has the row.
+8. `fly machine list` shows one machine. If two, run `fly scale count 1`.
+9. Make a trivial change with the agent, commit it, `./scripts/deploy.sh` again, confirm `/help`
+   shows the new version.
+
+### Updating
+
+Run `./scripts/deploy.sh` again. Confirm `/help` in the test group shows the new version.
+
+### Stopping after the trip
+
+- `fly scale count 0` stops the machine (and billing) but keeps the app and its config, so you
+  can scale back up later.
+- `fly apps destroy <app name from fly.toml>` removes the app entirely.
+- Either way, the Sheets keep everything — expenses, balances, and settlement live in Google
+  Sheets, not on the machine.
+- `LOG_LEVEL` isn't set by `./scripts/set-fly-secrets.sh` (it isn't a secret). If you ever need
+  it, set it by hand: `fly secrets set LOG_LEVEL=DEBUG`.
+
+### Why no port
+
+The bot uses long polling: it calls out to Telegram, nothing listens for incoming connections.
+There is no `[http_service]` in `fly.toml` and no Fly health check configured. The `whopaid
+started` line in `fly logs` is the health signal — if it's there, the bot is up.

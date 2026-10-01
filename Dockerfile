@@ -9,6 +9,8 @@ COPY app/ app/
 RUN uv sync --frozen --no-dev
 
 FROM python:3.12-slim
+ARG BOT_VERSION=dev
+ENV BOT_VERSION=$BOT_VERSION
 RUN useradd --create-home --shell /bin/bash app
 WORKDIR /app
 COPY --from=builder --chown=app:app /app/.venv /app/.venv

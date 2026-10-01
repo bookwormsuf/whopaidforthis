@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import signal
 
 import httpx
 from telegram import Update
@@ -71,15 +72,28 @@ _KNOWN_COMMANDS = {
     "undo",
 }
 
-BOT_VERSION = "0.1.0"
+# Pinned explicitly (sprint 3) rather than left to PTB's platform-dependent default, so
+# SIGTERM is guaranteed to stop polling and exit within fly.toml's kill_timeout.
+STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGABRT)
 
 
 async def _post_init(application: Application) -> None:
-    """Log a startup line once the bot's own identity is known.
+    """Log the one startup line once the bot's own identity is known (sprint 3 pin).
 
     Spec §1: the bot's username is read from getMe at startup, never hardcoded.
+    Exactly one INFO line, message `whopaid started`, fields `bot_username` and
+    `version`. Nothing else about config goes in this line.
     """
-    logger.info("bot started as @%s", application.bot.username)
+    deps: Deps = application.bot_data["deps"]
+    logger.info(
+        "whopaid started",
+        extra={"bot_username": application.bot.username, "version": deps.bot_version},
+    )
+
+
+async def _post_shutdown(application: Application) -> None:
+    """Log the one shutdown line once polling has stopped (sprint 3 pin)."""
+    logger.info("whopaid stopped")
 
 
 async def _unbound_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -128,7 +142,13 @@ async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> 
 
 def build_application(token: str, deps: Deps) -> Application:
     """Build the PTB Application with every Sprint 1 handler registered."""
-    application = ApplicationBuilder().token(token).post_init(_post_init).build()
+    application = (
+        ApplicationBuilder()
+        .token(token)
+        .post_init(_post_init)
+        .post_shutdown(_post_shutdown)
+        .build()
+    )
     application.bot_data["deps"] = deps
     application.add_error_handler(_error_handler)
 
@@ -173,15 +193,18 @@ def run(settings: Settings) -> None:
     ledger = SheetsLedgerStore(
         service_account_info=service_account_info,
         control_sheet_id=settings.whopaid_control_sheet_id,
-        bot_version=BOT_VERSION,
+        bot_version=settings.bot_version,
     )
     rates = RateService(FrankfurterProvider(http_client), ledger)
     deps = Deps(
         ledger=ledger,
         currencies=FrankfurterCurrencyCatalog(http_client),
         service_account_email=service_account_info["client_email"],
-        bot_version=BOT_VERSION,
+        bot_version=settings.bot_version,
         draft_service=DraftService(ledger, rates, InMemoryDraftStore(), Dedup()),
     )
     application = build_application(settings.telegram_bot_token.get_secret_value(), deps)
-    application.run_polling(allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY])
+    application.run_polling(
+        allowed_updates=[Update.MESSAGE, Update.CALLBACK_QUERY],
+        stop_signals=STOP_SIGNALS,
+    )

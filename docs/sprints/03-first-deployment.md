@@ -12,7 +12,7 @@ Any feature work.
 
 ## Sprint pins
 - App name `whopaid-bot` (Fly names are global; fall back to `whopaid-bot-<4 random chars>` if taken). Region `sin`.
-- `fly.toml`: `[processes] app = "python -m app"`, no `[http_service]` section (nothing listens on a port), `auto_stop_machines = false`, `auto_start_machines = true`, `min_machines_running = 1`, VM `shared-cpu-1x`, 256 MB.
+- `fly.toml`: one `shared-cpu-1x` machine, 256 MB, region `sin`, no volume. No `[http_service]` or `[[services]]` section (nothing listens), so Fly's auto-stop never applies; deploys use `strategy = "immediate"` and `fly deploy --ha=false` so there is exactly one machine and never two pollers. Secrets via `fly secrets import` fed from `.env` by `scripts/set-fly-secrets.sh`.
 - Exactly one machine, ever. Two machines polling the same token make Telegram return 409 and both go deaf. README states: stop the local bot before deploying and never run both.
 - On SIGTERM the bot stops polling and exits within 10 s.
 - Startup logs one line `whopaid started` with bot username and version; nothing else about config.
@@ -23,7 +23,7 @@ Any feature work.
 Make sure Sprint 2 is signed off and the local bot is stopped.
 
 ## Agent builds
-`fly.toml`, Dockerfile build-arg for version, shutdown handling, README section "Deployment" with the exact commands below and a "Stopping after the trip" subsection, `scripts/set-fly-secrets.sh` that reads `.env` and calls `fly secrets set` for each variable (so you never paste secrets by hand).
+`fly.toml`, Dockerfile build-arg for version, shutdown handling, README section "Deployment" with the exact commands below and a "Stopping after the trip" subsection, `scripts/set-fly-secrets.sh` that reads `.env` and feeds `fly secrets import` with every variable (so you never paste secrets by hand).
 
 ## Tests required
 Shutdown handler unit test; version string present in `/help`.
@@ -31,13 +31,14 @@ Shutdown handler unit test; version string present in `/help`.
 ## After: your checklist
 1. `fly auth login` (opens a browser; you already have flyctl installed).
 2. `fly launch --no-deploy --copy-config --name whopaid-bot --region sin`. Answer **No** to Postgres, Redis and any other add-on.
+   If Fly says the name is taken, accept the name it suggests (or use `whopaid-bot-<4 chars>`); `--copy-config` writes it into `fly.toml`, and every later command uses that name.
 3. `./scripts/set-fly-secrets.sh` . It prints the variable names it set, never the values.
-4. `fly deploy`. Wait for "deployed successfully".
+4. `./scripts/deploy.sh`. Wait for "deployed successfully".
 5. `fly status`. Exactly one machine, state `started`.
 6. `fly logs`. You see `whopaid started`.
 7. Close your laptop. From your phone, send `/help` and `500 coffee` in the test group, confirm it. Reopen the laptop; the Sheet has the row.
 8. `fly machine list` shows one machine. If two, run `fly scale count 1`.
-9. Make a trivial change with the agent, `fly deploy` again, confirm `/help` shows the new version.
+9. Make a trivial change with the agent, commit it, `./scripts/deploy.sh` again, confirm `/help` shows the new version.
 
 ## Exit criteria
 - [ ] Bot answered with laptop closed

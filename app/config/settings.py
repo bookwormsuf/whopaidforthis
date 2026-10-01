@@ -28,6 +28,10 @@ class Settings(BaseSettings):
         description="ID of the control Sheet holding the Bindings tab. Required."
     )
     log_level: LogLevel = "INFO"
+    bot_version: str = Field(
+        default="dev",
+        description="Short git SHA baked into the image via the BOT_VERSION build arg.",
+    )
 
     @field_validator("log_level", mode="before")
     @classmethod

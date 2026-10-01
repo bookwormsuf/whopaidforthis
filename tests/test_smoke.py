@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import signal
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -12,7 +13,7 @@ import pytest
 from pydantic import ValidationError
 from telegram import Update
 
-from app.bot.app import _error_handler, build_application
+from app.bot.app import STOP_SIGNALS, _error_handler, build_application
 from app.bot.deps import Deps
 from app.bot.handlers.basic import HELP_TEXT, help_command
 from app.config.settings import Settings, load_settings
@@ -201,15 +202,76 @@ def test_json_formatter_redacts_secret_from_message_and_exception() -> None:
     assert "[REDACTED]" in line
 
 
+def _record(**extra: object) -> logging.LogRecord:
+    record = logging.LogRecord(
+        name="app.test",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg="whopaid started",
+        args=(),
+        exc_info=None,
+    )
+    for key, value in extra.items():
+        setattr(record, key, value)
+    return record
+
+
+def test_json_formatter_includes_allowed_extra_field() -> None:
+    formatter = JsonFormatter()
+    record = _record(bot_username="whopaidforthisbot", version="abc1234")
+
+    parsed = json.loads(formatter.format(record))
+
+    assert parsed["bot_username"] == "whopaidforthisbot"
+    assert parsed["version"] == "abc1234"
+
+
+def test_json_formatter_drops_disallowed_extra_field() -> None:
+    formatter = JsonFormatter()
+    record = _record(chat_id=-100, secret_token="should-not-appear")
+
+    parsed = json.loads(formatter.format(record))
+
+    assert "chat_id" not in parsed
+    assert "secret_token" not in parsed
+
+
+def test_json_formatter_redacts_secret_in_an_allowed_extra_field() -> None:
+    secret = "123456:fake"
+    formatter = JsonFormatter(redact=[secret])
+    record = _record(version=secret)
+
+    line = formatter.format(record)
+
+    assert secret not in line
+    assert "[REDACTED]" in line
+
+
 async def test_help_command_replies_with_html_and_mentions_balances() -> None:
     update = MagicMock()
     update.message.reply_text = AsyncMock()
     context = MagicMock()
+    context.application.bot_data = {"deps": _fake_deps()}
 
     await help_command(update, context)
 
-    update.message.reply_text.assert_awaited_once_with(HELP_TEXT, parse_mode="HTML")
+    reply_text = update.message.reply_text.await_args.args[0]
+    assert reply_text.startswith(HELP_TEXT)
+    assert update.message.reply_text.await_args.kwargs == {"parse_mode": "HTML"}
     assert "/balances" in HELP_TEXT
+
+
+async def test_help_command_footer_shows_bot_version() -> None:
+    update = MagicMock()
+    update.message.reply_text = AsyncMock()
+    context = MagicMock()
+    context.application.bot_data = {"deps": make_deps(InMemoryLedgerStore(), bot_version="abc1234")}
+
+    await help_command(update, context)
+
+    reply_text = update.message.reply_text.await_args.args[0]
+    assert "whopaid abc1234" in reply_text
 
 
 def test_build_application_registers_error_handler() -> None:
@@ -248,3 +310,20 @@ async def test_error_handler_handles_missing_update_gracefully() -> None:
     context.error = LedgerUnavailable("boom")
 
     await _error_handler(None, context)  # must not raise
+
+
+def test_build_application_registers_post_init_and_post_shutdown_hooks() -> None:
+    application = build_application("123456:fake-token", _fake_deps())
+    assert application.post_init is not None
+    assert application.post_shutdown is not None
+
+
+async def test_post_shutdown_hook_logs_whopaid_stopped(caplog: pytest.LogCaptureFixture) -> None:
+    application = build_application("123456:fake-token", _fake_deps())
+    with caplog.at_level(logging.INFO, logger="app.bot.app"):
+        await application.post_shutdown(application)
+    assert any(record.message == "whopaid stopped" for record in caplog.records)
+
+
+def test_stop_signals_includes_sigterm() -> None:
+    assert signal.SIGTERM in STOP_SIGNALS

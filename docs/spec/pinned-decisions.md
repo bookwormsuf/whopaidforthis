@@ -154,7 +154,7 @@ Every failure path ends in one of: silent ignore (non-expense text), a one-line 
 
 ## 15. Deployment
 
-- Fly.io, one `shared-cpu-1x` machine, no volume. `fly.toml` must set `auto_stop_machines = false` and `min_machines_running = 1` (long polling must not be stopped). Secrets via `fly secrets set`. README gives the exact commands, including how to stop the machine after the trip.
+- Fly.io, one `shared-cpu-1x` machine, 256 MB, region `sin`, no volume. `fly.toml` has no `[http_service]` or `[[services]]` section (nothing listens), so Fly's auto-stop never applies; deploys use `strategy = "immediate"` and `fly deploy --ha=false` so there is exactly one machine and never two pollers. Secrets via `fly secrets import` fed from `.env` by `scripts/set-fly-secrets.sh`. README gives the exact commands, including how to stop the machine after the trip.
 - Dockerfile: multi-stage `uv` build, non-root user, `CMD ["python", "-m", "app"]`.
 
 ## 16. Phases

@@ -5,6 +5,7 @@ from __future__ import annotations
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from app.bot.deps import get_deps
 from app.bot.handlers.join import join_command
 
 HELP_TEXT = (
@@ -29,9 +30,15 @@ HELP_TEXT = (
 )
 
 
+def _help_text(context: ContextTypes.DEFAULT_TYPE) -> str:
+    """HELP_TEXT with the running build's version appended (sprint 3 pin)."""
+    version = get_deps(context).bot_version
+    return f"{HELP_TEXT}\n\nwhopaid {version}"
+
+
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Reply with the one-screen summary of what the bot does."""
-    await update.message.reply_text(HELP_TEXT, parse_mode="HTML")
+    await update.message.reply_text(_help_text(context), parse_mode="HTML")
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -40,4 +47,4 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if chat is not None and chat.type in ("group", "supergroup"):
         await join_command(update, context)
         return
-    await update.message.reply_text(HELP_TEXT, parse_mode="HTML")
+    await update.message.reply_text(_help_text(context), parse_mode="HTML")

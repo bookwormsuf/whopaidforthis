@@ -13,7 +13,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 0 Accounts, keys, skeleton | written | done | green (10) | 2026-09-29, findings fixed | 2026-09-29 | 2026-09-29 | Sprint 0 closed. Next: run sprint 1 / agent |
 | 1 Trip binding and users | written | done | green (112) | 2026-09-29, findings fixed | 2026-09-29, all six pass | 2026-09-29 | Sprint 1 closed. Next: run sprint 2 / agent |
 | 2 Text expenses, just me | written (+ carry-overs) | done | green (236) | 2026-09-29, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 2 closed. Next: run sprint 3 / agent |
-| 3 First deployment | written | not started | – | – | – | – | Run sprint 3 / agent |
+| 3 First deployment | written | done | green (247) | 2026-10-01, findings fixed | – | – | Do the sprint 3 checklist / Sufyan |
 | 4 Receipt photos, total only | written | not started | – | – | – | – | after sprint 3 |
 | 5 Splitting and balances | written | not started | – | – | – | – | after sprint 4; needs tester B |
 | 6 Item claiming | written | not started | – | – | – | – | after sprint 5; needs tester B |
@@ -114,3 +114,66 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Performed by: Sufyan, recorded by Claude.
 - Disposition: Sufyan said "sign off sprint 2" after all nine checklist steps passed. Sprint 2 closed.
 - Next action / owner: run sprint 3 (first deployment to Fly.io) / agent.
+
+### 2026-10-01 — Sprint 3 build
+
+- Performed by: Claude (build agent).
+- Scope and reason: Sprint 3 "Agent builds" list per `docs/sprints/03-first-deployment.md`: `fly.toml`,
+  Dockerfile version build-arg, startup/shutdown logging, deploy and secrets scripts, README
+  Deployment section.
+- Evidence / outputs: `fly.toml` (new); `Dockerfile` (`ARG`/`ENV BOT_VERSION`); `app/config/settings.py`
+  (`bot_version` field, env `BOT_VERSION`, default `dev`); `app/bot/app.py` (`BOT_VERSION` constant
+  removed, `STOP_SIGNALS` module constant, `_post_init` logs `whopaid started` with
+  `bot_username`/`version` fields, new `_post_shutdown` logs `whopaid stopped`, `stop_signals`
+  passed explicitly to `run_polling`); `app/logging_setup.py` (`JsonFormatter` emits only an
+  allowlisted set of `extra=` fields, written before the core fields so an extra can never
+  overwrite them; `default=str` removed so a non-serialisable extra raises); `app/bot/handlers/
+  basic.py` (`/help` footer appends `whopaid <version>`); `scripts/export_fly_secrets.py` (new --
+  reads `.env` with `dotenv.dotenv_values`, derives the required-variable list from `Settings`,
+  validates with `load_settings()` first); `scripts/deploy.sh` (`--ha=false`), `scripts/
+  set-fly-secrets.sh` (rewritten to feed `fly secrets import` from the Python exporter),
+  `scripts/README.md` (all three scripts executable); `README.md` Deployment/Updating/
+  Stopping-after-the-trip/Why-no-port sections; `.dockerignore` (added `scripts`, `fly.toml`,
+  `.env.*`); `docs/spec/pinned-decisions.md` §15 and `docs/sprints/03-first-deployment.md` sprint
+  pins and checklist (rewritten to match the no-`[http_service]`/`--ha=false` design and the
+  `fly secrets import` flow); `tests/test_smoke.py` (post_init/post_shutdown hook tests,
+  `STOP_SIGNALS` test, allowlisted-extra/dropped-extra/redacted-extra logging tests, `/help`
+  version-footer test); `tests/test_export_fly_secrets.py` (new).
+- Checks: `uv run pytest -q` 247 passed. `uv run ruff check .` and `uv run ruff format --check .`
+  clean. `uvx pre-commit run --all-files` clean (gitleaks, ruff check, ruff format). `bash -n`
+  clean on both shell scripts. `set-fly-secrets.sh --dry-run` run against a throwaway fake `.env`
+  in the scratchpad dir (via a `WHOPAID_ENV_FILE` override plus fake `TELEGRAM_BOT_TOKEN` etc. as
+  real env vars, so `Settings()` validation never touched the real `.env` either): printed only
+  `would set: NAME` lines for the four required variables, nothing for `LOG_LEVEL`/`BOT_VERSION`/
+  an empty var, no value anywhere. A stub `fly` binary on `PATH` confirmed the full (non-dry-run)
+  path: `Setting: NAME` lines and `Set 4 secrets.` print only after `fly secrets import` exits 0,
+  and nothing prints if it exits 1. Docker was running, so built the real image (`docker build
+  --build-arg BOT_VERSION=testsha123`); confirmed `BOT_VERSION=testsha123` in the container's
+  environment via `docker run ... env`, then removed the test image. `fly config validate` needs
+  `fly auth login`, which this machine doesn't have; not run.
+- Review (`/review`, four axes) fixed: the hand-rolled bash `.env` parser (quote-stripping,
+  skip-empty logic) replaced with the app's own `dotenv.dotenv_values` plus a required-names list
+  derived from `Settings`, and secrets now flow through `fly secrets import` fed by one pipe
+  rather than being assembled into a bash array, so a value never has to pass through argv or get
+  typed into a terminal; `scripts/deploy.sh` gained `--ha=false` because Fly adds a stopped
+  standby machine for a process group with no services, which the sprint pin's "exactly one
+  machine, ever" didn't account for; `JsonFormatter` moved from emitting every `extra=` key to an
+  explicit allowlist, with core fields written after extras so a colliding extra can't overwrite
+  `ts`/`level`/`logger`/`msg`/`exc`, and `default=str` removed so a bad extra fails a test instead
+  of silently stringifying; the stop-signal tuple moved into a `STOP_SIGNALS` module constant with
+  its own test; spec §15 amended (the auto-stop/auto-start/min-machines keys never applied without
+  a services block, so they're gone, replaced by the no-`[http_service]` + `--ha=false` + `fly
+  scale count 1` story); the README Deployment section and the sprint doc's own checklist had
+  drifted (README was missing the laptop-closed phone-test step and the trivial-change-redeploy
+  step) and are now the same nine steps verbatim; the app-name-taken fallback is now written into
+  both the sprint doc and the README instead of only the sprint pins.
+- Dropped below threshold or kept as-is: the exact wording of the `[deploy]` strategy comment
+  (bluegreen-vs-rolling explanation) was reworded for accuracy rather than restructured further;
+  `scripts/deploy.sh`'s dirty-working-tree refusal, not explicitly requested by this round, was
+  kept since nothing asked for its removal and it's still correct.
+- Not done: none of the "After: your checklist" steps (Fly login, launch, deploy, live run) —
+  those need Sufyan's Fly login per the sprint doc.
+- Reviewed by / disposition: agent build, then agent self-review against findings handed back by
+  the coordinator (not an independent `/review` run); still awaiting Sufyan's checklist.
+- Next action / owner: run `/review` on this sprint's changes (per CLAUDE.md, "End every sprint
+  with `/review`... before handing over the manual checklist"), then the sprint 3 checklist / Sufyan.

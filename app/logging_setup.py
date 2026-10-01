@@ -12,6 +12,12 @@ import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
+# Allowlist of `extra=` keys a log call may attach as structured fields. Anything else
+# passed via `extra={...}` is dropped rather than emitted, so a careless `extra=` can't
+# leak an unreviewed field into the logs. Grepped from every `extra=` call site in app/
+# (currently only app/bot/app.py's startup line) plus bot_username/version themselves.
+EXTRA_FIELDS = frozenset({"bot_username", "version"})
+
 
 class JsonFormatter(logging.Formatter):
     """Formats each log record as one JSON object per line, redacting given secrets."""
@@ -21,14 +27,20 @@ class JsonFormatter(logging.Formatter):
         self._redact = [value for value in redact if value]
 
     def format(self, record: logging.LogRecord) -> str:
-        payload = {
-            "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
-            "level": record.levelname,
-            "logger": record.name,
-            "msg": record.getMessage(),
-        }
+        # Extras go in first so the core fields set below always win a key collision:
+        # an extra can never overwrite ts/level/logger/msg/exc.
+        payload: dict[str, object] = {}
+        for key, value in record.__dict__.items():
+            if key in EXTRA_FIELDS:
+                payload[key] = value
+        payload["ts"] = datetime.fromtimestamp(record.created, tz=UTC).isoformat()
+        payload["level"] = record.levelname
+        payload["logger"] = record.name
+        payload["msg"] = record.getMessage()
         if record.exc_info:
             payload["exc"] = self.formatException(record.exc_info)
+        # No `default=str`: a non-serialisable extra should raise so it's caught in
+        # tests, not silently stringified into the logs.
         line = json.dumps(payload)
         for secret in self._redact:
             line = line.replace(secret, "[REDACTED]")

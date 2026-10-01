@@ -1,0 +1,34 @@
+# Fly.io config for whopaid-bot (sprint 3, spec §15, docs/sprints/03-first-deployment.md).
+#
+# Deliberately no [http_service] and no [[services]] section: the bot only polls
+# Telegram outbound (long polling), nothing listens on a port, so there is nothing to
+# proxy or health-check. Fly only reads auto_stop_machines / auto_start_machines /
+# min_machines_running from inside a [http_service] or [[services]] block (verified
+# against https://fly.io/docs/reference/configuration/ on 2026-10-01); with neither
+# section present here, those keys do not apply and Fly never auto-stops this machine
+# on its own. The one-machine guarantee comes from two things instead: `scripts/
+# deploy.sh` always passes `fly deploy --ha=false` (without it, Fly adds a stopped
+# standby machine for a process group with no services, which is not "one machine,
+# ever"), and `fly scale count 1` (checklist step 8) as the repair step if that drifts.
+app = "whopaid-bot"
+primary_region = "sin"
+kill_timeout = 10
+kill_signal = "SIGTERM"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[processes]
+  app = "python -m app"
+
+[deploy]
+  # Only "bluegreen" starts the new machine before stopping the old one; "rolling"
+  # updates machines in place, one at a time. "immediate" is kept anyway: with a
+  # single machine it is the simplest strategy, and bluegreen needs health checks
+  # this app cannot have (nothing listens on a port). Two pollers on one Telegram
+  # token at once make Telegram return 409 and both go deaf.
+  strategy = "immediate"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
