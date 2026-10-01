@@ -1,17 +1,24 @@
 """The draft flow: `Draft`, `DraftStore`, `InMemoryDraftStore`, `DraftService`.
 
-Spec references: pinned-decisions §8, sprint 2 pins. This sprint only exercises
-`Just me` -> `preview` -> `Confirm`/`Cancel`, plus the rate-fetch-failure path and
-its `Retry` button. `Everyone`/`Choose people`/participants/split-method steps are
-Sprint 5.
+Spec references: pinned-decisions §3, §8, sprint 2, 4 and 5 pins. States:
 
-`Draft` is source-neutral: its money/description/category fields do not depend on
-`ParsedExpense` (a future receipt-based draft can populate the same fields). Every
-draft-flow method returns the updated `Draft` or raises a typed error
-(`DraftExpired`, `NotInitiator`, `AlreadySaved`, `AlreadyCancelled`,
-`DuplicateMessage`, `DraftError`); rendering a `Draft` into card text/keyboard is a
-pure bot-layer concern (`app/bot/render/draft.py::render_draft`), not this module's
--- this module must not import `app.bot` or build telegram objects.
+- `detected` -> `Just me` (preview) / `Everyone` / `Choose people` (`participants`);
+- `resolve_name`: a "paid by"/"split between" name matched zero or several joined
+  users, so the card asks "Who did you mean by 'Jon'?" (never guesses, spec §3);
+- `participants` -> `Next` -> `split_method` (`Equally` / `Custom`), or straight to
+  `preview` when exactly one person is selected;
+- `custom`: the initiator replies with `<name> <amount>` lines until the amounts add
+  up, then `Confirm` -> `preview`;
+- `preview` -> `Confirm` (commit) / `Edit` (back to `participants`) / `Cancel`;
+- receipt-only states `choose_total`, `reconcile`, `manual_amount` (sprint 4) and
+  `rate_failed`.
+
+`Draft` is source-neutral. Every draft-flow method returns the updated `Draft` or
+raises a typed error (`DraftExpired`, `NotInitiator`, `AlreadySaved`,
+`AlreadyCancelled`, `DuplicateMessage`, `DraftToast`, `DraftError`); rendering a
+`Draft` into card text/keyboard is a pure bot-layer concern
+(`app/bot/render/draft.py::render_draft`), not this module's -- this module must not
+import `app.bot` or build telegram objects.
 """
 
 from __future__ import annotations
@@ -29,17 +36,26 @@ from app.models.exchange_rate import ExchangeRate
 from app.models.expense import Expense, ExpenseSplit
 from app.models.receipt import CandidateTotal, Receipt, ReceiptLineItem
 from app.models.trip import Trip
-from app.services.conversion import both_amounts, reciprocal_rate
+from app.services.conversion import both_amounts
+from app.services.currencies import symbol_for
 from app.services.exchange_rates import RateService, RateUnavailable
-from app.services.expense_parser import ParsedExpense
+from app.services.expense_parser import ParsedExpense, parse_custom_line
 from app.services.ledger_store import LedgerStore, LedgerUnavailable
+from app.services.names import Person, is_everyone, resolve_name, resolve_names
 from app.services.receipt_parser import (
     line_item_sums,
     needs_reconciliation,
     reconcile,
     select_total,
 )
-from app.services.splitting import convert_shares, split_equal
+from app.services.splitting import (
+    Custom,
+    Equal,
+    Items,
+    Percent,
+    shares_in_both_currencies,
+    split_shares,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +63,10 @@ _DRAFT_TTL = timedelta(minutes=30)
 
 DraftState = Literal[
     "detected",
+    "resolve_name",
+    "participants",
+    "split_method",
+    "custom",
     "choose_total",
     "reconcile",
     "manual_amount",
@@ -84,6 +104,32 @@ class AlreadyCancelled(DraftError):
     pass
 
 
+class DraftToast(DraftError):
+    """A press that cannot proceed yet; `text` is shown to the presser as a toast
+    and the draft is unchanged (e.g. `Next` with nobody selected).
+    """
+
+    def __init__(self, text: str) -> None:
+        super().__init__(text)
+        self.text = text
+
+
+NOBODY_SELECTED_TEXT = "Pick at least one person"
+CUSTOM_NOT_BALANCED_TEXT = "The amounts don't add up yet"
+
+
+@dataclass(frozen=True)
+class PendingName:
+    """A "paid by"/"split between" name that matched zero or several joined users.
+    `candidate_ids` are the buttons offered: the matches, or everyone joined when
+    nothing matched.
+    """
+
+    role: Literal["payer", "participant"]
+    token: str
+    candidate_ids: tuple[int, ...]
+
+
 class DuplicateMessage(DraftError):
     """The (chat_id, message_id) this draft would be started from was already
     committed; the caller should stay silent (spec §10 dedup).
@@ -93,10 +139,10 @@ class DuplicateMessage(DraftError):
 @dataclass(frozen=True)
 class Draft:
     """Source-neutral: `amount_minor`/`currency`/`description`/`category`/`merchant`
-    describe the expense itself, independent of whether it came from text (this
-    sprint) or a receipt (later). `pending_participants_text`/`pending_payer_text`
-    carry the text parser's un-resolved "split between ..."/"paid by ..." clauses
-    for Sprint 5's name resolution; unused this sprint.
+    describe the expense itself, independent of whether it came from text or a
+    receipt. `pending_participants_text`/`pending_payer_text` carry the text
+    parser's "split between ..."/"paid by ..." clauses until they are resolved,
+    which happens once the rate is known (so a `rate_failed` draft keeps them).
     """
 
     draft_id: str
@@ -119,9 +165,20 @@ class Draft:
     payer_username: str | None
 
     line_items: list[ReceiptLineItem] = field(default_factory=list)
-    split: object = None  # a splitting.SplitSpec; Equal() once chosen, Sprint 5+
+    split: Equal | Custom | Items | Percent | None = None  # set once a method is chosen
 
     participant_ids: list[int] = field(default_factory=list)
+    # Joined trip users, snapshotted when a participant choice is made (spec §3:
+    # Everyone is evaluated at the moment the button is pressed). Rendering and the
+    # Splits rows take names from here.
+    people: tuple[Person, ...] = ()
+    # Name resolution (sprint 5): the names still to ask about, the participants
+    # already resolved, and which participant clause the message had.
+    name_queue: tuple[PendingName, ...] = ()
+    resolved_participant_ids: tuple[int, ...] = ()
+    participants_clause: Literal["names", "everyone"] | None = None
+    # The last custom-split reply's problems, shown on the card until the next reply.
+    custom_error: str | None = None
     rate: ExchangeRate | None = None
     trip_amount_minor: int = 0
     home_amount_minor: int = 0
@@ -145,6 +202,44 @@ class Draft:
     reading_receipt: bool = False
 
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+def person_for(draft: Draft, user_id: int) -> Person:
+    """The snapshotted person, else the payer or initiator as recorded on the draft."""
+    for person in draft.people:
+        if person.user_id == user_id:
+            return person
+    if user_id == draft.payer_id:
+        return Person(user_id, draft.payer_name, draft.payer_username)
+    if user_id == draft.initiator_id:
+        return Person(user_id, draft.initiator_name, None)
+    return Person(user_id, f"User {user_id}", None)
+
+
+def original_total(draft: Draft, trip: Trip) -> int:
+    """The expense amount in its original currency, minor units."""
+    if draft.currency == trip.trip_currency:
+        return draft.trip_amount_minor
+    return draft.home_amount_minor
+
+
+def draft_shares(draft: Draft, trip: Trip) -> dict[int, tuple[int, int]]:
+    """Each participant's `(share_trip, share_home)` for the draft's split, in
+    participant order. Both columns sum exactly to the expense amounts (spec §4/§5).
+    """
+    spec = draft.split or Equal()
+    shares = split_shares(spec, original_total(draft, trip), draft.participant_ids, draft.payer_id)
+    trip_shares, home_shares = shares_in_both_currencies(
+        shares,
+        original_currency=draft.currency,
+        trip_currency=trip.trip_currency,
+        home_currency=trip.home_currency,
+        trip_to_home_rate=draft.rate.rate if draft.rate is not None else Decimal(1),
+        trip_amount_minor=draft.trip_amount_minor,
+        home_amount_minor=draft.home_amount_minor,
+        payer_id=draft.payer_id,
+    )
+    return {pid: (trip_shares[pid], home_shares[pid]) for pid in shares}
 
 
 class DraftStore(Protocol):
@@ -309,57 +404,34 @@ class DraftService:
             participant_ids=[initiator_id],
             **common,
         )
-        await self._drafts.put(draft)
-        return draft
+        return await self._apply_clauses(draft, trip)
 
     async def choose_just_me(self, draft_id: str, presser_id: int) -> Draft:
         draft = await self._get_active(draft_id, presser_id)
         if draft.state != "detected":
             raise DraftError(f"cannot choose Just me from state {draft.state}")
-        updated = replace(draft, state="preview", participant_ids=[draft.initiator_id])
+        updated = replace(
+            draft, state="preview", participant_ids=[draft.initiator_id], split=Equal()
+        )
         await self._drafts.put(updated)
         return updated
 
     def _build_expense(self, draft: Draft, trip: Trip) -> Expense:
-        if draft.currency == trip.trip_currency:
-            trip_shares = split_equal(
-                draft.trip_amount_minor, draft.participant_ids, draft.payer_id
+        spec = draft.split or Equal()
+        shares = draft_shares(draft, trip)
+        splits = []
+        for pid, (share_trip, share_home) in shares.items():
+            person = person_for(draft, pid)
+            splits.append(
+                ExpenseSplit(
+                    user_id=pid,
+                    username=person.username,
+                    display_name=person.display_name,
+                    share_trip_minor=share_trip,
+                    share_home_minor=share_home,
+                    split_method=spec.kind,
+                )
             )
-            home_shares = convert_shares(
-                trip_shares,
-                draft.rate.rate if draft.rate is not None else Decimal(1),
-                trip.trip_currency,
-                trip.home_currency,
-                draft.home_amount_minor,
-                draft.payer_id,
-            )
-        else:
-            home_shares = split_equal(
-                draft.home_amount_minor, draft.participant_ids, draft.payer_id
-            )
-            rate_for_shares = (
-                reciprocal_rate(draft.rate.rate) if draft.rate is not None else Decimal(1)
-            )
-            trip_shares = convert_shares(
-                home_shares,
-                rate_for_shares,
-                trip.home_currency,
-                trip.trip_currency,
-                draft.trip_amount_minor,
-                draft.payer_id,
-            )
-
-        splits = [
-            ExpenseSplit(
-                user_id=pid,
-                username=draft.payer_username if pid == draft.payer_id else None,
-                display_name=draft.payer_name if pid == draft.payer_id else str(pid),
-                share_trip_minor=trip_shares[pid],
-                share_home_minor=home_shares[pid],
-                split_method="equal",
-            )
-            for pid in draft.participant_ids
-        ]
 
         rate_value = draft.rate.rate if draft.rate is not None else Decimal(0)
         rate_date = draft.rate.rate_date if draft.rate is not None else draft.transaction_date
@@ -386,7 +458,7 @@ class DraftService:
             rate=rate_value,
             rate_date=rate_date,
             source_type=draft.source_type,
-            split_method="equal",
+            split_method=spec.kind,
             status="confirmed",
             cancelled_at=None,
             notes=None,
@@ -454,8 +526,286 @@ class DraftService:
             trip_amount_minor=trip_amount_minor,
             home_amount_minor=home_amount_minor,
         )
+        return await self._apply_clauses(updated, trip)
+
+    # -- Participants, split method, names (sprint 5, spec §3/§8) -------------
+
+    async def _joined_people(self, trip: Trip, draft: Draft) -> tuple[Person, ...]:
+        """Everyone joined right now (spec §3), sorted by name for stable buttons.
+        The initiator and the payer are always included: sending an expense joins
+        the sender, and a payer is only ever set from a joined user.
+        """
+        users = await self._ledger.list_users(trip, joined_only=True)
+        people = {u.user_id: Person.from_trip_user(u) for u in users}
+        for pid in (draft.initiator_id, draft.payer_id):
+            people.setdefault(pid, person_for(draft, pid))
+        return tuple(sorted(people.values(), key=lambda p: (p.display_name.casefold(), p.user_id)))
+
+    async def _apply_clauses(self, draft: Draft, trip: Trip) -> Draft:
+        """Resolves the message's "paid by" and "split ..." clauses (spec §3, §6).
+        An exact payer replaces the sender; "split everyone"/"split all" selects
+        Everyone; named participants are pre-selected and the participants card is
+        skipped. Any name that is not one exact match is queued for the "Who did you
+        mean" card. A draft with neither clause stays `detected`.
+        """
+        payer_text = draft.pending_payer_text
+        participants_text = draft.pending_participants_text
+        if not payer_text and not participants_text:
+            await self._drafts.put(draft)
+            return draft
+
+        people = await self._joined_people(trip, draft)
+        everyone_ids = tuple(p.user_id for p in people)
+        draft = replace(
+            draft, people=people, pending_payer_text=None, pending_participants_text=None
+        )
+        queue: list[PendingName] = []
+        if payer_text:
+            match = resolve_name(payer_text, people, draft.initiator_id)
+            if match.status == "exact":
+                draft = self._with_payer(draft, match.user_ids[0])
+            else:
+                queue.append(PendingName("payer", payer_text, match.user_ids or everyone_ids))
+
+        resolved: list[int] = []
+        clause: Literal["names", "everyone"] | None = None
+        if participants_text:
+            if is_everyone(participants_text):
+                clause = "everyone"
+            else:
+                clause = "names"
+                for match in resolve_names(participants_text, people, draft.initiator_id):
+                    if match.status == "exact":
+                        resolved.append(match.user_ids[0])
+                    else:
+                        queue.append(
+                            PendingName("participant", match.token, match.user_ids or everyone_ids)
+                        )
+        draft = replace(
+            draft,
+            name_queue=tuple(queue),
+            resolved_participant_ids=tuple(resolved),
+            participants_clause=clause,
+        )
+        return await self._advance_names(draft)
+
+    @staticmethod
+    def _with_payer(draft: Draft, payer_id: int) -> Draft:
+        person = person_for(draft, payer_id)
+        return replace(
+            draft,
+            payer_id=person.user_id,
+            payer_name=person.display_name,
+            payer_username=person.username,
+        )
+
+    async def _advance_names(self, draft: Draft) -> Draft:
+        """After a name is settled: ask the next one, or apply the participants
+        clause, or fall back to the `detected` card.
+        """
+        if draft.name_queue:
+            updated = replace(draft, state="resolve_name")
+            await self._drafts.put(updated)
+            return updated
+        if draft.participants_clause == "everyone":
+            ids = [p.user_id for p in draft.people]
+        elif draft.participants_clause == "names":
+            ids = list(dict.fromkeys(draft.resolved_participant_ids))
+        else:
+            ids = []
+        draft = replace(draft, participants_clause=None, resolved_participant_ids=())
+        if not ids:
+            updated = replace(draft, state="detected")
+            await self._drafts.put(updated)
+            return updated
+        return await self._after_participants(replace(draft, participant_ids=ids))
+
+    async def _after_participants(self, draft: Draft) -> Draft:
+        """With exactly one participant there is nothing to split: straight to the
+        preview (sprint 5 pin); otherwise ask the split method.
+        """
+        if len(draft.participant_ids) == 1:
+            updated = replace(draft, state="preview", split=Equal())
+        else:
+            updated = replace(draft, state="split_method", split=None)
         await self._drafts.put(updated)
         return updated
+
+    async def _to_participants(self, draft: Draft, trip: Trip, selected: list[int]) -> Draft:
+        people = await self._joined_people(trip, draft)
+        known = {p.user_id for p in people}
+        updated = replace(
+            draft,
+            state="participants",
+            people=people,
+            participant_ids=[pid for pid in dict.fromkeys(selected) if pid in known],
+            split=None,
+            custom_error=None,
+            name_queue=(),
+            resolved_participant_ids=(),
+            participants_clause=None,
+        )
+        await self._drafts.put(updated)
+        return updated
+
+    async def choose_everyone(self, draft_id: str, presser_id: int) -> Draft:
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "detected":
+            raise DraftError(f"cannot choose Everyone from state {draft.state}")
+        trip = await self._trip_for(draft)
+        people = await self._joined_people(trip, draft)
+        return await self._after_participants(
+            replace(draft, people=people, participant_ids=[p.user_id for p in people])
+        )
+
+    async def choose_people(self, draft_id: str, presser_id: int) -> Draft:
+        """`Choose people`: the toggle card, initiator pre-selected (sprint 5 pin)."""
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "detected":
+            raise DraftError(f"cannot choose people from state {draft.state}")
+        trip = await self._trip_for(draft)
+        return await self._to_participants(draft, trip, [draft.initiator_id])
+
+    async def toggle_participant(self, draft_id: str, presser_id: int, user_id: int) -> Draft:
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "participants":
+            raise DraftError(f"cannot toggle from state {draft.state}")
+        if user_id not in {p.user_id for p in draft.people}:
+            raise DraftError("not one of the people on this card")
+        selected = set(draft.participant_ids) ^ {user_id}
+        ordered = [p.user_id for p in draft.people if p.user_id in selected]
+        updated = replace(draft, participant_ids=ordered)
+        await self._drafts.put(updated)
+        return updated
+
+    async def participants_next(self, draft_id: str, presser_id: int) -> Draft:
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "participants":
+            raise DraftError(f"cannot press Next from state {draft.state}")
+        if not draft.participant_ids:
+            raise DraftToast(NOBODY_SELECTED_TEXT)
+        return await self._after_participants(draft)
+
+    async def choose_equal(self, draft_id: str, presser_id: int) -> Draft:
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "split_method":
+            raise DraftError(f"cannot choose Equally from state {draft.state}")
+        updated = replace(draft, state="preview", split=Equal())
+        await self._drafts.put(updated)
+        return updated
+
+    async def choose_custom(self, draft_id: str, presser_id: int) -> Draft:
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "split_method":
+            raise DraftError(f"cannot choose Custom from state {draft.state}")
+        updated = replace(draft, state="custom", split=Custom({}), custom_error=None)
+        await self._drafts.put(updated)
+        return updated
+
+    async def apply_custom_reply(
+        self, draft_id: str, presser_id: int, trip: Trip, text: str
+    ) -> Draft:
+        """The initiator's reply to the custom card: one `<name> <amount>` per line
+        (sprint 5 pin). Each matched line sets that person's amount, replacing an
+        earlier one; a joined user not yet selected is added. Lines that cannot be
+        used are listed on the card; the rest still apply.
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "custom" or not isinstance(draft.split, Custom):
+            raise DraftError(f"cannot take custom amounts in state {draft.state}")
+        amounts = dict(draft.split.amounts_by_participant)
+        selected = list(draft.participant_ids)
+        problems: list[str] = []
+        for line in (raw.strip() for raw in text.splitlines()):
+            if not line:
+                continue
+            parsed = parse_custom_line(line, trip.trip_currency, trip.home_currency, draft.currency)
+            if parsed is None:
+                problems.append(f"Couldn't read '{line}'")
+                continue
+            if parsed.currency != draft.currency:
+                problems.append(f"Use {symbol_for(draft.currency)} amounts for this expense")
+                continue
+            match = resolve_name(parsed.name_text, draft.people, draft.initiator_id)
+            if match.status != "exact":
+                problems.append(f"Who is '{parsed.name_text}'?")
+                continue
+            pid = match.user_ids[0]
+            amounts[pid] = parsed.amount_minor
+            if pid not in selected:
+                selected.append(pid)
+        updated = replace(
+            draft,
+            split=Custom(amounts),
+            participant_ids=selected,
+            custom_error="; ".join(problems) or None,
+        )
+        await self._drafts.put(updated)
+        return updated
+
+    async def finish_custom(self, draft_id: str, presser_id: int) -> Draft:
+        """`Confirm` on the custom card: only when the amounts add up exactly. People
+        left at zero are dropped from the participants (sprint 5 pin).
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "custom" or not isinstance(draft.split, Custom):
+            raise DraftError(f"cannot finish custom from state {draft.state}")
+        trip = await self._trip_for(draft)
+        amounts = draft.split.amounts_by_participant
+        if sum(amounts.values()) != original_total(draft, trip):
+            raise DraftToast(CUSTOM_NOT_BALANCED_TEXT)
+        kept = [pid for pid in draft.participant_ids if amounts.get(pid, 0) > 0]
+        updated = replace(
+            draft,
+            state="preview",
+            participant_ids=kept,
+            split=Custom({pid: amounts[pid] for pid in kept}),
+            custom_error=None,
+        )
+        await self._drafts.put(updated)
+        return updated
+
+    async def edit(self, draft_id: str, presser_id: int) -> Draft:
+        """`Edit` on the preview: back to the participants card with the current
+        participants selected; amount, description and payer are kept (spec §8).
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "preview":
+            raise DraftError(f"cannot edit from state {draft.state}")
+        trip = await self._trip_for(draft)
+        return await self._to_participants(draft, trip, list(draft.participant_ids))
+
+    async def pick_name(self, draft_id: str, presser_id: int, user_id: int) -> Draft:
+        """A candidate button on the "Who did you mean" card."""
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "resolve_name" or not draft.name_queue:
+            raise DraftError(f"cannot pick a name from state {draft.state}")
+        pending, rest = draft.name_queue[0], draft.name_queue[1:]
+        if user_id not in pending.candidate_ids:
+            raise DraftError("not one of the offered names")
+        if pending.role == "payer":
+            draft = self._with_payer(draft, user_id)
+        else:
+            draft = replace(
+                draft, resolved_participant_ids=(*draft.resolved_participant_ids, user_id)
+            )
+        return await self._advance_names(replace(draft, name_queue=rest))
+
+    async def name_unsure(self, draft_id: str, presser_id: int) -> Draft:
+        """`Not sure, choose people`: the participants card, with the initiator and
+        whoever was already resolved selected (everyone, for "split everyone").
+        Asked about the payer, the payer stays the sender; any names still queued
+        are dropped, since the person now picks participants by hand.
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "resolve_name" or not draft.name_queue:
+            raise DraftError(f"cannot answer Not sure from state {draft.state}")
+        trip = await self._trip_for(draft)
+        if draft.participants_clause == "everyone":
+            selected = [p.user_id for p in draft.people]
+        else:
+            selected = [draft.initiator_id, *draft.resolved_participant_ids]
+        return await self._to_participants(draft, trip, selected)
 
     # -- Receipt flow (sprint 4, spec §7/§8) ---------------------------------
 

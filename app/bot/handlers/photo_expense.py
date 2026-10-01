@@ -246,11 +246,13 @@ async def handle_manual_amount_reply(update: Update, context: ContextTypes.DEFAU
         logger.exception("manual_amount_reply: draft %s error", draft.draft_id)
         return True
 
-    await _edit_card(context, chat.id, updated, trip)
+    await edit_draft_card(context, chat.id, updated, trip)
     return True
 
 
-async def _edit_card(context: ContextTypes.DEFAULT_TYPE, chat_id: int, draft: Draft, trip) -> None:
+async def edit_draft_card(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, draft: Draft, trip
+) -> None:
     text, keyboard = render_draft(draft, trip)
     try:
         await context.bot.edit_message_text(

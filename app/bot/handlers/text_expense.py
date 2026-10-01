@@ -17,6 +17,7 @@ from telegram.ext import ContextTypes, filters
 from app.bot.deps import get_deps
 from app.bot.formatting import unsupported_currency_text
 from app.bot.handlers.photo_expense import handle_manual_amount_reply, read_receipt_photo
+from app.bot.handlers.split import handle_custom_split_reply
 from app.bot.render.draft import render_draft
 from app.models.user import TripUser
 from app.services.drafts import (
@@ -27,6 +28,7 @@ from app.services.drafts import (
     AlreadySaved,
     DraftError,
     DraftExpired,
+    DraftToast,
     DuplicateMessage,
     NotInitiator,
 )
@@ -79,6 +81,9 @@ async def text_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     # that draft's amount, not a new expense (sprint 4). Any other reply falls
     # through and parses as usual.
     if await handle_manual_amount_reply(update, context):
+        return
+    # Likewise a reply to a custom-split card carries `<name> <amount>` lines.
+    if await handle_custom_split_reply(update, context):
         return
 
     try:
@@ -224,6 +229,32 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 draft = await deps.draft_service.retry_unreadable(draft_id, presser.id)
         elif action == "manual":
             draft = await deps.draft_service.request_manual_amount(draft_id, presser.id)
+        elif action == "everyone":
+            draft = await deps.draft_service.choose_everyone(draft_id, presser.id)
+        elif action == "choose":
+            draft = await deps.draft_service.choose_people(draft_id, presser.id)
+        elif action in ("toggle", "pick"):
+            try:
+                user_id = int(_arg)
+            except ValueError:
+                await answer()
+                return
+            if action == "toggle":
+                draft = await deps.draft_service.toggle_participant(draft_id, presser.id, user_id)
+            else:
+                draft = await deps.draft_service.pick_name(draft_id, presser.id, user_id)
+        elif action == "unsure":
+            draft = await deps.draft_service.name_unsure(draft_id, presser.id)
+        elif action == "next":
+            draft = await deps.draft_service.participants_next(draft_id, presser.id)
+        elif action == "equal":
+            draft = await deps.draft_service.choose_equal(draft_id, presser.id)
+        elif action == "custom":
+            draft = await deps.draft_service.choose_custom(draft_id, presser.id)
+        elif action == "customok":
+            draft = await deps.draft_service.finish_custom(draft_id, presser.id)
+        elif action == "edit":
+            draft = await deps.draft_service.edit(draft_id, presser.id)
         else:
             await answer()
             return
@@ -242,6 +273,9 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     except AlreadyCancelled:
         await answer(ALREADY_CANCELLED_TEXT)
+        return
+    except DraftToast as exc:
+        await answer(exc.text)
         return
     except LedgerUnavailable:
         logger.exception("draft %s: ledger unavailable", draft_id)

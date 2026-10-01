@@ -94,14 +94,23 @@ async def test_detected_to_justme_to_preview_to_confirm_exact_card_texts() -> No
         "Rate 1 JPY = 0.00810 SGD (19 Sep)\n\n"
         "Who should share this?"
     )
-    assert [b.text for row in markup.inline_keyboard for b in row] == ["Just me", "Cancel"]
+    assert [b.text for row in markup.inline_keyboard for b in row] == [
+        "Just me",
+        "Everyone",
+        "Choose people",
+        "Cancel",
+    ]
     assert markup.inline_keyboard[0][0].callback_data == f"{draft.draft_id}:justme:-"
 
     preview = await service.choose_just_me(draft.draft_id, presser_id=42)
     assert preview.state == "preview"
     preview_text, preview_markup = render_draft(preview, trip)
-    assert preview_text == "<b>Ramen</b> — ¥1,200 (S$9.72)\nPaid by Ada\n\nAda — ¥1,200"
-    assert [b.text for row in preview_markup.inline_keyboard for b in row] == ["Confirm", "Cancel"]
+    assert preview_text == "<b>Ramen</b> — ¥1,200 (S$9.72)\nPaid by Ada\n\nAda 💳 — ¥1,200 · S$9.72"
+    assert [b.text for row in preview_markup.inline_keyboard for b in row] == [
+        "Confirm",
+        "Edit",
+        "Cancel",
+    ]
 
     committed = await service.confirm(draft.draft_id, presser_id=42)
     assert committed.state == "committed"
@@ -277,7 +286,7 @@ async def test_home_currency_card_texts_show_home_only() -> None:
 
     preview = await service.choose_just_me(draft.draft_id, presser_id=42)
     preview_text, _ = render_draft(preview, trip)
-    assert preview_text == "<b>Ramen</b> — S$12.00\nPaid by Ada\n\nAda — S$12.00"
+    assert preview_text == "<b>Ramen</b> — S$12.00\nPaid by Ada\n\nAda 💳 — S$12.00"
 
     committed = await service.confirm(draft.draft_id, presser_id=42)
     saved_text, saved_markup = render_draft(committed, trip)
@@ -292,7 +301,7 @@ async def test_trip_currency_card_texts_unchanged_pair_form() -> None:
 
     preview = await service.choose_just_me(draft.draft_id, presser_id=42)
     preview_text, _ = render_draft(preview, trip)
-    assert preview_text == "<b>Ramen</b> — ¥1,200 (S$9.72)\nPaid by Ada\n\nAda — ¥1,200"
+    assert preview_text == "<b>Ramen</b> — ¥1,200 (S$9.72)\nPaid by Ada\n\nAda 💳 — ¥1,200 · S$9.72"
 
     committed = await service.confirm(draft.draft_id, presser_id=42)
     saved_text, _ = render_draft(committed, trip)

@@ -1,16 +1,20 @@
-"""Pure splitting functions, no I/O. Spec references: pinned-decisions §5.
+"""Pure splitting functions, no I/O. Spec references: pinned-decisions §4, §5.
 
-`split_custom` and `split_items` are Sprint 5/6 concerns; only `split_equal` is fully
-implemented and used this sprint (`Just me`, n=1). `SplitSpec` is scaffolded now so
-`Percent` can be added later without touching callers.
+`split_equal` and `split_custom` are used from Sprint 5; `split_items` is Sprint 6.
+Split inputs are a `SplitSpec` union (`Equal`, `Custom`, `Items`, plus the
+placeholder `Percent`), discriminated by `kind`, so a new method is one more member
+and one more branch in `split_shares`, without touching callers.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_EVEN, Decimal
-from typing import Literal
+from typing import Annotated, Literal
 
+from pydantic import Field, TypeAdapter
+
+from app.services.conversion import reciprocal_rate
 from app.services.currencies import decimals_for
 
 
@@ -42,34 +46,101 @@ def split_equal(total_minor: int, participant_ids: list[int], payer_id: int) -> 
 
 @dataclass(frozen=True)
 class Equal:
-    pass
+    kind: Literal["equal"] = "equal"
 
 
 @dataclass(frozen=True)
 class Custom:
+    """Amounts in the expense's original currency, minor units."""
+
     amounts_by_participant: dict[int, int] = field(default_factory=dict)
+    kind: Literal["custom"] = "custom"
 
 
 @dataclass(frozen=True)
 class Items:
     claims: dict[str, list[int]] = field(default_factory=dict)  # item_id -> claimant IDs
+    kind: Literal["items"] = "items"
 
 
 @dataclass(frozen=True)
 class Percent:
     weights: dict[int, float] = field(default_factory=dict)  # placeholder, not implemented
+    kind: Literal["percent"] = "percent"
 
 
-SplitSpec = Equal | Custom | Items | Percent
+SplitSpec = Annotated[Equal | Custom | Items | Percent, Field(discriminator="kind")]
+
+# Serialises and restores a `SplitSpec` (e.g. for logs or a future persistent draft
+# store); `kind` picks the member.
+SPLIT_SPEC_ADAPTER: TypeAdapter[Equal | Custom | Items | Percent] = TypeAdapter(SplitSpec)
 
 SplitMethod = Literal["equal", "custom", "items"]
 
 
+class SplitError(ValueError):
+    """A split that cannot be made (custom amounts off, an unsupported method)."""
+
+
 def split_custom(amounts_by_participant: dict[int, int], total_minor: int) -> dict[int, int]:
-    """Reject unless the sum equals `total_minor` exactly."""
+    """Reject unless the sum equals `total_minor` exactly. Negative amounts are
+    rejected too: a share is never below zero.
+    """
+    if any(amount < 0 for amount in amounts_by_participant.values()):
+        raise SplitError("custom split amounts must not be negative")
     if sum(amounts_by_participant.values()) != total_minor:
-        raise ValueError("custom split amounts do not sum to the total")
+        raise SplitError("custom split amounts do not sum to the total")
     return dict(amounts_by_participant)
+
+
+def split_shares(
+    spec: Equal | Custom | Items | Percent,
+    total_minor: int,
+    participant_ids: list[int],
+    payer_id: int,
+) -> dict[int, int]:
+    """Shares of `total_minor` (in the expense's original currency) per `spec`."""
+    if isinstance(spec, Equal):
+        return split_equal(total_minor, participant_ids, payer_id)
+    if isinstance(spec, Custom):
+        return split_custom(spec.amounts_by_participant, total_minor)
+    raise SplitError(f"split method {spec.kind} is not available yet")
+
+
+def shares_in_both_currencies(
+    original_shares: dict[int, int],
+    *,
+    original_currency: str,
+    trip_currency: str,
+    home_currency: str,
+    trip_to_home_rate: Decimal,
+    trip_amount_minor: int,
+    home_amount_minor: int,
+    payer_id: int,
+) -> tuple[dict[int, int], dict[int, int]]:
+    """`(trip_shares, home_shares)` from shares in the original currency (spec §4):
+    the other currency's shares are converted per share and reconciled to that
+    currency's total with `convert_shares`, so both sums are exact.
+    """
+    if original_currency == trip_currency:
+        home_shares = convert_shares(
+            original_shares,
+            trip_to_home_rate,
+            trip_currency,
+            home_currency,
+            home_amount_minor,
+            payer_id,
+        )
+        return dict(original_shares), home_shares
+    trip_shares = convert_shares(
+        original_shares,
+        reciprocal_rate(trip_to_home_rate),
+        home_currency,
+        trip_currency,
+        trip_amount_minor,
+        payer_id,
+    )
+    return trip_shares, dict(original_shares)
 
 
 def _exact_converted(amount_minor: int, from_ccy: str, to_ccy: str, rate: Decimal) -> Decimal:

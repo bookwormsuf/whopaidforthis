@@ -25,8 +25,9 @@ HELP_TEXT = (
     "/undo — cancel your last expense\n"
     "/help — this message\n\n"
     "You can also just type an amount and a description, like "
-    "<code>1200 yen ramen</code>, or send a photo of a receipt.\n\n"
-    "/mine, /balances and /settle are coming in a later sprint."
+    "<code>1200 yen ramen</code>, or send a photo of a receipt. Add "
+    "<code>split everyone</code>, <code>split between me Amir</code> or "
+    "<code>paid by Amir</code> to share it."
 )
 
 

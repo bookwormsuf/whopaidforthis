@@ -4,8 +4,8 @@ Recognises: an amount (optional thousands separators, optional decimals) with a
 currency token before, after, or attached (`¥1,200`, `S$12`, `12 sgd`, `1200 yen`,
 `$12`), a leading `I paid`/`paid`, a leading `for` before the description, and
 trailing `split (between|among|with) <names>` / `split everyone` / `split all` and
-`paid by <name>` clauses (captured but not resolved this sprint -- name resolution
-is a later sprint's concern, spec §3).
+`paid by <name>` clauses. The clauses are captured as text here; resolving the names
+to trip users is `app.services.names` (spec §3), done by the draft flow.
 """
 
 from __future__ import annotations
@@ -29,9 +29,12 @@ _WORD_AMOUNT_RE = re.compile(
 )
 
 _LEADING_PAID_RE = re.compile(r"^(i\s+paid|paid)\s+", re.IGNORECASE)
-_PAID_BY_RE = re.compile(r"\bpaid\s+by\s+(.+)$", re.IGNORECASE)
+# The two trailing clauses, in either order: each runs to the end of the message or
+# up to the start of the other one.
+_PAID_BY_RE = re.compile(r"\bpaid\s+by\s+(.+?)(?=\s+split\s|$)", re.IGNORECASE)
 _SPLIT_RE = re.compile(
-    r"\bsplit\s+(?:(?:between|among|with)\s+(.+)|(everyone|all))$", re.IGNORECASE
+    r"\bsplit\s+(?:(?:between|among|with)\s+(.+?)|(everyone|all))(?=\s+paid\s+by\s|$)",
+    re.IGNORECASE,
 )
 
 _CATEGORY_KEYWORDS: list[tuple[re.Pattern[str], Category]] = [
@@ -77,20 +80,17 @@ def _strip_bot_mention(text: str, bot_username: str) -> str:
 
 
 def _extract_trailing(text: str) -> tuple[str, str | None, str | None]:
-    working = text
-    payer_text: str | None = None
-    participants_text: str | None = None
-
-    match = _PAID_BY_RE.search(working)
-    if match:
-        payer_text = match.group(1).strip()
-        working = working[: match.start()].strip()
-
-    match = _SPLIT_RE.search(working)
-    if match:
-        participants_text = (match.group(1) or match.group(2) or "").strip()
-        working = working[: match.start()].strip()
-
+    """Splits off the trailing `paid by <name>` and `split ...` clauses, which may
+    come in either order (`... paid by Ada split between me and Ada`).
+    """
+    payer_match = _PAID_BY_RE.search(text)
+    split_match = _SPLIT_RE.search(text)
+    payer_text = payer_match.group(1).strip() if payer_match else None
+    participants_text = (
+        (split_match.group(1) or split_match.group(2) or "").strip() if split_match else None
+    )
+    starts = [m.start() for m in (payer_match, split_match) if m is not None]
+    working = text[: min(starts)].strip() if starts else text
     return working, participants_text, payer_text
 
 
@@ -140,10 +140,11 @@ class _LocatedAmount:
 
 
 def _locate_amount(
-    words: list[str], trip_currency: str, home_currency: str
+    words: list[str], trip_currency: str, home_currency: str, bare_currency: str | None = None
 ) -> _LocatedAmount | None:
     """The one amount/currency-token rule (spec §4/§6), shared by `parse_expense`,
-    `parse_amount_only` and `parse_caption_description`.
+    `parse_amount_only`, `parse_caption_description` and `parse_custom_line`. A bare
+    number is in `bare_currency`, which defaults to the trip currency.
     """
     for index, word in enumerate(words):
         match = _WORD_AMOUNT_RE.match(word)
@@ -172,7 +173,7 @@ def _locate_amount(
 
         if currency_token == _UNSUPPORTED:
             return _LocatedAmount(0, _UNSUPPORTED, frozenset(consumed))
-        currency = currency_token if currency_token is not None else trip_currency
+        currency = currency_token if currency_token is not None else bare_currency or trip_currency
         decimals = decimals_for(currency)
         value = Decimal(number_str.replace(",", ""))
         amount_minor = int((value * (Decimal(10) ** decimals)).to_integral_value(ROUND_HALF_EVEN))
@@ -220,6 +221,34 @@ def parse_amount_only(text: str, trip_currency: str, home_currency: str) -> tupl
     if located is None or located.currency == _UNSUPPORTED:
         return None
     return located.amount_minor, located.currency
+
+
+@dataclass(frozen=True)
+class CustomLine:
+    """One line of a custom split reply, e.g. `Amir 2000` (sprint 5 pin)."""
+
+    name_text: str
+    amount_minor: int
+    currency: str
+
+
+def parse_custom_line(
+    line: str, trip_currency: str, home_currency: str, expense_currency: str
+) -> CustomLine | None:
+    """`<name> <amount>` (either order), using the same amount/currency rule as
+    `parse_expense`, except that a bare number is in the expense's own currency
+    (`Me 6` on an S$12 expense is S$6). `None` if the line has no amount, no name,
+    or a currency that isn't the trip's or the home currency.
+    """
+    words = line.strip().split()
+    located = _locate_amount(words, trip_currency, home_currency, expense_currency)
+    if located is None or located.currency == _UNSUPPORTED:
+        return None
+    name_text = " ".join(w for i, w in enumerate(words) if i not in located.consumed).strip()
+    name_text = name_text.strip(":-–—").strip()
+    if not name_text:
+        return None
+    return CustomLine(name_text, located.amount_minor, located.currency)
 
 
 def parse_expense(

@@ -12,7 +12,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from app.models.category import Category
-from app.models.expense import Expense, ExpenseRecord, ExpenseSplit
+from app.models.expense import Expense, ExpenseRecord, ExpenseSplit, SplitRecord
 from app.models.receipt import ReceiptLineItem
 from app.services.conversion import both_amounts
 from app.services.currencies import decimals_for
@@ -79,6 +79,19 @@ def split_to_row(
         _amount_number(split.share_home_minor, home_currency),
         split.split_method,
     ]
+
+
+def row_to_split_record(row: list[object], trip_currency: str, home_currency: str) -> SplitRecord:
+    """Inverse of `split_to_row`."""
+    return SplitRecord(
+        expense_id=str(row[0]),
+        user_id=int(row[1]),
+        username=(str(row[2]) or None),
+        display_name=str(row[3]),
+        share_trip_minor=_minor_from_number(row[4], trip_currency),
+        share_home_minor=_minor_from_number(row[5], home_currency),
+        split_method=str(row[6]),  # type: ignore[arg-type]
+    )
 
 
 def line_item_to_row(item: ReceiptLineItem, expense: Expense, item_index: int) -> list[object]:

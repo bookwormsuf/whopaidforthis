@@ -628,6 +628,25 @@ async def test_list_expenses_round_trips() -> None:
     assert records[0].status == "confirmed"
 
 
+async def test_list_splits_round_trips() -> None:
+    store = _store()
+    expenses_ws, splits_ws = _expenses_and_splits_worksheets()
+    spreadsheet = FakeSpreadsheet([expenses_ws, splits_ws])
+    store._open = AsyncMock(return_value=spreadsheet)  # type: ignore[method-assign]
+
+    trip = _trip_jpy_sgd()
+    expense = _expense()
+    await store.append_expense(trip, expense)
+
+    records = await store.list_splits(trip)
+    assert [(r.expense_id, r.user_id) for r in records] == [
+        (expense.expense_id, s.user_id) for s in expense.splits
+    ]
+    assert [(r.share_trip_minor, r.share_home_minor) for r in records] == [
+        (s.share_trip_minor, s.share_home_minor) for s in expense.splits
+    ]
+
+
 async def test_list_expenses_includes_message_id_for_dedup() -> None:
     """DraftService now owns the dedup lazy-load via list_expenses (item 14); there
     is no dedicated list_message_keys method any more.

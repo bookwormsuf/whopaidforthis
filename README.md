@@ -79,9 +79,60 @@ messages, each producing its own draft — there's no "this is one receipt acros
 merging in this sprint.
 
 Line items are extracted and stored in the Sheet's `Line Items` tab for your own reference,
-but aren't yet splittable by item — everyone pays an equal share of the receipt total this
-sprint (per-item claiming is a later sprint). Item amounts are always shown in the trip
+but aren't yet splittable by item — a receipt is shared equally or with custom amounts, like
+a text expense (per-item claiming is a later sprint). Item amounts are always shown in the trip
 currency; for a receipt paid in the home currency they are converted at that expense's rate.
+
+## Splitting model
+
+Every expense has one **payer** (who handed over the money) and one or more **participants**
+(who owe a share). The draft card asks who should share it:
+
+- **Just me** — the sender is the only participant.
+- **Everyone** — every trip user who has run `/join`, counted at the moment you tap it.
+- **Choose people** — one toggle per joined user (you start selected), then **Next**.
+
+With more than one participant the card asks how to split:
+
+- **Equally** — everyone gets `total // n`; the leftover minor units (yen, cents) go one each
+  to participants in Telegram user ID order, skipping the payer while anyone else is left.
+- **Custom** — reply to the card with one line per person, e.g. `Amir 2000`. The card shows
+  each person's amount and `Remaining: ¥0 ✅` once they add up exactly; **Confirm** only
+  appears then. Anyone you don't mention gets nothing and is dropped.
+
+The preview lists every share in both currencies, payer marked 💳, with **Confirm**, **Edit**
+(back to choosing people, amount kept) and **Cancel**. Only the person who sent the expense can
+press its buttons; anyone else gets "Only <name> can edit this".
+
+You can skip the buttons in the message itself:
+
+- `6000 yen dinner split everyone` (or `split all`)
+- `6000 yen dinner split between me Amir and John` (also `among`, `with`)
+- `3000 yen lunch paid by Amir` — the payer doesn't have to be a participant
+
+Names match a joined user's username, first name or full name, ignoring case; `me` is you. If a
+name matches nobody or more than one person, the card asks "Who did you mean by 'Jon'?" with
+buttons — it never guesses.
+
+Shares are computed in the currency the expense was entered in, then converted to the other
+currency share by share and reconciled with the largest-remainder method, so shares always add
+up exactly to the expense amount in both currencies.
+
+## Settlement logic
+
+Balances and settling up are in the home currency only, each expense converted at its own
+day's rate (see `docs/adr/0001`). For each person: **paid** is the total of expenses they paid,
+**share** the total of their shares, and **net** = paid − share (positive means they're owed).
+Cancelled expenses don't count.
+
+- `/balances` — paid, share and net for everyone with any activity, most owed first.
+- `/mine` — your own three numbers and your last 3 expenses with your share of each.
+- `/settle` — who pays whom, one line per transfer, e.g. `Amir → Sufyan S$31.20`, or
+  "All square 🎉".
+
+`/settle` is greedy: it repeatedly has the person who owes most pay the person owed most, as
+much as one of them needs. That takes at most one transfer fewer than the number of people with a
+balance. It is near-minimal, not guaranteed minimal.
 
 ## LLM API setup
 

@@ -10,7 +10,7 @@ from datetime import date, datetime
 from typing import Protocol
 
 from app.models.exchange_rate import ExchangeRate
-from app.models.expense import Expense, ExpenseRecord
+from app.models.expense import Expense, ExpenseRecord, SplitRecord
 from app.models.receipt import ReceiptLineItem
 from app.models.trip import Trip
 from app.models.user import TripUser
@@ -70,6 +70,8 @@ class LedgerStore(Protocol):
     ) -> None: ...
 
     async def list_expenses(self, trip: Trip) -> list[ExpenseRecord]: ...
+
+    async def list_splits(self, trip: Trip) -> list[SplitRecord]: ...
 
     async def cancel_expense(
         self, trip: Trip, expense_id: str, cancelled_at: datetime, note_suffix: str
@@ -194,6 +196,23 @@ class InMemoryLedgerStore:
         expenses = self._expenses.get(trip.sheet_id, {})
         order = self._expense_order.get(trip.sheet_id, [])
         return [_expense_to_record(expenses[expense_id]) for expense_id in order]
+
+    async def list_splits(self, trip: Trip) -> list[SplitRecord]:
+        expenses = self._expenses.get(trip.sheet_id, {})
+        order = self._expense_order.get(trip.sheet_id, [])
+        return [
+            SplitRecord(
+                expense_id=expense_id,
+                user_id=split.user_id,
+                username=split.username,
+                display_name=split.display_name,
+                share_trip_minor=split.share_trip_minor,
+                share_home_minor=split.share_home_minor,
+                split_method=split.split_method,
+            )
+            for expense_id in order
+            for split in expenses[expense_id].splits
+        ]
 
     async def cancel_expense(
         self, trip: Trip, expense_id: str, cancelled_at: datetime, note_suffix: str

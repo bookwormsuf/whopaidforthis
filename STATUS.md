@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-10-01 (sprint 4 signed off)
+Updated: 2026-10-01 (sprint 5 built and reviewed)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -15,7 +15,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 2 Text expenses, just me | written (+ carry-overs) | done | green (236) | 2026-09-29, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 2 closed. Next: run sprint 3 / agent |
 | 3 First deployment | written | done | green (247) | 2026-10-01, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 3 closed. Next: run sprint 4 / agent |
 | 4 Receipt photos, total only | written (+ §7/§10 amendments) | done | green (302) | 2026-10-01, findings fixed | 2026-10-01, all eight pass | 2026-10-01 | Sprint 4 closed. Next: run sprint 5 / agent |
-| 5 Splitting and balances | written | not started | – | – | – | – | after sprint 4; needs tester B |
+| 5 Splitting and balances | written | done | green (363) | 2026-10-01, findings fixed | – | – | Merge and deploy, then the single-person checklist / Sufyan; two-person steps deferred to Sprint 7 |
 | 6 Item claiming | written | not started | – | – | – | – | after sprint 5; needs tester B |
 | 7 Hardening and go-live | written | not started | – | – | – | – | after sprint 6; needs all friends |
 
@@ -367,3 +367,48 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Next action / owner: run sprint 5 (splitting and balances; automated multi-user tests in place
   of a second tester, per the 2026-10-01 decision) / agent.
 
+### 2026-10-01 — Sprint 5 build and review
+
+- Performed by: Claude, in a cloud session.
+- Scope and reason: Sprint 5 "Agent builds" list, per `docs/sprints/05-splitting-and-balances.md`,
+  under the 2026-10-01 decision (automated multi-user tests in place of a second tester).
+- Evidence / outputs:
+  - `app/services/names.py`: name resolution by username, first name or full name, ignoring
+    case; `me` is the sender.
+  - `app/services/settlements.py`: balances and greedy settlement, pure.
+  - `app/services/splitting.py`: `SplitSpec` discriminated by `kind`, `split_shares`, and shares
+    in both currencies.
+  - Draft states `resolve_name`, `participants`, `split_method`, `custom`, plus `Edit`.
+  - `app/bot/keyboards/split.py`, `app/bot/handlers/split.py` (custom-split replies) and
+    `app/bot/handlers/balances.py` (`/balances`, `/mine`, `/settle`).
+  - `LedgerStore.list_splits`.
+  - README sections "Splitting model" and "Settlement logic".
+  - `tests/group_sim.py`, a fake group that drives the real handlers as several users, and
+    `tests/test_split_flow.py`, covering checklist steps 1 to 8 with two or three users.
+- Checks: `uv run pytest -q` 363 passed; `ruff check` and `ruff format --check` clean. Not yet
+  run against Telegram.
+- Review (`/review`): three findings, all fixed.
+  - `/settle` raised on a ledger whose shares don't add up (hand-edited Sheet). It now warns
+    instead, `/balances` shows the same warning, and a repeated Splits row counts once.
+  - A plain number in a custom-split reply was read as the trip currency, so `Me 6` on an S$12
+    expense was refused. It is now read in the expense's own currency.
+  - The payer question used a non-pinned button label. Both questions now use the pinned
+    `Not sure, choose people`. For a payer it keeps the sender as payer and opens the
+    participants card.
+- Decisions and readings of the pins:
+  - The split-method card appears after Everyone/Choose people with two or more people, so
+    checklist step 1 needs an `Equally` tap before the preview.
+  - Custom amounts are in the expense's own currency; `Confirm` on the custom card goes to the
+    preview (spec §8), whose `Confirm` saves.
+  - The preview shows home currency only for an expense entered in the home currency (spec §12).
+  - Custom lines may name a joined user who was not selected; they are added.
+  - An unknown name offers every joined user as a candidate.
+  - The original brief's `/settle` example is not in the repo; a three-person stand-in with two
+    transfers is tested instead.
+  - Not done: a receipt caption's `split ...`/`paid by` clauses (spec §13) still only override
+    the description. Carry to Sprint 6, which reworks the receipt split flow.
+- Deferred two-person checks for Sprint 7's checklist (covered by automated tests until then):
+  step 4 (tester B sends `paid by`/`split between`), step 5 (tester B presses your buttons), and
+  a real second account's balance in steps 1, 6 and 7.
+- Next action / owner: merge and deploy / Sufyan approves; then the single-person checklist /
+  Sufyan.
