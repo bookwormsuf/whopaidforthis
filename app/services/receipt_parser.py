@@ -52,6 +52,9 @@ Japanese receipt conventions, when this is a Japanese receipt:
 - 合計 (goukei) is the total.
 - お預り (oazukari) is the cash handed over by the customer -- never the total.
 - お釣り (otsuri) is the change given back -- never the total.
+- A tax amount printed as already included -- 内税, (内 消費税等), 税込, "incl. tax" --
+  is part of the item prices. Do not list it as a `tax` line item; only list tax that is
+  added on top of the items.
 
 List every priced line as a line item, with a `kind`: `item` for a regular purchased
 item, `tax` for a tax line, `service_charge` for a service charge, `discount` for a
@@ -211,32 +214,58 @@ class TotalDecision:
     computed_total_minor: int | None
 
 
-def select_total(receipt: Receipt) -> TotalDecision:
-    """Spec §7 total-selection rule.
+def _distinct_candidates(candidates: list[CandidateTotal]) -> list[CandidateTotal]:
+    """One candidate per amount. Receipts often print the same total on several lines
+    (内税品計, 合計, 現金計); they are one choice, not three. A merged amount counts as
+    a grand-total guess if any of its lines was.
+    """
+    by_amount: dict[int, CandidateTotal] = {}
+    for candidate in candidates:
+        existing = by_amount.get(candidate.amount_minor)
+        if existing is None or (
+            candidate.is_grand_total_guess and not existing.is_grand_total_guess
+        ):
+            by_amount[candidate.amount_minor] = candidate
+    return list(by_amount.values())
 
-    `computed = items + tax + service - discount`. If exactly one candidate has
+
+def select_total(receipt: Receipt) -> TotalDecision:
+    """Spec §7 total-selection rule, over distinct amounts.
+
+    `computed = items + tax + service - discount`. If exactly one amount has
     `is_grand_total_guess` and `|candidate - computed| <= 5` minor units (or there
-    are no line items at all), choose it. Otherwise ask, with up to 3 candidates
-    (grand-total guesses first, then largest).
+    are no line items at all), choose it. If the receipt prints only one amount that
+    could be the total, choose it too: there is nothing to ask (the caller still
+    shows the reconciliation prompt if it is more than 5 off the line items).
+    Otherwise ask, with up to 3 candidates (grand-total guesses first, then largest).
     """
     computed = None
     if receipt.line_items:
         items_sum, adjustments_sum = line_item_sums(receipt.line_items)
         computed = items_sum + adjustments_sum
 
-    guesses = [c for c in receipt.candidate_totals if c.is_grand_total_guess]
+    candidates = _distinct_candidates(receipt.candidate_totals)
+    if len(candidates) == 1:
+        return TotalDecision("confident", candidates[0].amount_minor, candidates, computed)
+
+    guesses = [c for c in candidates if c.is_grand_total_guess]
     if len(guesses) == 1:
         candidate = guesses[0]
         if computed is None or abs(candidate.amount_minor - computed) <= _CONFIDENT_TOLERANCE_MINOR:
-            return TotalDecision(
-                "confident", candidate.amount_minor, receipt.candidate_totals, computed
-            )
+            return TotalDecision("confident", candidate.amount_minor, candidates, computed)
 
-    ordered = sorted(
-        receipt.candidate_totals,
-        key=lambda c: (not c.is_grand_total_guess, -c.amount_minor),
-    )
+    ordered = sorted(candidates, key=lambda c: (not c.is_grand_total_guess, -c.amount_minor))
     return TotalDecision("ask", None, ordered[:3], computed)
+
+
+def needs_reconciliation(chosen_total_minor: int, computed_total_minor: int | None) -> bool:
+    """An automatically chosen total gets the reconciliation prompt only when it is
+    more than 5 minor units off the line items (spec §7, amended 2026-10-01).
+    """
+    return (
+        computed_total_minor is not None
+        and abs(chosen_total_minor - computed_total_minor) > _CONFIDENT_TOLERANCE_MINOR
+    )
 
 
 @dataclass(frozen=True)

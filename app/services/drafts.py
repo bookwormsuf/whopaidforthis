@@ -33,7 +33,12 @@ from app.services.conversion import both_amounts, reciprocal_rate
 from app.services.exchange_rates import RateService, RateUnavailable
 from app.services.expense_parser import ParsedExpense
 from app.services.ledger_store import LedgerStore, LedgerUnavailable
-from app.services.receipt_parser import line_item_sums, reconcile, select_total
+from app.services.receipt_parser import (
+    line_item_sums,
+    needs_reconciliation,
+    reconcile,
+    select_total,
+)
 from app.services.splitting import convert_shares, split_equal
 
 logger = logging.getLogger(__name__)
@@ -491,10 +496,20 @@ class DraftService:
             )
             await self._drafts.put(draft)
             return draft
-        assert decision.chosen_total_minor is not None
-        # A confident pick is already within ±5 of the line-item sum (spec §7), so
-        # it skips the reconciliation prompt.
-        return await self._finalize_receipt_amount(base, trip, decision.chosen_total_minor)
+        chosen = decision.chosen_total_minor
+        assert chosen is not None
+        # Within ±5 of the line items goes straight to the card; further off (only
+        # possible when the receipt printed a single total) asks first (spec §7).
+        if needs_reconciliation(chosen, decision.computed_total_minor):
+            draft = Draft(
+                state="reconcile",
+                amount_minor=chosen,
+                participant_ids=[base["initiator_id"]],
+                **base,
+            )
+            await self._drafts.put(draft)
+            return draft
+        return await self._finalize_receipt_amount(base, trip, chosen)
 
     async def start_from_receipt(
         self,

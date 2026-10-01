@@ -19,6 +19,7 @@ from app.services.llm_schemas import ReceiptExtraction
 from app.services.receipt_parser import (
     AnthropicReceiptReader,
     ReceiptUnreadable,
+    needs_reconciliation,
     reconcile,
     resolve_receipt_currency,
     resolve_transaction_date,
@@ -319,3 +320,40 @@ async def test_no_image_bytes_in_log_records(caplog: pytest.LogCaptureFixture) -
         formatted = record.getMessage()
         assert image.data_b64 not in formatted
         assert image.data_b64[:40] not in formatted
+
+
+def _same_total_three_times(**extra) -> ReceiptExtraction:
+    """A receipt printing one total on three lines (e.g. 内税品計, 合計, 現金計), two of
+    them flagged as the grand total, plus whatever `extra` candidates are given.
+    """
+    lines = [("内税品計", False), ("合計", True), ("現金計", True)]
+    candidates = [
+        {"label_as_printed": label, "amount_minor": 1000, "is_grand_total_guess": guess}
+        for label, guess in lines
+    ] + extra.get("more", [])
+    return ReceiptExtraction(
+        line_items=[{"description": "Sushi", "quantity": 1, "amount_minor": 1000, "kind": "item"}],
+        candidate_totals=candidates,
+        description="Sushi",
+        category="food",
+        confidence=0.9,
+    )
+
+
+def test_same_amount_on_several_lines_is_one_confident_total() -> None:
+    decision = select_total(to_receipt(_same_total_three_times(), "JPY"))
+    assert decision.status == "confident"
+    assert decision.chosen_total_minor == 1000
+
+
+def test_ask_shows_each_amount_once() -> None:
+    cash = {"label_as_printed": "お預り", "amount_minor": 1500, "is_grand_total_guess": True}
+    decision = select_total(to_receipt(_same_total_three_times(more=[cash]), "JPY"))
+    assert decision.status == "ask"
+    assert sorted(c.amount_minor for c in decision.candidates) == [1000, 1500]
+
+
+def test_needs_reconciliation_only_beyond_tolerance() -> None:
+    assert not needs_reconciliation(1000, None)
+    assert not needs_reconciliation(1000, 1005)
+    assert needs_reconciliation(1000, 1006)
