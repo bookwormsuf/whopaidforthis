@@ -55,6 +55,49 @@ bound group asks before rebinding — it never wipes the old Sheet.
 Once bound, everyone in the group should send `/join` (or `/start`) so the bot knows who's
 splitting expenses.
 
+## Receipts
+
+Send a photo of a receipt in a bound group and the bot reads it with an LLM: merchant,
+total, date, and the individual line items. Just photograph the whole receipt, including the
+totals section at the bottom — the clearer and flatter the photo, the better the read.
+
+If the receipt shows more than one number that could be the total (for example a
+tax-included and a tax-excluded total both printed), the bot asks "Which is the final
+total?" with buttons for each candidate. If the total you pick doesn't match the line items
+added up, it shows the difference and asks "Use the receipt total anyway?" — the receipt's
+printed total is always what gets saved.
+
+If the bot can't read a receipt at all (too blurry, not a receipt), it says "Couldn't read
+that receipt" with two buttons: **Try again** (re-reads the same photo) and **Enter amount
+manually** (reply to that message with just the amount, e.g. `2400`).
+
+A caption on the photo overrides the description the LLM guessed — a receipt sent with the
+caption `dinner` saves as "Dinner" rather than whatever the LLM extracted.
+
+**Limitation:** Telegram albums (several photos sent together) are processed as separate
+messages, each producing its own draft — there's no "this is one receipt across 3 photos"
+merging in this sprint.
+
+Line items are extracted and stored in the Sheet's `Line Items` tab for your own reference,
+but aren't yet splittable by item — everyone pays an equal share of the receipt total this
+sprint (per-item claiming is a later sprint).
+
+## LLM API setup
+
+Receipt reading uses the Anthropic API (`ANTHROPIC_API_KEY` in your `.env`, already covered in
+Setup above). In the [Anthropic Console](https://console.anthropic.com/), set a monthly spend
+limit on the API key so a bug or a flood of photos can't run up a surprise bill — a few dollars
+is plenty for a trip's worth of receipts. Each receipt read costs a fraction of a cent to a
+couple of cents; you can watch usage accrue under Usage in the Console.
+
+## Privacy
+
+Receipt photos are downloaded, resized, and sent to the Anthropic API entirely in memory —
+they are never written to disk and never logged (not the image bytes, not the base64, not the
+LLM request). Once the read finishes, the bot keeps only the Telegram file ID (so "Try again"
+can re-download the same photo) and the structured facts it extracted: merchant, total, date,
+and line items. Those facts, not the photo, are what end up in the Sheet.
+
 ## Run locally
 
 ```

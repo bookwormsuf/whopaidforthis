@@ -14,6 +14,7 @@ from app.bot.session_state import RecentUpdates, SeenUsersThrottle, SettripSessi
 from app.services.currencies import CurrencyCatalog
 from app.services.drafts import DraftService
 from app.services.ledger_store import LedgerStore
+from app.services.receipt_parser import ReceiptReader
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class Deps:
     service_account_email: str
     bot_version: str
     draft_service: DraftService
+    receipt_reader: ReceiptReader
     settrip_sessions: SettripSessionStore = field(default_factory=SettripSessionStore)
     seen_users: SeenUsersThrottle = field(default_factory=SeenUsersThrottle)
     recent_updates: RecentUpdates = field(default_factory=RecentUpdates)

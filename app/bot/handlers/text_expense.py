@@ -15,6 +15,7 @@ from telegram import Update
 from telegram.ext import ContextTypes, filters
 
 from app.bot.deps import get_deps
+from app.bot.formatting import unsupported_currency_text
 from app.bot.render.draft import render_draft
 from app.models.user import TripUser
 from app.services.drafts import (
@@ -35,6 +36,14 @@ from app.services.ledger_store import (
     TripSheetInaccessible,
 )
 
+__all__ = [
+    "DRAFT_CALLBACK_PATTERN",
+    "TEXT_EXPENSE_FILTER",
+    "draft_callback",
+    "text_expense_handler",
+    "unsupported_currency_text",
+]
+
 # ULID alphabet (Crockford base32, no I/L/O/U); cannot collide with "st:" or "join:".
 DRAFT_CALLBACK_PATTERN = r"^[0-9A-HJKMNP-TV-Z]{26}:"
 
@@ -47,10 +56,6 @@ logger = logging.getLogger(__name__)
 TEXT_EXPENSE_FILTER = (
     filters.ChatType.GROUPS & filters.TEXT & ~filters.COMMAND & filters.Regex(r"\d")
 )
-
-
-def unsupported_currency_text(trip_currency: str, home_currency: str) -> str:
-    return f"I can only record {trip_currency} or {home_currency} for this trip."
 
 
 async def text_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -171,6 +176,38 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             draft = await deps.draft_service.cancel(draft_id, presser.id)
         elif action == "retry_rate":
             draft = await deps.draft_service.retry_rate(draft_id, presser.id)
+        elif action == "total":
+            try:
+                index = int(_arg)
+            except ValueError:
+                await query.answer()
+                return
+            draft = await deps.draft_service.choose_total(draft_id, presser.id, index)
+        elif action == "usetotal":
+            draft = await deps.draft_service.use_total_anyway(draft_id, presser.id)
+        elif action == "retry":
+            # Local import: avoids a module-load cycle (photo_expense imports
+            # formatting/render, never text_expense).
+            from app.bot.handlers.photo_expense import retry_receipt_read
+
+            pending = await deps.draft_service.get_for_retry(draft_id, presser.id)
+            result = await retry_receipt_read(deps, trip, context.bot, pending)
+            if result["unreadable"]:
+                draft = await deps.draft_service.retry_unreadable(
+                    draft_id, presser.id, transaction_date=pending.transaction_date
+                )
+            else:
+                draft = await deps.draft_service.retry_receipt(
+                    draft_id,
+                    presser.id,
+                    trip=trip,
+                    extraction=result["extraction"],
+                    currency=result["currency"],
+                    transaction_date=result["transaction_date"],
+                    date_source=result["date_source"],
+                )
+        elif action == "manual":
+            draft = await deps.draft_service.request_manual_amount(draft_id, presser.id)
         else:
             await query.answer()
             return

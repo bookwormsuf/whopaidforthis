@@ -14,7 +14,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 1 Trip binding and users | written | done | green (112) | 2026-09-29, findings fixed | 2026-09-29, all six pass | 2026-09-29 | Sprint 1 closed. Next: run sprint 2 / agent |
 | 2 Text expenses, just me | written (+ carry-overs) | done | green (236) | 2026-09-29, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 2 closed. Next: run sprint 3 / agent |
 | 3 First deployment | written | done | green (247) | 2026-10-01, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 3 closed. Next: run sprint 4 / agent |
-| 4 Receipt photos, total only | written | not started | – | – | – | – | Run sprint 4 / agent |
+| 4 Receipt photos, total only | written | done | green (283) | pending | – | – | /review then checklist |
 | 5 Splitting and balances | written | not started | – | – | – | – | after sprint 4; needs tester B |
 | 6 Item claiming | written | not started | – | – | – | – | after sprint 5; needs tester B |
 | 7 Hardening and go-live | written | not started | – | – | – | – | after sprint 6; needs all friends |
@@ -189,3 +189,88 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Performed by: Sufyan, recorded by Claude.
 - Disposition: Sufyan said "sign off sprint 3". Sprint 3 closed. From here on testing is against the Fly machine; the local bot must stay stopped.
 - Next action / owner: run sprint 4 (receipt photos, total only) / agent.
+
+### 2026-10-01 — Sprint 4 build
+
+- Performed by: Claude (build agent).
+- Scope and reason: Sprint 4 "Agent builds" list per `docs/sprints/04-receipt-photos-total-only.md`:
+  receipt reading via the Anthropic API (structured outputs), image downscaling, total selection
+  and reconciliation, the receipt draft flow (`choose_total`, `reconcile`, `manual_amount`), the
+  photo handler, Line Items write path, and README sections.
+- Evidence / outputs: new `app/models/receipt.py` (domain `Receipt`/`ReceiptLineItem`/
+  `CandidateTotal`), `app/services/llm_schemas.py` (`ReceiptExtraction` structured-output schema),
+  `app/services/images.py` (`prepare_image`, 10 MB refusal, downscale to 1568px longest side, JPEG
+  quality 85), `app/services/receipt_parser.py` (`AnthropicReceiptReader` using
+  `client.messages.parse(..., output_format=ReceiptExtraction)`, one retry on failure,
+  `select_total`/`reconcile`/`resolve_transaction_date`/`resolve_receipt_currency` pure functions),
+  `app/bot/handlers/photo_expense.py` (photo handler, retry-read helper, manual-amount reply
+  handler), `app/bot/keyboards/receipt.py` (choose_total/reconcile/manual_amount keyboards).
+  Extended: `app/services/drafts.py` (`Draft` gains receipt-only fields; `DraftService` gains
+  `start_from_receipt`, `start_unreadable`, `choose_total`, `use_total_anyway`, `retry_receipt`,
+  `retry_unreadable`, `request_manual_amount`, `set_manual_amount`, `get_for_retry`,
+  `find_by_bot_message`; `confirm` now passes line items to `append_expense`), `app/bot/render/
+  draft.py` (receipt detected/choose_total/reconcile/manual_amount cards), `app/bot/handlers/
+  text_expense.py` (`draft_callback` routes `total`/`usetotal`/`retry`/`manual`),
+  `app/services/expense_parser.py` (`parse_amount_only`, `parse_caption_description`),
+  `app/services/ledger_store.py` + `app/services/google_sheets.py` + `app/services/sheet_rows.py`
+  (`append_expense` takes `line_items`, writes the `Line Items` tab first in the commit batch),
+  `app/services/sheet_layout.py` (Read Me wording for Line Items corrected: not yet split per
+  person this sprint), `app/bot/deps.py`/`app/bot/app.py` (`receipt_reader` dependency, Anthropic
+  client constructed once at startup from `anthropic_api_key`), `app/logging_setup.py`
+  (`input_tokens`/`output_tokens` added to the extra-fields allowlist), `tests/helpers.py`
+  (`FakeReceiptReader`). New tests: `tests/test_images.py`, `tests/test_receipt_parser.py`,
+  `tests/test_receipt_drafts.py`, `tests/test_photo_expense_handler.py`, five hand-written
+  fixtures under `tests/fixtures/receipts/`. README: "Receipts", "LLM API setup", "Privacy"
+  sections. `pyproject.toml`/`uv.lock`: added `anthropic`, `pillow`.
+- Checks: `uv run pytest -q` 283 passed (up from 247; 36 new). `uv run ruff check .` and
+  `uv run ruff format --check .` clean. `uvx pre-commit run --all-files` clean (gitleaks, ruff
+  check, ruff format). `uv lock` updated, `uv sync --frozen` succeeds. Docker build
+  (`docker build -t whopaid-test .`) succeeded; image removed after.
+- The exact `client.messages.parse()` call shape and the image content-block shape were read from
+  the claude-api skill's Python README (`/private/tmp/claude-501/bundled-skills/.../claude-api/
+  python/claude-api/README.md` and `tool-use.md`) before writing `receipt_parser.py`, not recalled
+  from memory. The installed SDK version (`anthropic==1.11.0`) was checked directly
+  (`inspect.signature(Messages.parse)`) and matches the README's `output_format=<PydanticModel>`
+  shape exactly. Model pinned to `claude-sonnet-5` per spec §7, `max_tokens=4096`, no `thinking`
+  parameter (adaptive thinking omitted per the sprint pin, not needed for extraction).
+- Deviations from the pins, with reasons:
+  - The sprint doc says "extend `app/bot/handlers/callbacks.py`" for the new draft actions
+    (`total`, `usetotal`, `retry`, `manual`). `callbacks.py` only handles the unrelated
+    `join:`-prefixed callback pattern; every `"{draft_id}:{action}:{arg}"` callback (spec §8) is
+    already dispatched through `text_expense.draft_callback`, so the new actions were added there
+    instead, matching the existing single-dispatcher architecture. `app/bot/handlers/
+    photo_expense.py` exposes a `retry_receipt_read` helper that `draft_callback` imports locally
+    (avoids a module-load cycle, since `photo_expense` also needs `text_expense`-adjacent helpers
+    via the shared `app/bot/formatting.py`).
+  - `unsupported_currency_text` moved from `text_expense.py` to `app/bot/formatting.py` so both
+    the text and photo handlers can import it without a circular import.
+  - The sprint pin "a caption that parses as an expense (Sprint 2 parser) overrides description"
+    is read literally as using `parse_expense`, which requires an amount. The sprint doc's own
+    checklist step 6 ("caption `dinner`" with no amount → description "Dinner") only works with a
+    lighter caption-only extraction, so a new `parse_caption_description` (reusing the same
+    bot-mention-stripping/trailing-clause/category logic, without requiring an amount) is used for
+    captions instead of `parse_expense`.
+  - The reconciliation prompt fires whenever the chosen total (however it was chosen — confident
+    auto-select or the `choose_total` button) differs from `items + adjustments` at all, not only
+    after the `ask` branch. Spec §7 states the reconciliation trigger ("chosen total ≠ computed")
+    separately from the total-selection rule, and a confident auto-selection can still be a few
+    minor units off the line-item sum within the ±5 tolerance — tested in
+    `test_reconcile_state_renders_numbers`.
+  - Line Items' `Amount <T>` column is always written using the trip currency's decimal places,
+    even for a receipt read in the home currency (there is no separate `Amount <H>` column in the
+    §10 schema). Noted as a known limitation in `sheet_rows.line_item_to_row`'s docstring and in
+    code comments; not covered by a test since no fixture exercises a home-currency receipt with
+    line items.
+- Not done / open questions for the reviewer:
+  - `/review` has not been run on this sprint yet.
+  - No real receipt photos or a live Anthropic call were exercised — all tests use
+    `FakeReceiptReader` or a fake Anthropic client; Sufyan's own checklist (sprint doc "After:
+    your checklist") still needs a real deploy and real photos, including the Anthropic Console
+    usage check (step 8).
+  - Telegram album handling is unimplemented by design (documented limitation per the sprint
+    pins), each photo in an album becomes its own draft.
+  - Reconciliation rendering sign ("difference 238" without +/-) was kept unsigned/absolute per
+    the existing codebase's terse-card-text style; worth a second opinion on whether it should say
+    "receipt total is 238 higher" instead.
+- Reviewed by / disposition: not yet reviewed.
+- Next action / owner: `/review` on this sprint's changes, then the sprint 4 checklist / Sufyan.

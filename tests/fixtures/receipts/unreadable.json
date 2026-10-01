@@ -1,0 +1,11 @@
+{
+  "merchant": null,
+  "currency": null,
+  "transaction_datetime": null,
+  "line_items": [],
+  "candidate_totals": [],
+  "description": "Expense",
+  "category": "other",
+  "confidence": 0.05,
+  "notes": "Photo is too blurry to read any numbers."
+}

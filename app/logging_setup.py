@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 # passed via `extra={...}` is dropped rather than emitted, so a careless `extra=` can't
 # leak an unreviewed field into the logs. Grepped from every `extra=` call site in app/
 # (currently only app/bot/app.py's startup line) plus bot_username/version themselves.
-EXTRA_FIELDS = frozenset({"bot_username", "version"})
+EXTRA_FIELDS = frozenset({"bot_username", "version", "input_tokens", "output_tokens"})
 
 
 class JsonFormatter(logging.Formatter):

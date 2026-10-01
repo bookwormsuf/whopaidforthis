@@ -1,0 +1,15 @@
+{
+  "merchant": "Honolulu Coffee Co",
+  "currency": "USD",
+  "transaction_datetime": "2026-09-23T09:00:00",
+  "line_items": [
+    {"description": "Latte", "quantity": 1, "unit_amount_minor": 500, "amount_minor": 500, "kind": "item"}
+  ],
+  "candidate_totals": [
+    {"label_as_printed": "Total", "amount_minor": 500, "is_grand_total_guess": true}
+  ],
+  "description": "Coffee",
+  "category": "drinks",
+  "confidence": 0.92,
+  "notes": null
+}

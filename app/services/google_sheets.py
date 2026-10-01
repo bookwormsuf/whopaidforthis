@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -21,6 +22,7 @@ from gspread.worksheet import Worksheet
 
 from app.models.exchange_rate import ExchangeRate
 from app.models.expense import Expense, ExpenseRecord
+from app.models.receipt import ReceiptLineItem
 from app.models.trip import Trip
 from app.models.user import TripUser
 from app.services.ledger_store import LedgerUnavailable, TripSheetInaccessible, merge_user
@@ -31,7 +33,12 @@ from app.services.sheet_layout import (
     layout_requests,
     read_me_lines,
 )
-from app.services.sheet_rows import expense_to_row, row_to_expense_record, split_to_row
+from app.services.sheet_rows import (
+    expense_to_row,
+    line_item_to_row,
+    row_to_expense_record,
+    split_to_row,
+)
 from app.services.summary_formulas import summary_rows, title_cells
 
 logger = logging.getLogger(__name__)
@@ -460,15 +467,30 @@ class SheetsLedgerStore:
     def _row_to_cells(self, row: list[Any]) -> dict[str, Any]:
         return {"values": [self._cell(value) for value in row]}
 
-    async def append_expense(self, trip: Trip, expense: Expense) -> None:
+    async def append_expense(
+        self, trip: Trip, expense: Expense, line_items: Sequence[ReceiptLineItem] = ()
+    ) -> None:
         """One `spreadsheets.batchUpdate` with `appendCells` requests, in order Line
-        Items (none this sprint), Splits, Expenses last (spec §10, amended).
+        Items, Splits, Expenses last (spec §10; sprint 4 adds Line Items rows).
         """
         spreadsheet = await self._open(trip.sheet_id)
         splits_ws = await _with_retries(spreadsheet.worksheet, "Splits")
         expenses_ws = await _with_retries(spreadsheet.worksheet, "Expenses")
 
         requests: list[dict[str, Any]] = []
+        if line_items:
+            line_items_ws = await _with_retries(spreadsheet.worksheet, "Line Items")
+            for index, item in enumerate(line_items, start=1):
+                row = line_item_to_row(item, expense.expense_id, index, trip.trip_currency)
+                requests.append(
+                    {
+                        "appendCells": {
+                            "sheetId": line_items_ws.id,
+                            "rows": [self._row_to_cells(row)],
+                            "fields": "userEnteredValue",
+                        }
+                    }
+                )
         for split in expense.splits:
             row = split_to_row(split, expense.expense_id, trip.trip_currency, trip.home_currency)
             requests.append(

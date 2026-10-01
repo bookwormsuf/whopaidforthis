@@ -90,3 +90,8 @@ def fmt_rate(rate: Decimal) -> str:
 
 def first_name(display_name: str) -> str:
     return display_name.split()[0] if display_name.split() else display_name
+
+
+def unsupported_currency_text(trip_currency: str, home_currency: str) -> str:
+    """Shared by the text and photo expense handlers (spec §4)."""
+    return f"I can only record {trip_currency} or {home_currency} for this trip."

@@ -127,6 +127,61 @@ def _category_for(text: str) -> Category:
     return Category.OTHER
 
 
+def parse_caption_description(text: str, bot_username: str) -> tuple[str, Category] | None:
+    """A receipt photo's caption, e.g. `dinner`, overriding the LLM's description
+    (spec §13, sprint 4 pin). Deliberately lighter than `parse_expense`: a caption
+    has no amount to find, so this just extracts description/category the same way
+    `parse_expense` does from its leftover words, without requiring one.
+    """
+    mention_stripped = _strip_bot_mention(text, bot_username)
+    if not mention_stripped:
+        return None
+    working, _participants_text, _payer_text = _extract_trailing(mention_stripped)
+    working = _LEADING_PAID_RE.sub("", working).strip()
+    if not working:
+        return None
+    description = working.title()
+    category = _category_for(working)
+    return description, category
+
+
+def parse_amount_only(text: str, trip_currency: str, home_currency: str) -> tuple[int, str] | None:
+    """Parses a short reply like `2400` or `S$24` into `(amount_minor, currency)`.
+
+    Reuses the same amount/currency-token rule as `parse_expense` (spec §6), for the
+    receipt "Enter amount manually" flow (spec §7/§8, sprint 4). Returns `None` if no
+    amount is found or the currency isn't the trip's or home currency.
+    """
+    words = text.strip().split()
+    for index, word in enumerate(words):
+        match = _WORD_AMOUNT_RE.match(word)
+        if not match:
+            continue
+        prefix = match.group("prefix")
+        suffix = match.group("suffix")
+        number_str = match.group("number")
+
+        currency_token = None
+        if prefix:
+            currency_token = _match_currency_token(prefix, trip_currency, home_currency)
+        if currency_token is None and suffix:
+            currency_token = _match_currency_token(suffix, trip_currency, home_currency)
+        if currency_token is None and index + 1 < len(words):
+            currency_token = _match_currency_token(words[index + 1], trip_currency, home_currency)
+        if currency_token is None and index - 1 >= 0:
+            currency_token = _match_currency_token(words[index - 1], trip_currency, home_currency)
+
+        if currency_token == _UNSUPPORTED:
+            return None
+
+        currency = currency_token if currency_token is not None else trip_currency
+        decimals = decimals_for(currency)
+        value = Decimal(number_str.replace(",", ""))
+        amount_minor = int((value * (Decimal(10) ** decimals)).to_integral_value(ROUND_HALF_EVEN))
+        return amount_minor, currency
+    return None
+
+
 def parse_expense(
     text: str, trip_currency: str, home_currency: str, bot_username: str
 ) -> ParsedExpense | None:

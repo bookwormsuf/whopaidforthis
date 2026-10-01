@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import signal
 
+import anthropic
 import httpx
 from telegram import Update
 from telegram.ext import (
@@ -30,6 +31,12 @@ from app.bot.deps import Deps, get_deps
 from app.bot.handlers.basic import help_command, start_command
 from app.bot.handlers.callbacks import join_button_callback
 from app.bot.handlers.join import UNBOUND_TEXT, join_command, lost_access_text
+from app.bot.handlers.photo_expense import (
+    MANUAL_AMOUNT_REPLY_FILTER,
+    PHOTO_EXPENSE_FILTER,
+    manual_amount_reply_handler,
+    photo_expense_handler,
+)
 from app.bot.handlers.reads import (
     recent_command,
     summary_command,
@@ -55,6 +62,7 @@ from app.services.ledger_store import (
     LedgerUnavailable,
     TripSheetInaccessible,
 )
+from app.services.receipt_parser import AnthropicReceiptReader
 
 logger = logging.getLogger(__name__)
 
@@ -173,9 +181,15 @@ def build_application(token: str, deps: Deps) -> Application:
     application.add_handler(
         MessageHandler(AwaitingSettripText(deps.settrip_sessions), settrip_text_handler)
     )
+    # Manual-amount replies to a receipt's "Couldn't read that receipt" card:
+    # registered before the text-expense handler so a reply to the bot's own
+    # message is never instead treated as a new expense candidate (sprint 4 pin).
+    application.add_handler(MessageHandler(MANUAL_AMOUNT_REPLY_FILTER, manual_amount_reply_handler))
     # Text-expense candidates ("1200 yen ramen"): registered after the settrip
     # awaiting-text handler, so a session mid-/settrip still wins (sprint 2 pin).
     application.add_handler(MessageHandler(TEXT_EXPENSE_FILTER, text_expense_handler))
+    # Receipt photos (sprint 4 pin, spec §7/§13): every photo in a bound group.
+    application.add_handler(MessageHandler(PHOTO_EXPENSE_FILTER, photo_expense_handler))
 
     # Fallback gate for any other command in an unbound group (spec §13).
     application.add_handler(MessageHandler(filters.COMMAND, _unbound_gate), group=1)
@@ -196,12 +210,14 @@ def run(settings: Settings) -> None:
         bot_version=settings.bot_version,
     )
     rates = RateService(FrankfurterProvider(http_client), ledger)
+    anthropic_client = anthropic.Anthropic(api_key=settings.anthropic_api_key.get_secret_value())
     deps = Deps(
         ledger=ledger,
         currencies=FrankfurterCurrencyCatalog(http_client),
         service_account_email=service_account_info["client_email"],
         bot_version=settings.bot_version,
         draft_service=DraftService(ledger, rates, InMemoryDraftStore(), Dedup()),
+        receipt_reader=AnthropicReceiptReader(anthropic_client),
     )
     application = build_application(settings.telegram_bot_token.get_secret_value(), deps)
     application.run_polling(

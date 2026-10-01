@@ -27,18 +27,31 @@ from ulid import ULID
 from app.models.category import Category
 from app.models.exchange_rate import ExchangeRate
 from app.models.expense import Expense, ExpenseSplit
+from app.models.receipt import ReceiptLineItem
 from app.models.trip import Trip
 from app.services.conversion import both_amounts, reciprocal_rate
 from app.services.exchange_rates import RateService, RateUnavailable
 from app.services.expense_parser import ParsedExpense
 from app.services.ledger_store import LedgerStore, LedgerUnavailable
+from app.services.llm_schemas import CandidateTotal, ReceiptExtraction
+from app.services.receipt_parser import line_item_sums, reconcile, select_total
 from app.services.splitting import convert_shares, split_equal
 
 logger = logging.getLogger(__name__)
 
 _DRAFT_TTL = timedelta(minutes=30)
 
-DraftState = Literal["detected", "preview", "rate_failed", "committing", "committed", "cancelled"]
+DraftState = Literal[
+    "detected",
+    "choose_total",
+    "reconcile",
+    "manual_amount",
+    "preview",
+    "rate_failed",
+    "committing",
+    "committed",
+    "cancelled",
+]
 
 EXPIRED_TEXT = "This expense expired, please send it again"
 ALREADY_SAVED_TEXT = "Already saved"
@@ -101,7 +114,7 @@ class Draft:
     payer_name: str
     payer_username: str | None
 
-    line_items: list = field(default_factory=list)
+    line_items: list[ReceiptLineItem] = field(default_factory=list)
     split: object = None  # a splitting.SplitSpec; Equal() once chosen, Sprint 5+
 
     participant_ids: list[int] = field(default_factory=list)
@@ -112,6 +125,14 @@ class Draft:
 
     pending_participants_text: str | None = None
     pending_payer_text: str | None = None
+
+    # Receipt-sourced drafts only (sprint 4, spec §7/§8):
+    photo_file_id: str | None = None
+    candidate_totals: list[CandidateTotal] = field(default_factory=list)
+    items_sum_minor: int | None = None
+    adjustments_sum_minor: int | None = None
+    date_source: Literal["receipt", "message"] | None = None
+    awaiting_manual_amount: bool = False
 
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -124,6 +145,8 @@ class DraftStore(Protocol):
     async def delete(self, draft_id: str) -> None: ...
 
     async def sweep_expired(self) -> None: ...
+
+    async def find_by_bot_message(self, chat_id: int, bot_message_id: int) -> Draft | None: ...
 
 
 class InMemoryDraftStore:
@@ -159,6 +182,12 @@ class InMemoryDraftStore:
         ]
         for draft_id in expired:
             del self._drafts[draft_id]
+
+    async def find_by_bot_message(self, chat_id: int, bot_message_id: int) -> Draft | None:
+        for draft in self._drafts.values():
+            if draft.chat_id == chat_id and draft.bot_message_id == bot_message_id:
+                return await self.get(draft.draft_id)
+        return None
 
 
 class Dedup(Protocol):
@@ -368,7 +397,7 @@ class DraftService:
         await self._drafts.put(replace(draft, state="committing"))
         if not await self._ledger.expense_exists(trip, expense.expense_id):
             try:
-                await self._ledger.append_expense(trip, expense)
+                await self._ledger.append_expense(trip, expense, draft.line_items)
             except LedgerUnavailable:
                 logger.exception("draft %s: could not append expense", draft.draft_id)
                 await self._drafts.put(replace(draft, state="preview"))
@@ -417,3 +446,318 @@ class DraftService:
         )
         await self._drafts.put(updated)
         return updated
+
+    # -- Receipt flow (sprint 4, spec §7/§8) ---------------------------------
+
+    async def find_by_bot_message(self, chat_id: int, bot_message_id: int) -> Draft | None:
+        return await self._drafts.find_by_bot_message(chat_id, bot_message_id)
+
+    @staticmethod
+    def _line_items_from_extraction(extraction: ReceiptExtraction) -> list[ReceiptLineItem]:
+        return [
+            ReceiptLineItem(
+                description=item.description,
+                quantity=item.quantity,
+                unit_amount_minor=item.unit_amount_minor,
+                amount_minor=item.amount_minor,
+                kind=item.kind,
+            )
+            for item in extraction.line_items
+        ]
+
+    async def start_from_receipt(
+        self,
+        *,
+        chat_id: int,
+        message_id: int,
+        photo_file_id: str,
+        initiator_id: int,
+        initiator_name: str,
+        initiator_username: str | None,
+        trip: Trip,
+        extraction: ReceiptExtraction,
+        currency: str,
+        transaction_date: date,
+        date_source: Literal["receipt", "message"],
+        caption_parsed: tuple[str, Category] | None = None,
+    ) -> Draft:
+        await self._ensure_not_duplicate(trip, chat_id, message_id)
+
+        description = (
+            caption_parsed[0]
+            if caption_parsed is not None
+            else (extraction.description or "Expense")
+        )
+        line_items = self._line_items_from_extraction(extraction)
+        items_sum_minor = adjustments_sum_minor = None
+        if extraction.line_items:
+            items_sum_minor, adjustments_sum_minor = line_item_sums(extraction.line_items)
+
+        base = dict(
+            draft_id=str(ULID()),
+            chat_id=chat_id,
+            message_id=message_id,
+            bot_message_id=None,
+            initiator_id=initiator_id,
+            initiator_name=initiator_name,
+            description=description,
+            category=extraction.category,
+            merchant=extraction.merchant,
+            source_type="receipt",
+            payer_id=initiator_id,
+            payer_name=initiator_name,
+            payer_username=initiator_username,
+            transaction_date=transaction_date,
+            line_items=line_items,
+            photo_file_id=photo_file_id,
+            date_source=date_source,
+            items_sum_minor=items_sum_minor,
+            adjustments_sum_minor=adjustments_sum_minor,
+            currency=currency,
+        )
+
+        decision = select_total(extraction)
+        if decision.status == "ask":
+            draft = Draft(
+                state="choose_total",
+                amount_minor=0,
+                participant_ids=[initiator_id],
+                candidate_totals=decision.candidates,
+                **base,
+            )
+            await self._drafts.put(draft)
+            return draft
+
+        assert decision.chosen_total_minor is not None
+        return await self._settle_receipt_total(base, trip, decision.chosen_total_minor)
+
+    async def start_unreadable(
+        self,
+        *,
+        chat_id: int,
+        message_id: int,
+        photo_file_id: str,
+        initiator_id: int,
+        initiator_name: str,
+        initiator_username: str | None,
+        trip: Trip,
+        transaction_date: date,
+    ) -> Draft:
+        """The LLM read failed twice (spec §7): "Couldn't read that receipt" with
+        `Try again` / `Enter amount manually`.
+        """
+        await self._ensure_not_duplicate(trip, chat_id, message_id)
+        draft = Draft(
+            draft_id=str(ULID()),
+            chat_id=chat_id,
+            message_id=message_id,
+            bot_message_id=None,
+            initiator_id=initiator_id,
+            initiator_name=initiator_name,
+            state="manual_amount",
+            amount_minor=0,
+            currency=trip.trip_currency,
+            description="Expense",
+            category=Category.OTHER,
+            merchant=None,
+            source_type="receipt",
+            payer_id=initiator_id,
+            payer_name=initiator_name,
+            payer_username=initiator_username,
+            transaction_date=transaction_date,
+            photo_file_id=photo_file_id,
+            participant_ids=[initiator_id],
+        )
+        await self._drafts.put(draft)
+        return draft
+
+    def _base_from_draft(self, draft: Draft) -> dict:
+        return dict(
+            draft_id=draft.draft_id,
+            chat_id=draft.chat_id,
+            message_id=draft.message_id,
+            bot_message_id=draft.bot_message_id,
+            initiator_id=draft.initiator_id,
+            initiator_name=draft.initiator_name,
+            description=draft.description,
+            category=draft.category,
+            merchant=draft.merchant,
+            source_type=draft.source_type,
+            payer_id=draft.payer_id,
+            payer_name=draft.payer_name,
+            payer_username=draft.payer_username,
+            transaction_date=draft.transaction_date,
+            line_items=draft.line_items,
+            photo_file_id=draft.photo_file_id,
+            date_source=draft.date_source,
+            items_sum_minor=draft.items_sum_minor,
+            adjustments_sum_minor=draft.adjustments_sum_minor,
+            currency=draft.currency,
+            created_at=draft.created_at,
+        )
+
+    async def _settle_receipt_total(self, base: dict, trip: Trip, chosen_total_minor: int) -> Draft:
+        items_sum_minor = base["items_sum_minor"]
+        adjustments_sum_minor = base["adjustments_sum_minor"]
+        if items_sum_minor is not None:
+            recon = reconcile(items_sum_minor, adjustments_sum_minor, chosen_total_minor)
+            if recon is not None:
+                draft = Draft(
+                    state="reconcile",
+                    amount_minor=chosen_total_minor,
+                    participant_ids=[base["initiator_id"]],
+                    **base,
+                )
+                await self._drafts.put(draft)
+                return draft
+        return await self._finalize_receipt_amount(base, trip, chosen_total_minor)
+
+    async def _finalize_receipt_amount(self, base: dict, trip: Trip, amount_minor: int) -> Draft:
+        try:
+            rate = await self._rates.rate_for(trip, base["transaction_date"])
+        except RateUnavailable:
+            draft = Draft(
+                state="rate_failed",
+                amount_minor=amount_minor,
+                participant_ids=[base["initiator_id"]],
+                **base,
+            )
+            await self._drafts.put(draft)
+            return draft
+
+        trip_amount_minor, home_amount_minor = both_amounts(
+            amount_minor, base["currency"], trip.trip_currency, trip.home_currency, rate.rate
+        )
+        draft = Draft(
+            state="detected",
+            rate=rate,
+            amount_minor=amount_minor,
+            trip_amount_minor=trip_amount_minor,
+            home_amount_minor=home_amount_minor,
+            participant_ids=[base["initiator_id"]],
+            **base,
+        )
+        await self._drafts.put(draft)
+        return draft
+
+    async def choose_total(self, draft_id: str, presser_id: int, index: int) -> Draft:
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "choose_total":
+            raise DraftError(f"cannot choose_total from state {draft.state}")
+        if index < 0 or index >= len(draft.candidate_totals):
+            raise DraftError("invalid candidate index")
+        trip = await self._trip_for(draft)
+        chosen = draft.candidate_totals[index].amount_minor
+        return await self._settle_receipt_total(self._base_from_draft(draft), trip, chosen)
+
+    async def use_total_anyway(self, draft_id: str, presser_id: int) -> Draft:
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "reconcile":
+            raise DraftError(f"cannot use_total_anyway from state {draft.state}")
+        trip = await self._trip_for(draft)
+        return await self._finalize_receipt_amount(
+            self._base_from_draft(draft), trip, draft.amount_minor
+        )
+
+    async def get_for_retry(self, draft_id: str, presser_id: int) -> Draft:
+        """Validates the `retry` button press (initiator, right state) and hands back
+        the draft so the caller can re-download `photo_file_id`. Raises the usual
+        `DraftError` subclasses, same as every other button action.
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "manual_amount":
+            raise DraftError(f"cannot retry from state {draft.state}")
+        return draft
+
+    async def retry_receipt(
+        self,
+        draft_id: str,
+        presser_id: int,
+        *,
+        trip: Trip,
+        extraction: ReceiptExtraction,
+        currency: str,
+        transaction_date: date,
+        date_source: Literal["receipt", "message"],
+        caption_parsed: tuple[str, Category] | None = None,
+    ) -> Draft:
+        """Re-runs total selection after a successful `Try again` read. Keeps the
+        same draft id (the card is edited in place, spec §8), unlike `start_from_receipt`.
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "manual_amount":
+            raise DraftError(f"cannot retry_receipt from state {draft.state}")
+
+        description = (
+            caption_parsed[0]
+            if caption_parsed is not None
+            else (extraction.description or "Expense")
+        )
+        line_items = self._line_items_from_extraction(extraction)
+        items_sum_minor = adjustments_sum_minor = None
+        if extraction.line_items:
+            items_sum_minor, adjustments_sum_minor = line_item_sums(extraction.line_items)
+
+        base = self._base_from_draft(draft)
+        base.update(
+            description=description,
+            category=extraction.category,
+            merchant=extraction.merchant,
+            transaction_date=transaction_date,
+            line_items=line_items,
+            date_source=date_source,
+            items_sum_minor=items_sum_minor,
+            adjustments_sum_minor=adjustments_sum_minor,
+            currency=currency,
+        )
+
+        decision = select_total(extraction)
+        if decision.status == "ask":
+            updated = Draft(
+                state="choose_total",
+                amount_minor=0,
+                participant_ids=[draft.initiator_id],
+                candidate_totals=decision.candidates,
+                **base,
+            )
+            await self._drafts.put(updated)
+            return updated
+
+        assert decision.chosen_total_minor is not None
+        return await self._settle_receipt_total(base, trip, decision.chosen_total_minor)
+
+    async def retry_unreadable(
+        self, draft_id: str, presser_id: int, *, transaction_date: date
+    ) -> Draft:
+        """`Try again` read failed again (or raised `ReceiptUnreadable`): stays in
+        `manual_amount`, still offering both buttons.
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "manual_amount":
+            raise DraftError(f"cannot retry_unreadable from state {draft.state}")
+        updated = replace(draft, transaction_date=transaction_date, awaiting_manual_amount=False)
+        await self._drafts.put(updated)
+        return updated
+
+    async def request_manual_amount(self, draft_id: str, presser_id: int) -> Draft:
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "manual_amount":
+            raise DraftError(f"cannot request_manual_amount from state {draft.state}")
+        updated = replace(draft, awaiting_manual_amount=True)
+        await self._drafts.put(updated)
+        return updated
+
+    async def set_manual_amount(
+        self, draft_id: str, presser_id: int, trip: Trip, amount_minor: int, currency: str
+    ) -> Draft:
+        """The initiator replied to the `manual_amount` card with an amount (spec
+        §8): produces a normal text-style draft, source_type `receipt`, no line items.
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "manual_amount":
+            raise DraftError(f"cannot set_manual_amount from state {draft.state}")
+        base = self._base_from_draft(draft)
+        base.update(
+            line_items=[], items_sum_minor=None, adjustments_sum_minor=None, currency=currency
+        )
+        return await self._finalize_receipt_amount(base, trip, amount_minor)

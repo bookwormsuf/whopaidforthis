@@ -11,11 +11,17 @@ from html import escape
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.bot.formatting import (
+    fmt_amount_pair,
     fmt_date,
     fmt_date_short,
     fmt_money,
     fmt_rate,
     format_expense_amount,
+)
+from app.bot.keyboards.receipt import (
+    choose_total_keyboard,
+    manual_amount_keyboard,
+    reconcile_keyboard,
 )
 from app.models.trip import Trip
 from app.services.drafts import Draft
@@ -36,6 +42,12 @@ def render_draft(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup | 
     """Builds every card, `Saved ✅ ...`/`Cancelled.` included."""
     if draft.state == "detected":
         return _render_detected(draft, trip)
+    if draft.state == "choose_total":
+        return _render_choose_total(draft, trip)
+    if draft.state == "reconcile":
+        return _render_reconcile(draft, trip)
+    if draft.state == "manual_amount":
+        return _render_manual_amount(draft, trip)
     if draft.state == "preview":
         return _render_preview(draft, trip)
     if draft.state == "rate_failed":
@@ -49,6 +61,8 @@ def render_draft(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup | 
 
 def _render_detected(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
     assert draft.rate is not None
+    if draft.source_type == "receipt":
+        return _render_detected_receipt(draft, trip)
     desc = escape(draft.description)
     payer = escape(draft.payer_name)
     date_str = fmt_date(draft.transaction_date)
@@ -75,6 +89,60 @@ def _render_detected(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarku
         "Who should share this?"
     )
     return text, _buttons(draft.draft_id, ("Just me", "justme"), ("Cancel", "cancel"))
+
+
+def _render_detected_receipt(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    """Receipt detected card (sprint 4 pin): merchant, total in both currencies,
+    date source, "N items found" when items exist.
+    """
+    assert draft.rate is not None
+    desc = escape(draft.description)
+    payer = escape(draft.payer_name)
+    merchant_line = f"{escape(draft.merchant)}\n" if draft.merchant else ""
+    date_str = fmt_date(draft.transaction_date)
+    date_source_str = "from receipt" if draft.date_source == "receipt" else "from message time"
+    items_line = f"\n{len(draft.line_items)} items found" if draft.line_items else ""
+    amount = fmt_amount_pair(draft.trip_amount_minor, draft.home_amount_minor, trip)
+    text = (
+        f"🧾 {merchant_line}<b>{desc}</b>\n{amount}\nPaid by {payer} · "
+        f"{date_str} ({date_source_str}){items_line}\n\nWho should share this?"
+    )
+    return text, _buttons(draft.draft_id, ("Just me", "justme"), ("Cancel", "cancel"))
+
+
+def _render_choose_total(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    desc = escape(draft.description)
+    text = f"🧾 <b>{desc}</b>\n\nWhich is the final total?"
+    keyboard = choose_total_keyboard(draft.draft_id, draft.candidate_totals, draft.currency)
+    return text, keyboard
+
+
+def _render_reconcile(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    assert draft.items_sum_minor is not None and draft.adjustments_sum_minor is not None
+    desc = escape(draft.description)
+    items_str = fmt_money(draft.items_sum_minor, draft.currency)
+    adjustments_str = fmt_money(draft.adjustments_sum_minor, draft.currency)
+    computed = draft.items_sum_minor + draft.adjustments_sum_minor
+    computed_str = fmt_money(computed, draft.currency)
+    total_str = fmt_money(draft.amount_minor, draft.currency)
+    difference = draft.amount_minor - computed
+    difference_str = fmt_money(abs(difference), draft.currency)
+    text = (
+        f"🧾 <b>{desc}</b>\n"
+        f"Items {items_str} + adjustments {adjustments_str} = {computed_str}\n"
+        f"Receipt total {total_str} (difference {difference_str})\n\n"
+        "Use the receipt total anyway?"
+    )
+    return text, reconcile_keyboard(draft.draft_id)
+
+
+def _render_manual_amount(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup | None]:
+    desc = escape(draft.description)
+    if draft.awaiting_manual_amount:
+        text = f"🧾 <b>{desc}</b>\n\nReply to this message with the amount."
+        return text, None
+    text = f"🧾 <b>{desc}</b>\n\nCouldn't read that receipt"
+    return text, manual_amount_keyboard(draft.draft_id)
 
 
 def _render_preview(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:

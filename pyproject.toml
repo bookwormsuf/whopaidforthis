@@ -10,6 +10,8 @@ dependencies = [
     "httpx",
     "gspread>=6,<7",
     "python-ulid",
+    "anthropic",
+    "pillow",
 ]
 
 [dependency-groups]

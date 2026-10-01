@@ -13,6 +13,7 @@ from decimal import Decimal
 
 from app.models.category import Category
 from app.models.expense import Expense, ExpenseRecord, ExpenseSplit
+from app.models.receipt import ReceiptLineItem
 from app.services.currencies import decimals_for
 
 
@@ -76,6 +77,29 @@ def split_to_row(
         _amount_number(split.share_trip_minor, trip_currency),
         _amount_number(split.share_home_minor, home_currency),
         split.split_method,
+    ]
+
+
+def line_item_to_row(
+    item: ReceiptLineItem, expense_id: str, item_index: int, trip_currency: str
+) -> list[object]:
+    """One row for the `Line Items` tab, column order per §10.
+
+    This sprint (sprint 4) always writes `Assigned User IDs` empty and
+    `Allocation Method = "unassigned"` -- item claiming is Sprint 6. `Amount <T>` is
+    formatted using the trip currency's decimal places; there is no separate "Amount
+    <H>" column for line items (known limitation for a receipt paid in the home
+    currency, documented in the README).
+    """
+    return [
+        expense_id,
+        f"{expense_id}-{item_index:02d}",
+        item.description,
+        item.quantity,
+        _amount_number(item.amount_minor, trip_currency),
+        "",
+        "unassigned",
+        item.kind,
     ]
 
 

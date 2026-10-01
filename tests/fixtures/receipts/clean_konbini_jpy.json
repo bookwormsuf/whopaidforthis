@@ -1,0 +1,17 @@
+{
+  "merchant": "Lawson",
+  "currency": "JPY",
+  "transaction_datetime": "2026-09-20T14:05:00",
+  "line_items": [
+    {"description": "Onigiri", "quantity": 2, "unit_amount_minor": 150, "amount_minor": 300, "kind": "item"},
+    {"description": "Green Tea", "quantity": 1, "unit_amount_minor": 120, "amount_minor": 120, "kind": "item"},
+    {"description": "Tax", "quantity": 1, "unit_amount_minor": null, "amount_minor": 0, "kind": "tax"}
+  ],
+  "candidate_totals": [
+    {"label_as_printed": "合計", "amount_minor": 420, "is_grand_total_guess": true}
+  ],
+  "description": "Konbini Snacks",
+  "category": "groceries",
+  "confidence": 0.95,
+  "notes": null
+}

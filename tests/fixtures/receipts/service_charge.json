@@ -1,0 +1,17 @@
+{
+  "merchant": "Harbour View Restaurant",
+  "currency": "JPY",
+  "transaction_datetime": "2026-09-22T20:00:00",
+  "line_items": [
+    {"description": "Set Course", "quantity": 2, "unit_amount_minor": 5000, "amount_minor": 10000, "kind": "item"},
+    {"description": "Service Charge 10%", "quantity": 1, "unit_amount_minor": null, "amount_minor": 1000, "kind": "service_charge"},
+    {"description": "Consumption Tax", "quantity": 1, "unit_amount_minor": null, "amount_minor": 1100, "kind": "tax"}
+  ],
+  "candidate_totals": [
+    {"label_as_printed": "合計", "amount_minor": 12100, "is_grand_total_guess": true}
+  ],
+  "description": "Dinner",
+  "category": "food",
+  "confidence": 0.9,
+  "notes": null
+}

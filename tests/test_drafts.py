@@ -234,9 +234,9 @@ class _AppendOnceThenFailLedger(InMemoryLedgerStore):
         super().__init__()
         self._append_calls = 0
 
-    async def append_expense(self, trip, expense) -> None:
+    async def append_expense(self, trip, expense, line_items=()) -> None:
         self._append_calls += 1
-        await super().append_expense(trip, expense)
+        await super().append_expense(trip, expense, line_items)
         if self._append_calls == 1:
             raise LedgerUnavailable("boom")
 

@@ -275,8 +275,10 @@ def read_me_lines(trip_currency: str, home_currency: str) -> list[str]:
     )
     lines += _read_me_section(
         "Line Items",
-        "one priced line from a receipt (an item, tax, service charge, or discount).",
-        "to see the detail behind a receipt that was split by item.",
+        "one priced line from a receipt (an item, tax, service charge, or discount). "
+        "Not yet split per person -- everyone pays an equal share of the receipt total "
+        'for now, so Assigned User IDs is blank and Allocation Method reads "unassigned".',
+        "to see the detail behind a receipt photo.",
     )
     lines += _read_me_section(
         "Users",

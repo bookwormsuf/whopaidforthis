@@ -1,0 +1,18 @@
+{
+  "merchant": "Ichiran Ramen",
+  "currency": "JPY",
+  "transaction_datetime": "2026-09-21T19:30:00",
+  "line_items": [
+    {"description": "Ramen", "quantity": 2, "unit_amount_minor": 980, "amount_minor": 1960, "kind": "item"},
+    {"description": "Gyoza", "quantity": 1, "unit_amount_minor": 420, "amount_minor": 420, "kind": "item"}
+  ],
+  "candidate_totals": [
+    {"label_as_printed": "小計", "amount_minor": 2380, "is_grand_total_guess": false},
+    {"label_as_printed": "合計(税込)", "amount_minor": 2618, "is_grand_total_guess": true},
+    {"label_as_printed": "お預り", "amount_minor": 3000, "is_grand_total_guess": false}
+  ],
+  "description": "Ramen Dinner",
+  "category": "food",
+  "confidence": 0.8,
+  "notes": "Printed tax-included total differs from items sum by more than the tolerance."
+}

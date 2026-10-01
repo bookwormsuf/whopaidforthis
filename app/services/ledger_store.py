@@ -5,11 +5,13 @@ Spec references: pinned-decisions §10.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date, datetime
 from typing import Protocol
 
 from app.models.exchange_rate import ExchangeRate
 from app.models.expense import Expense, ExpenseRecord
+from app.models.receipt import ReceiptLineItem
 from app.models.trip import Trip
 from app.models.user import TripUser
 
@@ -63,7 +65,9 @@ class LedgerStore(Protocol):
 
     # -- Sprint 2: expenses, rates, dedup -----------------------------------
 
-    async def append_expense(self, trip: Trip, expense: Expense) -> None: ...
+    async def append_expense(
+        self, trip: Trip, expense: Expense, line_items: Sequence[ReceiptLineItem] = ()
+    ) -> None: ...
 
     async def list_expenses(self, trip: Trip) -> list[ExpenseRecord]: ...
 
@@ -130,6 +134,7 @@ class InMemoryLedgerStore:
         self._expenses: dict[str, dict[str, Expense]] = {}
         self._expense_order: dict[str, list[str]] = {}
         self._rates: dict[str, dict[tuple[str, str, date], ExchangeRate]] = {}
+        self._line_items: dict[str, list[ReceiptLineItem]] = {}
         self.get_binding_calls = 0
 
     async def get_binding(self, chat_id: int) -> Trip | None:
@@ -164,11 +169,19 @@ class InMemoryLedgerStore:
 
     # -- Sprint 2: expenses, rates, dedup -----------------------------------
 
-    async def append_expense(self, trip: Trip, expense: Expense) -> None:
+    async def append_expense(
+        self, trip: Trip, expense: Expense, line_items: Sequence[ReceiptLineItem] = ()
+    ) -> None:
         expenses = self._expenses.setdefault(trip.sheet_id, {})
         order = self._expense_order.setdefault(trip.sheet_id, [])
         expenses[expense.expense_id] = expense
         order.append(expense.expense_id)
+        if line_items:
+            self._line_items[expense.expense_id] = list(line_items)
+
+    def line_items_for(self, expense_id: str) -> list[ReceiptLineItem]:
+        """Test helper: the line items passed to `append_expense` for an expense."""
+        return self._line_items.get(expense_id, [])
 
     async def list_expenses(self, trip: Trip) -> list[ExpenseRecord]:
         expenses = self._expenses.get(trip.sheet_id, {})
