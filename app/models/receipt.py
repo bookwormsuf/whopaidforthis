@@ -45,11 +45,11 @@ class CandidateTotal(BaseModel):
 
 
 class Receipt(BaseModel):
-    """A validated receipt reading, with a chosen total once one has been picked.
-
-    `chosen_total_minor` is `None` until the total-selection flow (`select_total` in
-    `app.services.receipt_parser`) has settled on one -- either automatically (a
-    single confident candidate) or by the user picking one of `candidate_totals`.
+    """A validated receipt reading (spec §7: built from a `ReceiptExtraction` by
+    `app.services.receipt_parser.to_receipt`). `currency` is already resolved to the
+    trip or home currency; `transaction_datetime` is `None` when no valid date was
+    printed. At least one candidate total is required: a reading with none is
+    unreadable, not a receipt.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -58,8 +58,7 @@ class Receipt(BaseModel):
     currency: str
     transaction_datetime: datetime | None
     line_items: list[ReceiptLineItem] = Field(default_factory=list)
-    candidate_totals: list[CandidateTotal] = Field(default_factory=list)
-    chosen_total_minor: int | None = None
+    candidate_totals: list[CandidateTotal] = Field(min_length=1)
     description: str
     category: Category
     confidence: float = Field(ge=0, le=1)

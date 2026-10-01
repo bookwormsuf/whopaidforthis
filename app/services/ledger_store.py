@@ -183,6 +183,13 @@ class InMemoryLedgerStore:
         """Test helper: the line items passed to `append_expense` for an expense."""
         return self._line_items.get(expense_id, [])
 
+    def expense_for(self, expense_id: str) -> Expense | None:
+        """Test helper: the full `Expense` (with splits) passed to `append_expense`."""
+        for expenses in self._expenses.values():
+            if expense_id in expenses:
+                return expenses[expense_id]
+        return None
+
     async def list_expenses(self, trip: Trip) -> list[ExpenseRecord]:
         expenses = self._expenses.get(trip.sheet_id, {})
         order = self._expense_order.get(trip.sheet_id, [])

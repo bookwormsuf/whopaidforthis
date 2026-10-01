@@ -127,32 +127,24 @@ def _category_for(text: str) -> Category:
     return Category.OTHER
 
 
-def parse_caption_description(text: str, bot_username: str) -> tuple[str, Category] | None:
-    """A receipt photo's caption, e.g. `dinner`, overriding the LLM's description
-    (spec §13, sprint 4 pin). Deliberately lighter than `parse_expense`: a caption
-    has no amount to find, so this just extracts description/category the same way
-    `parse_expense` does from its leftover words, without requiring one.
+@dataclass(frozen=True)
+class _LocatedAmount:
+    """The first amount in a word list, plus every word index it consumed (the
+    amount itself and an adjacent currency word, if any). `currency` is the trip or
+    home currency, or `_UNSUPPORTED`.
     """
-    mention_stripped = _strip_bot_mention(text, bot_username)
-    if not mention_stripped:
-        return None
-    working, _participants_text, _payer_text = _extract_trailing(mention_stripped)
-    working = _LEADING_PAID_RE.sub("", working).strip()
-    if not working:
-        return None
-    description = working.title()
-    category = _category_for(working)
-    return description, category
+
+    amount_minor: int
+    currency: str
+    consumed: frozenset[int]
 
 
-def parse_amount_only(text: str, trip_currency: str, home_currency: str) -> tuple[int, str] | None:
-    """Parses a short reply like `2400` or `S$24` into `(amount_minor, currency)`.
-
-    Reuses the same amount/currency-token rule as `parse_expense` (spec §6), for the
-    receipt "Enter amount manually" flow (spec §7/§8, sprint 4). Returns `None` if no
-    amount is found or the currency isn't the trip's or home currency.
+def _locate_amount(
+    words: list[str], trip_currency: str, home_currency: str
+) -> _LocatedAmount | None:
+    """The one amount/currency-token rule (spec §4/§6), shared by `parse_expense`,
+    `parse_amount_only` and `parse_caption_description`.
     """
-    words = text.strip().split()
     for index, word in enumerate(words):
         match = _WORD_AMOUNT_RE.match(word)
         if not match:
@@ -161,25 +153,73 @@ def parse_amount_only(text: str, trip_currency: str, home_currency: str) -> tupl
         suffix = match.group("suffix")
         number_str = match.group("number")
 
+        consumed = {index}
         currency_token = None
         if prefix:
             currency_token = _match_currency_token(prefix, trip_currency, home_currency)
         if currency_token is None and suffix:
             currency_token = _match_currency_token(suffix, trip_currency, home_currency)
         if currency_token is None and index + 1 < len(words):
-            currency_token = _match_currency_token(words[index + 1], trip_currency, home_currency)
+            candidate = _match_currency_token(words[index + 1], trip_currency, home_currency)
+            if candidate is not None:
+                currency_token = candidate
+                consumed.add(index + 1)
         if currency_token is None and index - 1 >= 0:
-            currency_token = _match_currency_token(words[index - 1], trip_currency, home_currency)
+            candidate = _match_currency_token(words[index - 1], trip_currency, home_currency)
+            if candidate is not None:
+                currency_token = candidate
+                consumed.add(index - 1)
 
         if currency_token == _UNSUPPORTED:
-            return None
-
+            return _LocatedAmount(0, _UNSUPPORTED, frozenset(consumed))
         currency = currency_token if currency_token is not None else trip_currency
         decimals = decimals_for(currency)
         value = Decimal(number_str.replace(",", ""))
         amount_minor = int((value * (Decimal(10) ** decimals)).to_integral_value(ROUND_HALF_EVEN))
-        return amount_minor, currency
+        return _LocatedAmount(amount_minor, currency, frozenset(consumed))
     return None
+
+
+def _description_words(words: list[str], consumed: frozenset[int]) -> str:
+    leftover = [word for index, word in enumerate(words) if index not in consumed]
+    if leftover and leftover[0].lower() == "for":
+        leftover = leftover[1:]
+    return " ".join(leftover).strip()
+
+
+def parse_caption_description(
+    text: str, trip_currency: str, home_currency: str, bot_username: str
+) -> tuple[str, Category] | None:
+    """A receipt photo's caption, e.g. `dinner` or `¥3000 dinner`, as a `(description,
+    category)` override for the LLM's reading (spec §13, sprint 4 pin). Uses the same
+    rules as `parse_expense` (an amount and its currency word are dropped from the
+    description) but does not require an amount, so `dinner` alone works. `None` if
+    nothing is left to describe (e.g. a caption that is only an amount).
+    """
+    mention_stripped = _strip_bot_mention(text, bot_username)
+    if not mention_stripped:
+        return None
+    working, _participants_text, _payer_text = _extract_trailing(mention_stripped)
+    working = _LEADING_PAID_RE.sub("", working).strip()
+    words = working.split()
+    located = _locate_amount(words, trip_currency, home_currency)
+    leftover_text = _description_words(words, located.consumed if located else frozenset())
+    if not leftover_text:
+        return None
+    return leftover_text.title(), _category_for(leftover_text)
+
+
+def parse_amount_only(text: str, trip_currency: str, home_currency: str) -> tuple[int, str] | None:
+    """Parses a short reply like `2400` or `S$24` into `(amount_minor, currency)`.
+
+    Uses the same amount/currency-token rule as `parse_expense` (spec §6), for the
+    receipt "Enter amount manually" flow (spec §7/§8, sprint 4). Returns `None` if no
+    amount is found or the currency isn't the trip's or home currency.
+    """
+    located = _locate_amount(text.strip().split(), trip_currency, home_currency)
+    if located is None or located.currency == _UNSUPPORTED:
+        return None
+    return located.amount_minor, located.currency
 
 
 def parse_expense(
@@ -197,38 +237,11 @@ def parse_expense(
     if not words:
         return None
 
-    amount_index: int | None = None
-    prefix = suffix = number_str = None
-    for index, word in enumerate(words):
-        match = _WORD_AMOUNT_RE.match(word)
-        if match:
-            amount_index = index
-            prefix = match.group("prefix")
-            suffix = match.group("suffix")
-            number_str = match.group("number")
-            break
-
-    if amount_index is None or number_str is None:
+    located = _locate_amount(words, trip_currency, home_currency)
+    if located is None:
         return None  # no amount found: not an expense candidate, stay silent
 
-    consumed = {amount_index}
-    currency_token = None
-    if prefix:
-        currency_token = _match_currency_token(prefix, trip_currency, home_currency)
-    if currency_token is None and suffix:
-        currency_token = _match_currency_token(suffix, trip_currency, home_currency)
-    if currency_token is None and amount_index + 1 < len(words):
-        candidate = _match_currency_token(words[amount_index + 1], trip_currency, home_currency)
-        if candidate is not None:
-            currency_token = candidate
-            consumed.add(amount_index + 1)
-    if currency_token is None and amount_index - 1 >= 0:
-        candidate = _match_currency_token(words[amount_index - 1], trip_currency, home_currency)
-        if candidate is not None:
-            currency_token = candidate
-            consumed.add(amount_index - 1)
-
-    if currency_token == _UNSUPPORTED:
+    if located.currency == _UNSUPPORTED:
         return ParsedExpense(
             amount_minor=0,
             currency="",
@@ -239,21 +252,13 @@ def parse_expense(
             error="unsupported_currency",
         )
 
-    currency = currency_token if currency_token is not None else trip_currency
-    decimals = decimals_for(currency)
-    value = Decimal(number_str.replace(",", ""))
-    amount_minor = int((value * (Decimal(10) ** decimals)).to_integral_value(ROUND_HALF_EVEN))
-
-    leftover = [word for index, word in enumerate(words) if index not in consumed]
-    if leftover and leftover[0].lower() == "for":
-        leftover = leftover[1:]
-    leftover_text = " ".join(leftover).strip()
+    leftover_text = _description_words(words, located.consumed)
     description = leftover_text.title() if leftover_text else "Expense"
     category = _category_for(leftover_text)
 
     return ParsedExpense(
-        amount_minor=amount_minor,
-        currency=currency,
+        amount_minor=located.amount_minor,
+        currency=located.currency,
         description=description,
         category=category,
         participants_text=participants_text,

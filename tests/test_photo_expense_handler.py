@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 from PIL import Image
 
 from app.bot.handlers.photo_expense import photo_expense_handler
-from app.bot.handlers.text_expense import draft_callback
+from app.bot.handlers.text_expense import draft_callback, text_expense_handler
 from app.models.trip import Trip
 from app.services.ledger_store import InMemoryLedgerStore
 from app.services.llm_schemas import ReceiptExtraction
@@ -199,3 +199,147 @@ async def test_total_choice_callback_proceeds_to_reconcile() -> None:
     callback_update.callback_query.edit_message_text.assert_awaited_once()
     (text,), kwargs = callback_update.callback_query.edit_message_text.call_args
     assert "Use the receipt total anyway?" in text
+
+
+def _draft_id_from(update: MagicMock) -> str:
+    return (
+        update.effective_message.reply_text.call_args.kwargs["reply_markup"]
+        .inline_keyboard[0][0]
+        .callback_data.split(":")[0]
+    )
+
+
+def _unreadable_extraction() -> ReceiptExtraction:
+    """What the prompt asks for on a blurry photo or a non-receipt: no candidates."""
+    return ReceiptExtraction(
+        candidate_totals=[], description="Expense", category="other", confidence=0.1
+    )
+
+
+async def test_no_candidate_totals_shows_two_buttons_not_sheets_error() -> None:
+    ledger, trip = await _bound_ledger()
+    deps = make_deps(ledger, receipt_reader=FakeReceiptReader(extraction=_unreadable_extraction()))
+    context = _context(deps)
+    update = _update()
+
+    await photo_expense_handler(update, context)
+
+    (text,), kwargs = update.effective_message.reply_text.call_args
+    assert "Couldn't read that receipt" in text
+    labels = [b.text for row in kwargs["reply_markup"].inline_keyboard for b in row]
+    assert labels == ["Try again", "Enter amount manually"]
+
+
+async def test_download_failure_shows_two_buttons() -> None:
+    ledger, trip = await _bound_ledger()
+    reader = FakeReceiptReader(extraction=_confident_extraction())
+    deps = make_deps(ledger, receipt_reader=reader)
+    context = _context(deps)
+    context.bot.get_file = AsyncMock(side_effect=RuntimeError("network blip"))
+    update = _update()
+
+    await photo_expense_handler(update, context)
+
+    (text,), _ = update.effective_message.reply_text.call_args
+    assert "Couldn't read that receipt" in text
+    assert reader.calls == []
+
+
+async def test_caption_with_amount_drops_the_amount_from_description() -> None:
+    ledger, trip = await _bound_ledger()
+    deps = make_deps(ledger, receipt_reader=FakeReceiptReader(extraction=_confident_extraction()))
+    context = _context(deps)
+    update = _update(caption="¥3000 dinner")
+
+    await photo_expense_handler(update, context)
+
+    (text,), _ = update.effective_message.reply_text.call_args
+    assert "<b>Dinner</b>" in text
+    assert "3000" not in text
+
+
+async def test_manual_amount_reply_sets_amount_and_keeps_caption() -> None:
+    ledger, trip = await _bound_ledger()
+    deps = make_deps(ledger, receipt_reader=FakeReceiptReader(error=ReceiptUnreadable()))
+    context = _context(deps)
+    context.bot.edit_message_text = AsyncMock()
+    photo = _update(caption="dinner", message_id=11, update_id=11)
+    await photo_expense_handler(photo, context)
+    draft_id = _draft_id_from(photo)
+
+    await draft_callback(_callback_update(f"{draft_id}:manual:-"), context)
+
+    reply = _text_update("2400", reply_to_message_id=5000, update_id=12)
+    await text_expense_handler(reply, context)
+
+    reply.effective_message.reply_text.assert_not_awaited()  # no second draft
+    kwargs = context.bot.edit_message_text.call_args.kwargs
+    assert kwargs["message_id"] == 5000
+    assert "Dinner" in kwargs["text"]
+    assert "¥2,400" in kwargs["text"]
+
+
+async def test_reply_to_other_bot_message_still_parses_as_expense() -> None:
+    ledger, trip = await _bound_ledger()
+    deps = make_deps(ledger)
+    context = _context(deps)
+    reply = _text_update("1200 yen ramen", reply_to_message_id=4321, update_id=13)
+
+    await text_expense_handler(reply, context)
+
+    (text,), _ = reply.effective_message.reply_text.call_args
+    assert "Ramen" in text
+
+
+async def test_retry_answers_once_and_keeps_buttons_when_download_fails() -> None:
+    ledger, trip = await _bound_ledger()
+    deps = make_deps(ledger, receipt_reader=FakeReceiptReader(error=ReceiptUnreadable()))
+    context = _context(deps)
+    photo = _update(message_id=14, update_id=14)
+    await photo_expense_handler(photo, context)
+    draft_id = _draft_id_from(photo)
+
+    context.bot.get_file = AsyncMock(side_effect=RuntimeError("file gone"))
+    callback = _callback_update(f"{draft_id}:retry:-")
+    await draft_callback(callback, context)
+
+    callback.callback_query.answer.assert_awaited_once_with("Reading the receipt again…")
+    (text,), kwargs = callback.callback_query.edit_message_text.call_args
+    assert "Couldn't read that receipt" in text
+    labels = [b.text for row in kwargs["reply_markup"].inline_keyboard for b in row]
+    assert labels == ["Try again", "Enter amount manually"]
+
+
+async def test_retry_success_moves_to_detected_card() -> None:
+    ledger, trip = await _bound_ledger()
+    reader = FakeReceiptReader(error=ReceiptUnreadable())
+    deps = make_deps(ledger, receipt_reader=reader)
+    context = _context(deps)
+    photo = _update(message_id=15, update_id=15)
+    await photo_expense_handler(photo, context)
+    draft_id = _draft_id_from(photo)
+
+    reader._error = None
+    reader._extraction = _confident_extraction()
+    callback = _callback_update(f"{draft_id}:retry:-")
+    await draft_callback(callback, context)
+
+    callback.callback_query.answer.assert_awaited_once()
+    (text,), _ = callback.callback_query.edit_message_text.call_args
+    assert "Lawson" in text
+    assert "Who should share this?" in text
+
+
+def _text_update(text: str, *, reply_to_message_id: int, update_id: int) -> MagicMock:
+    update = MagicMock()
+    update.update_id = update_id
+    update.effective_chat = SimpleNamespace(id=CHAT_ID, type="supergroup")
+    update.effective_user = SimpleNamespace(id=1, first_name="Ada", last_name=None, username="ada")
+    message = MagicMock()
+    message.text = text
+    message.message_id = update_id + 1000
+    message.date = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+    message.reply_to_message = SimpleNamespace(message_id=reply_to_message_id)
+    message.reply_text = AsyncMock(return_value=SimpleNamespace(message_id=6000))
+    update.effective_message = message
+    return update

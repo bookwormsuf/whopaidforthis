@@ -9,20 +9,17 @@ via `Literal`/`StrEnum`, `ge`/`le` numeric bounds, `default_factory` for arrays)
 
 `candidate_totals` is allowed to be empty -- the prompt instructs the model to list
 every number that could be a total, but a sufficiently unreadable photo may have
-none Claude is willing to name. An empty list is treated downstream
-(`app.services.receipt_parser.select_total`) as "unreadable", not as a 0-candidate
-ask.
+none Claude is willing to name. An empty list is rejected when validating
+into the domain `Receipt` (`app.services.receipt_parser.to_receipt`), which makes
+the photo unreadable rather than a 0-candidate ask.
 """
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.category import Category
-
-LineItemKind = Literal["item", "tax", "service_charge", "discount"]
+from app.models.receipt import LineItemKind
 
 
 class LineItemExtraction(BaseModel):
@@ -35,7 +32,7 @@ class LineItemExtraction(BaseModel):
     kind: LineItemKind
 
 
-class CandidateTotal(BaseModel):
+class CandidateTotalExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     label_as_printed: str
@@ -52,7 +49,7 @@ class ReceiptExtraction(BaseModel):
     currency: str | None = None
     transaction_datetime: str | None = None  # ISO 8601, only if printed on the receipt
     line_items: list[LineItemExtraction] = Field(default_factory=list)
-    candidate_totals: list[CandidateTotal] = Field(default_factory=list)
+    candidate_totals: list[CandidateTotalExtraction] = Field(default_factory=list)
     description: str
     category: Category
     confidence: float = Field(ge=0, le=1)

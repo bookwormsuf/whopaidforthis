@@ -8,13 +8,19 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
+import pytest
+
 from app.bot.render.draft import render_draft
 from app.bot.session_state import Dedup
+from app.models.category import Category
+from app.models.receipt import Receipt
 from app.models.trip import Trip
-from app.services.drafts import DraftService, InMemoryDraftStore
+from app.services.drafts import DraftError, DraftService, InMemoryDraftStore
 from app.services.exchange_rates import RateService, StaticRateProvider
 from app.services.ledger_store import InMemoryLedgerStore
 from app.services.llm_schemas import ReceiptExtraction
+from app.services.receipt_parser import to_receipt
+from app.services.sheet_rows import line_item_to_row
 
 
 def _trip() -> Trip:
@@ -42,8 +48,12 @@ async def _setup():
     return service, ledger, trip
 
 
-def _confident_extraction() -> ReceiptExtraction:
-    return ReceiptExtraction(
+def _receipt(currency: str = "JPY", **fields) -> Receipt:
+    return to_receipt(ReceiptExtraction(**fields), currency)
+
+
+def _confident_receipt() -> Receipt:
+    return _receipt(
         merchant="Lawson",
         currency="JPY",
         transaction_datetime="2026-09-20T14:00:00",
@@ -61,7 +71,7 @@ def _confident_extraction() -> ReceiptExtraction:
 
 async def test_confident_total_goes_straight_to_detected() -> None:
     service, ledger, trip = await _setup()
-    extraction = _confident_extraction()
+    receipt = _confident_receipt()
 
     draft = await service.start_from_receipt(
         chat_id=-100,
@@ -71,8 +81,7 @@ async def test_confident_total_goes_straight_to_detected() -> None:
         initiator_name="Ada",
         initiator_username="ada",
         trip=trip,
-        extraction=extraction,
-        currency="JPY",
+        receipt=receipt,
         transaction_date=date(2026, 9, 20),
         date_source="receipt",
     )
@@ -89,7 +98,7 @@ async def test_confident_total_goes_straight_to_detected() -> None:
 
 async def test_ambiguous_total_asks_then_choose_total_proceeds() -> None:
     service, ledger, trip = await _setup()
-    extraction = ReceiptExtraction(
+    receipt = _receipt(
         merchant="Ichiran",
         currency="JPY",
         line_items=[{"description": "Ramen", "quantity": 1, "amount_minor": 2380, "kind": "item"}],
@@ -110,8 +119,7 @@ async def test_ambiguous_total_asks_then_choose_total_proceeds() -> None:
         initiator_name="Ada",
         initiator_username="ada",
         trip=trip,
-        extraction=extraction,
-        currency="JPY",
+        receipt=receipt,
         transaction_date=date(2026, 9, 21),
         date_source="receipt",
     )
@@ -131,13 +139,13 @@ async def test_ambiguous_total_asks_then_choose_total_proceeds() -> None:
     assert proceeded.amount_minor == 2618
 
 
-async def test_reconcile_state_renders_numbers() -> None:
-    """A confident selection (diff within the ±5 tolerance) still shows the
-    reconciliation prompt if it doesn't exactly match items + adjustments (spec §7:
-    the reconciliation check is independent of how the total was chosen).
+async def test_confident_total_within_tolerance_skips_reconciliation() -> None:
+    """One confident candidate within ±5 of items + adjustments saves straight to the
+    normal card (spec §7, amended 2026-10-01): per-line tax rounding must not cost an
+    extra tap.
     """
     service, ledger, trip = await _setup()
-    extraction = ReceiptExtraction(
+    receipt = _receipt(
         line_items=[{"description": "Ramen", "quantity": 1, "amount_minor": 2380, "kind": "item"}],
         candidate_totals=[
             {"label_as_printed": "合計", "amount_minor": 2383, "is_grand_total_guess": True}
@@ -154,19 +162,86 @@ async def test_reconcile_state_renders_numbers() -> None:
         initiator_name="Ada",
         initiator_username="ada",
         trip=trip,
-        extraction=extraction,
-        currency="JPY",
+        receipt=receipt,
         transaction_date=date(2026, 9, 21),
         date_source="receipt",
     )
-    assert draft.state == "reconcile"
-    text, markup = render_draft(draft, trip)
-    assert "¥2,380" in text
-    assert "¥2,383" in text
+    assert draft.state == "detected"
+    assert draft.amount_minor == 2383
+
+
+async def test_reconcile_state_renders_numbers() -> None:
+    """A total picked from the buttons that differs from items + adjustments gets the
+    reconciliation prompt, showing items sum, adjustments, total and difference.
+    """
+    service, ledger, trip = await _setup()
+    receipt = _receipt(
+        line_items=[
+            {"description": "Ramen", "quantity": 1, "amount_minor": 2380, "kind": "item"},
+            {"description": "Tax", "quantity": 1, "amount_minor": 100, "kind": "tax"},
+        ],
+        candidate_totals=[
+            {"label_as_printed": "小計", "amount_minor": 2380, "is_grand_total_guess": False},
+            {"label_as_printed": "合計", "amount_minor": 2618, "is_grand_total_guess": False},
+        ],
+        description="Ramen",
+        category="food",
+        confidence=0.6,
+    )
+    draft = await service.start_from_receipt(
+        chat_id=-100,
+        message_id=3,
+        photo_file_id="f",
+        initiator_id=42,
+        initiator_name="Ada",
+        initiator_username="ada",
+        trip=trip,
+        receipt=receipt,
+        transaction_date=date(2026, 9, 21),
+        date_source="receipt",
+    )
+    assert draft.state == "choose_total"
+    # No grand-total guesses, so largest first: index 0 is 合計 (2618).
+    chosen = await service.choose_total(draft.draft_id, presser_id=42, index=0)
+    assert chosen.state == "reconcile"
+    text, markup = render_draft(chosen, trip)
+    assert "¥2,380" in text  # items
+    assert "¥100" in text  # adjustments
+    assert "¥2,618" in text  # total
+    assert "¥138" in text  # difference
     assert [b.text for row in markup.inline_keyboard for b in row] == [
         "Use total anyway",
         "Cancel",
     ]
+
+
+async def test_choose_total_matching_computed_skips_reconciliation() -> None:
+    service, ledger, trip = await _setup()
+    receipt = _receipt(
+        line_items=[{"description": "Ramen", "quantity": 1, "amount_minor": 2380, "kind": "item"}],
+        candidate_totals=[
+            {"label_as_printed": "小計", "amount_minor": 2380, "is_grand_total_guess": False},
+            {"label_as_printed": "お預り", "amount_minor": 3000, "is_grand_total_guess": False},
+        ],
+        description="Ramen",
+        category="food",
+        confidence=0.6,
+    )
+    draft = await service.start_from_receipt(
+        chat_id=-100,
+        message_id=3,
+        photo_file_id="f",
+        initiator_id=42,
+        initiator_name="Ada",
+        initiator_username="ada",
+        trip=trip,
+        receipt=receipt,
+        transaction_date=date(2026, 9, 21),
+        date_source="receipt",
+    )
+    chosen = await service.choose_total(draft.draft_id, presser_id=42, index=1)  # 2380
+    assert chosen.state == "detected"
+    assert chosen.amount_minor == 2380
 
 
 async def test_unreadable_then_manual_amount_produces_text_style_draft() -> None:
@@ -203,7 +278,7 @@ async def test_unreadable_then_manual_amount_produces_text_style_draft() -> None
 
 async def test_line_items_written_on_commit() -> None:
     service, ledger, trip = await _setup()
-    extraction = _confident_extraction()
+    receipt = _confident_receipt()
     draft = await service.start_from_receipt(
         chat_id=-100,
         message_id=5,
@@ -212,8 +287,7 @@ async def test_line_items_written_on_commit() -> None:
         initiator_name="Ada",
         initiator_username="ada",
         trip=trip,
-        extraction=extraction,
-        currency="JPY",
+        receipt=receipt,
         transaction_date=date(2026, 9, 20),
         date_source="receipt",
     )
@@ -226,3 +300,112 @@ async def test_line_items_written_on_commit() -> None:
     assert len(items) == 1
     assert items[0].description == "Onigiri"
     assert items[0].kind == "item"
+
+
+async def test_caption_survives_unreadable_then_manual_amount() -> None:
+    service, ledger, trip = await _setup()
+    draft = await service.start_unreadable(
+        chat_id=-100,
+        message_id=6,
+        photo_file_id="f",
+        initiator_id=42,
+        initiator_name="Ada",
+        initiator_username="ada",
+        trip=trip,
+        transaction_date=date(2026, 9, 22),
+        caption_override=("Dinner", Category.FOOD),
+    )
+    assert draft.description == "Dinner"
+    await service.request_manual_amount(draft.draft_id, presser_id=42)
+    settled = await service.set_manual_amount(draft.draft_id, 42, trip, 2400, "JPY")
+    assert settled.description == "Dinner"
+    assert settled.category == Category.FOOD
+
+
+async def test_retry_success_keeps_caption_and_refuses_double_press() -> None:
+    service, ledger, trip = await _setup()
+    draft = await service.start_unreadable(
+        chat_id=-100,
+        message_id=7,
+        photo_file_id="f",
+        initiator_id=42,
+        initiator_name="Ada",
+        initiator_username="ada",
+        trip=trip,
+        transaction_date=date(2026, 9, 22),
+        caption_override=("Dinner", Category.FOOD),
+    )
+    await service.begin_retry(draft.draft_id, presser_id=42)
+    with pytest.raises(DraftError):
+        await service.begin_retry(draft.draft_id, presser_id=42)
+
+    retried = await service.retry_receipt(
+        draft.draft_id,
+        42,
+        trip=trip,
+        receipt=_confident_receipt(),
+        transaction_date=date(2026, 9, 20),
+        date_source="receipt",
+    )
+    assert retried.state == "detected"
+    assert retried.description == "Dinner"
+    assert retried.merchant == "Lawson"
+    assert retried.reading_receipt is False
+
+
+async def test_retry_failure_allows_another_try() -> None:
+    service, ledger, trip = await _setup()
+    draft = await service.start_unreadable(
+        chat_id=-100,
+        message_id=8,
+        photo_file_id="f",
+        initiator_id=42,
+        initiator_name="Ada",
+        initiator_username="ada",
+        trip=trip,
+        transaction_date=date(2026, 9, 22),
+    )
+    await service.begin_retry(draft.draft_id, presser_id=42)
+    again = await service.retry_unreadable(draft.draft_id, presser_id=42)
+    assert again.state == "manual_amount"
+    await service.begin_retry(draft.draft_id, presser_id=42)  # does not raise
+
+
+async def test_home_currency_line_items_written_in_trip_currency() -> None:
+    """An SGD receipt on a JPY/SGD trip: `Amount <T>` holds each item converted to
+    yen at the expense's rate, not the SGD cents read as yen.
+    """
+    service, ledger, trip = await _setup()
+    receipt = _receipt(
+        "SGD",
+        line_items=[
+            {"description": "Chicken Rice", "quantity": 1, "amount_minor": 1250, "kind": "item"}
+        ],
+        candidate_totals=[
+            {"label_as_printed": "Total", "amount_minor": 1250, "is_grand_total_guess": True}
+        ],
+        description="Lunch",
+        category="food",
+        confidence=0.9,
+    )
+    draft = await service.start_from_receipt(
+        chat_id=-100,
+        message_id=9,
+        photo_file_id="f",
+        initiator_id=42,
+        initiator_name="Ada",
+        initiator_username="ada",
+        trip=trip,
+        receipt=receipt,
+        transaction_date=date(2026, 9, 20),
+        date_source="receipt",
+    )
+    await service.choose_just_me(draft.draft_id, presser_id=42)
+    committed = await service.confirm(draft.draft_id, presser_id=42)
+
+    expense = ledger.expense_for(committed.draft_id)
+    row = line_item_to_row(ledger.line_items_for(committed.draft_id)[0], expense, 1)
+    # S$12.50 / 0.0081 = ¥1,543.2... -> 1543
+    assert row[4] == 1543.0
+    assert row[1] == f"{committed.draft_id}-01"
+    assert row[5:] == ["", "unassigned", "item"]

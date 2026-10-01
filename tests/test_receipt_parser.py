@@ -23,6 +23,7 @@ from app.services.receipt_parser import (
     resolve_receipt_currency,
     resolve_transaction_date,
     select_total,
+    to_receipt,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "receipts"
@@ -31,6 +32,10 @@ FIXTURES = Path(__file__).parent / "fixtures" / "receipts"
 def _fixture(name: str) -> ReceiptExtraction:
     data = json.loads((FIXTURES / name).read_text())
     return ReceiptExtraction.model_validate(data)
+
+
+def _receipt(name: str):
+    return to_receipt(_fixture(name), "JPY")
 
 
 def _tiny_image():
@@ -124,15 +129,15 @@ def test_schema_rejects_confidence_out_of_range() -> None:
 
 
 def test_select_total_one_confident_candidate_within_tolerance_saves() -> None:
-    extraction = _fixture("clean_konbini_jpy.json")
-    decision = select_total(extraction)
+    receipt = _receipt("clean_konbini_jpy.json")
+    decision = select_total(receipt)
     assert decision.status == "confident"
     assert decision.chosen_total_minor == 420
 
 
 def test_select_total_two_candidates_asks() -> None:
-    extraction = _fixture("two_candidates_tax.json")
-    decision = select_total(extraction)
+    receipt = _receipt("two_candidates_tax.json")
+    decision = select_total(receipt)
     assert decision.status == "ask"
     assert decision.chosen_total_minor is None
     # Grand-total guesses first, then largest.
@@ -150,21 +155,23 @@ def test_select_total_no_line_items_uses_the_confident_candidate() -> None:
             {"label_as_printed": "Total", "amount_minor": 2400, "is_grand_total_guess": True}
         ],
     )
-    decision = select_total(extraction)
+    decision = select_total(to_receipt(extraction, "JPY"))
     assert decision.status == "confident"
     assert decision.chosen_total_minor == 2400
     assert decision.computed_total_minor is None
 
 
-def test_select_total_empty_candidates_raises_unreadable() -> None:
-    extraction = _fixture("unreadable.json")
+def test_empty_candidates_is_unreadable() -> None:
+    """An empty `candidate_totals` (the prompt asks for one on a blurry photo or a
+    non-receipt) fails validation into the domain `Receipt`.
+    """
     with pytest.raises(ReceiptUnreadable):
-        select_total(extraction)
+        to_receipt(_fixture("unreadable.json"), "JPY")
 
 
 def test_select_total_with_service_charge_is_confident() -> None:
-    extraction = _fixture("service_charge.json")
-    decision = select_total(extraction)
+    receipt = _receipt("service_charge.json")
+    decision = select_total(receipt)
     assert decision.status == "confident"
     assert decision.chosen_total_minor == 12100
     assert decision.computed_total_minor == 12100
@@ -191,7 +198,7 @@ def test_reconcile_numbers_when_total_differs() -> None:
 
 
 def test_date_within_30_days_uses_printed_date() -> None:
-    extraction = _fixture("clean_konbini_jpy.json")
+    extraction = _receipt("clean_konbini_jpy.json")
     message_time = datetime(2026, 9, 25, 10, 0, tzinfo=UTC)
     source, resolved = resolve_transaction_date(extraction, message_time, "Asia/Tokyo")
     assert source == "receipt"
@@ -199,7 +206,7 @@ def test_date_within_30_days_uses_printed_date() -> None:
 
 
 def test_date_beyond_30_days_falls_back_to_message_time() -> None:
-    extraction = _fixture("clean_konbini_jpy.json")  # printed 2026-09-20
+    extraction = _receipt("clean_konbini_jpy.json")  # printed 2026-09-20
     message_time = datetime(2026, 11, 5, 10, 0, tzinfo=UTC)
     source, resolved = resolve_transaction_date(extraction, message_time, "Asia/Tokyo")
     assert source == "message"
@@ -207,7 +214,7 @@ def test_date_beyond_30_days_falls_back_to_message_time() -> None:
 
 
 def test_no_printed_date_falls_back_to_message_time() -> None:
-    extraction = _fixture("unreadable.json")
+    extraction = _receipt("service_charge.json").model_copy(update={"transaction_datetime": None})
     message_time = datetime(2026, 9, 25, 23, 30, tzinfo=UTC)  # late UTC -> next day in Tokyo
     source, resolved = resolve_transaction_date(extraction, message_time, "Asia/Tokyo")
     assert source == "message"
@@ -245,7 +252,9 @@ class _FakeAnthropicMessages:
         if isinstance(outcome, Exception):
             raise outcome
         return SimpleNamespace(
-            parsed_output=outcome, usage=SimpleNamespace(input_tokens=100, output_tokens=50)
+            parsed_output=outcome,
+            stop_reason="end_turn" if outcome is not None else "refusal",
+            usage=SimpleNamespace(input_tokens=100, output_tokens=50),
         )
 
 
@@ -271,6 +280,27 @@ async def test_reader_gives_up_after_second_failure() -> None:
     with pytest.raises(ReceiptUnreadable):
         await reader.read(_tiny_image(), trip=_trip())
     assert client.messages.calls == 2
+
+
+async def test_reader_retries_when_no_parsed_output() -> None:
+    """A refusal or max_tokens cut-off returns `parsed_output=None` rather than
+    raising; it gets the one retry, then gives up as unreadable.
+    """
+    good = _fixture("clean_konbini_jpy.json")
+    client = _FakeAnthropicClient([None, good])
+    reader = AnthropicReceiptReader(client)
+    assert await reader.read(_tiny_image(), trip=_trip()) == good
+
+    client = _FakeAnthropicClient([None, None])
+    with pytest.raises(ReceiptUnreadable):
+        await AnthropicReceiptReader(client).read(_tiny_image(), trip=_trip())
+
+
+def test_unparseable_printed_date_becomes_none() -> None:
+    extraction = _fixture("clean_konbini_jpy.json").model_copy(
+        update={"transaction_datetime": "20th Sept"}
+    )
+    assert to_receipt(extraction, "JPY").transaction_datetime is None
 
 
 # -- No image bytes/base64 in logs -------------------------------------------

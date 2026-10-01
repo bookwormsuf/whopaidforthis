@@ -16,6 +16,7 @@ from telegram.ext import ContextTypes, filters
 
 from app.bot.deps import get_deps
 from app.bot.formatting import unsupported_currency_text
+from app.bot.handlers.photo_expense import handle_manual_amount_reply, read_receipt_photo
 from app.bot.render.draft import render_draft
 from app.models.user import TripUser
 from app.services.drafts import (
@@ -73,6 +74,12 @@ async def text_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if deps.recent_updates.seen(update.update_id):
             return
         deps.recent_updates.add(update.update_id)
+
+    # A reply carrying the amount for a receipt's "Enter amount manually" card is
+    # that draft's amount, not a new expense (sprint 4). Any other reply falls
+    # through and parses as usual.
+    if await handle_manual_amount_reply(update, context):
+        return
 
     try:
         trip = await deps.ledger.get_binding(chat.id)
@@ -139,10 +146,20 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Every draft button: `"{draft_id}:{action}:{arg}"` (spec §8)."""
     query = update.callback_query
     assert query is not None
+    answered = False
+
+    async def answer(text: str | None = None) -> None:
+        # A callback query can be answered only once; the `retry` action answers
+        # early, before its slow read, so every later answer becomes a no-op.
+        nonlocal answered
+        if not answered:
+            answered = True
+            await query.answer(text)
+
     data = query.data or ""
     parts = data.split(":", 2)
     if len(parts) != 3:
-        await query.answer()
+        await answer()
         return
     draft_id, action, _arg = parts
 
@@ -150,21 +167,21 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     presser = query.from_user
     chat = update.effective_chat
     if presser is None or chat is None:
-        await query.answer()
+        await answer()
         return
 
     try:
         trip = await deps.ledger.get_binding(chat.id)
     except TripSheetInaccessible:
         logger.info("draft %s: trip Sheet inaccessible", draft_id)
-        await query.answer()
+        await answer()
         return
     except LedgerUnavailable:
         logger.exception("draft %s: could not read the current binding", draft_id)
-        await query.answer(LEDGER_UNAVAILABLE_TEXT)
+        await answer(LEDGER_UNAVAILABLE_TEXT)
         return
     if trip is None:
-        await query.answer()
+        await answer()
         return
 
     try:
@@ -180,62 +197,61 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             try:
                 index = int(_arg)
             except ValueError:
-                await query.answer()
+                await answer()
                 return
             draft = await deps.draft_service.choose_total(draft_id, presser.id, index)
         elif action == "usetotal":
             draft = await deps.draft_service.use_total_anyway(draft_id, presser.id)
         elif action == "retry":
-            # Local import: avoids a module-load cycle (photo_expense imports
-            # formatting/render, never text_expense).
-            from app.bot.handlers.photo_expense import retry_receipt_read
-
-            pending = await deps.draft_service.get_for_retry(draft_id, presser.id)
-            result = await retry_receipt_read(deps, trip, context.bot, pending)
-            if result["unreadable"]:
-                draft = await deps.draft_service.retry_unreadable(
-                    draft_id, presser.id, transaction_date=pending.transaction_date
-                )
-            else:
+            pending = await deps.draft_service.begin_retry(draft_id, presser.id)
+            # Answer now: the read can take far longer than a callback query lives.
+            await answer("Reading the receipt again…")
+            outcome = await read_receipt_photo(
+                deps, trip, context.bot, pending.photo_file_id, datetime.now(UTC)
+            )
+            if outcome.status == "ok":
+                assert outcome.receipt is not None and outcome.transaction_date is not None
+                assert outcome.date_source is not None
                 draft = await deps.draft_service.retry_receipt(
                     draft_id,
                     presser.id,
                     trip=trip,
-                    extraction=result["extraction"],
-                    currency=result["currency"],
-                    transaction_date=result["transaction_date"],
-                    date_source=result["date_source"],
+                    receipt=outcome.receipt,
+                    transaction_date=outcome.transaction_date,
+                    date_source=outcome.date_source,
                 )
+            else:
+                draft = await deps.draft_service.retry_unreadable(draft_id, presser.id)
         elif action == "manual":
             draft = await deps.draft_service.request_manual_amount(draft_id, presser.id)
         else:
-            await query.answer()
+            await answer()
             return
     except DraftExpired:
-        await query.answer()
+        await answer()
         try:
             await query.edit_message_text(EXPIRED_TEXT, parse_mode="HTML")
         except Exception:  # noqa: BLE001 - editing an already-changed message is not fatal
             logger.debug("draft %s: could not edit expired draft message", draft_id)
         return
     except NotInitiator as exc:
-        await query.answer(f"Only {exc.initiator_name} can edit this")
+        await answer(f"Only {exc.initiator_name} can edit this")
         return
     except AlreadySaved:
-        await query.answer(ALREADY_SAVED_TEXT)
+        await answer(ALREADY_SAVED_TEXT)
         return
     except AlreadyCancelled:
-        await query.answer(ALREADY_CANCELLED_TEXT)
+        await answer(ALREADY_CANCELLED_TEXT)
         return
     except LedgerUnavailable:
         logger.exception("draft %s: ledger unavailable", draft_id)
-        await query.answer(LEDGER_UNAVAILABLE_TEXT)
+        await answer(LEDGER_UNAVAILABLE_TEXT)
         return
     except DraftError:
         logger.exception("draft %s: draft error", draft_id)
-        await query.answer()
+        await answer()
         return
 
-    await query.answer()
+    await answer()
     text, keyboard = render_draft(draft, trip)
     await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)

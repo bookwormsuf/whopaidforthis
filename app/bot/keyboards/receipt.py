@@ -7,7 +7,7 @@ from __future__ import annotations
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.bot.formatting import fmt_money
-from app.services.llm_schemas import CandidateTotal
+from app.models.receipt import CandidateTotal
 
 
 def choose_total_keyboard(
