@@ -321,3 +321,17 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   Sending the same image as two separate messages still gives two drafts, by design.
 - Reviewed by / disposition: findings fixed; awaiting Sufyan's checklist and sign-off.
 - Next action / owner: deploy, run the sprint 4 checklist / Sufyan.
+
+### 2026-10-01 — Deploy from GitHub Actions
+
+- Performed by: Claude (cloud session).
+- Scope and reason: Sufyan now works from a phone and the cloud environment's network policy
+  blocks Fly.io, so deploys move to GitHub Actions. `.github/workflows/deploy.yml` runs on every
+  push to `main` (and by hand from the Actions tab): ruff, format check and pytest, then
+  `flyctl deploy --remote-only --build-arg BOT_VERSION=<short sha> --ha=false`, the same deploy
+  as `scripts/deploy.sh`. One deploy at a time (`concurrency`). README "Updating" section
+  updated. Spec §15 is unchanged in substance (one machine, `--ha=false`, no services).
+- Needs: repo secret `FLY_API_TOKEN`, a Fly deploy token scoped to the app, created by Sufyan.
+- Checks: workflow YAML parses; not yet run on GitHub (it first runs when this merges).
+- Next action / owner: add the secret / Sufyan; merge, watch the run, then the sprint 4
+  checklist from step 2 / Sufyan.
