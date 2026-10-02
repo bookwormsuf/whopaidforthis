@@ -43,7 +43,12 @@ from app.models.trip import Trip
 from app.services.conversion import both_amounts
 from app.services.currencies import symbol_for
 from app.services.exchange_rates import RateService, RateUnavailable
-from app.services.expense_parser import ParsedExpense, parse_custom_line, parse_item_command
+from app.services.expense_parser import (
+    ParsedExpense,
+    parse_custom_line,
+    parse_item_assignment,
+    parse_item_command,
+)
 from app.services.ledger_store import LedgerStore, LedgerUnavailable
 from app.services.names import Person, is_everyone, resolve_name, resolve_names
 from app.services.receipt_parser import (
@@ -195,6 +200,8 @@ class Draft:
     everyone_items: frozenset[int] = frozenset()
     rest_everyone: bool = False  # `Rest → everyone` pressed: unclaimed go to everyone
     items_error: str | None = None  # the last text shortcut's problem, shown on the card
+    # Who the initiator's item taps count for, when not themselves (added 2026-10-02).
+    claiming_for: int | None = None
     # `Use total anyway` keeps the receipt total but turns off `By items` (spec §7).
     items_allowed: bool = True
     rate: ExchangeRate | None = None
@@ -947,15 +954,35 @@ class DraftService:
         return replace(draft, item_claims=claims, everyone_items=frozenset(everyone))
 
     async def toggle_item(self, draft_id: str, presser_id: int, index: int) -> Draft:
-        """An item button: toggles the presser's claim."""
+        """An item button: toggles the presser's claim, or, for the initiator with a
+        "Tapping for" person picked, that person's claim.
+        """
         draft = await self._get_open(draft_id)
         if index not in claimable_indices(draft):
             raise DraftError("not a claimable item")
         draft = await self._joined_presser(draft, presser_id)
-        draft = self._claim(draft, index, presser_id, None)
-        if presser_id in draft.item_claims.get(index, ()):
-            draft = self._as_participant(draft, presser_id)
+        # The initiator may be tapping for someone else ("Tapping for").
+        target = presser_id
+        if presser_id == draft.initiator_id and draft.claiming_for is not None:
+            target = draft.claiming_for
+        draft = self._claim(draft, index, target, None)
+        if target in draft.item_claims.get(index, ()):
+            draft = self._as_participant(draft, target)
         updated = replace(draft, items_error=None)
+        await self._drafts.put(updated)
+        return updated
+
+    async def set_claiming_for(self, draft_id: str, presser_id: int, user_id: int) -> Draft:
+        """The "Tapping for" row (initiator only): the initiator's item taps now
+        count for `user_id`; picking themselves goes back to normal.
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "items":
+            raise DraftError(f"cannot pick who to tap for in state {draft.state}")
+        if user_id not in {p.user_id for p in draft.people}:
+            raise DraftError("not one of the people on this card")
+        target = None if user_id == draft.initiator_id else user_id
+        updated = replace(draft, claiming_for=target, items_error=None)
         await self._drafts.put(updated)
         return updated
 
@@ -977,7 +1004,8 @@ class DraftService:
 
     async def apply_item_command(self, draft_id: str, presser_id: int, text: str) -> Draft:
         """A text shortcut replied to the item card (spec §9): `mine 1,4`,
-        `split 5 everyone`, `unclaim 2`. Numbers are the item numbers on the card.
+        `split 5 everyone`, `unclaim 2`, and, from the initiator, `alvin 1,3` to give
+        items to someone else. Numbers are the item numbers on the card.
         Unknown numbers or an unrecognised line are shown on the card.
         """
         draft = await self._get_open(draft_id)
@@ -988,9 +1016,22 @@ class DraftService:
             if not line:
                 continue
             command = parse_item_command(line)
+            target = presser_id
             if command is None:
-                problems.append(f"Couldn't read '{line}'")
-                continue
+                assignment = parse_item_assignment(line)
+                if assignment is None:
+                    problems.append(f"Couldn't read '{line}'")
+                    continue
+                who, numbers = assignment
+                match = resolve_name(who, draft.people, presser_id)
+                if match.status != "exact":
+                    problems.append(f"Who is '{who}'?")
+                    continue
+                target = match.user_ids[0]
+                if target != presser_id and presser_id != draft.initiator_id:
+                    problems.append(f"Only {draft.initiator_name} can give items to others")
+                    continue
+                command = ("mine", numbers)
             verb, numbers = command
             unknown = [n for n in numbers if not 1 <= n <= len(numbered)]
             if unknown:
@@ -999,9 +1040,7 @@ class DraftService:
             for n in numbers:
                 index = numbered[n - 1]
                 if verb == "mine":
-                    draft = self._as_participant(
-                        self._claim(draft, index, presser_id, True), presser_id
-                    )
+                    draft = self._as_participant(self._claim(draft, index, target, True), target)
                 elif verb == "unclaim":
                     draft = self._claim(draft, index, presser_id, False)
                 else:

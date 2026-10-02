@@ -82,9 +82,25 @@ def _strip_bot_mention(text: str, bot_username: str) -> str:
     return pattern.sub("", text).strip()
 
 
+_TAG_RE = re.compile(r"(?<!\S)@\w+")
+
+
+def _extract_tag(text: str) -> tuple[str, str | None]:
+    """A tagged person (`@alvin`) paid (decided 2026-10-02). Returns the text with
+    every tag removed and the first tag, `@` kept, or `None`. The bot's own mention
+    is stripped before this.
+    """
+    tags = _TAG_RE.findall(text)
+    if not tags:
+        return text, None
+    return " ".join(_TAG_RE.sub(" ", text).split()), tags[0]
+
+
 def _extract_trailing(text: str) -> tuple[str, str | None, str | None]:
     """Splits off the trailing `paid by <name>` and `split ...` clauses, which may
-    come in either order (`... paid by Ada split between me and Ada`).
+    come in either order (`... paid by Ada split between me and Ada`). A tag
+    elsewhere in the message (`@alvin`) is the payer when there is no `paid by`, and
+    is never part of the description.
     """
     payer_match = _PAID_BY_RE.search(text)
     split_match = _SPLIT_RE.search(text)
@@ -94,7 +110,8 @@ def _extract_trailing(text: str) -> tuple[str, str | None, str | None]:
     )
     starts = [m.start() for m in (payer_match, split_match) if m is not None]
     working = text[: min(starts)].strip() if starts else text
-    return working, participants_text, payer_text
+    working, tagged = _extract_tag(working)
+    return working, participants_text, payer_text or tagged
 
 
 def _match_currency_token(token: str, trip_currency: str, home_currency: str) -> str | None:
@@ -309,6 +326,25 @@ def parse_item_command(line: str) -> tuple[str, list[int]] | None:
         return None  # `split` needs `everyone`; `mine`/`unclaim` must not have it
     numbers = [int(n) for n in re.findall(r"\d+", match.group("numbers"))]
     return ("everyone" if verb == "split" else verb), numbers
+
+
+_ITEM_ASSIGN_RE = re.compile(
+    r"^(?P<who>@?[^\d\s,][^\d,]*?)\s+(?P<numbers>\d+(?:\s*,\s*\d+|\s+\d+)*)$"
+)
+
+
+def parse_item_assignment(line: str) -> tuple[str, list[int]] | None:
+    """`alvin 1,3` on the item card: the sender gives items 1 and 3 to Alvin (added
+    2026-10-02). Returns `(name as written, item numbers)`, or `None`. The verbs of
+    `parse_item_command` are not names.
+    """
+    match = _ITEM_ASSIGN_RE.match(line.strip())
+    if match is None:
+        return None
+    who = match.group("who").strip()
+    if who.casefold() in {"mine", "unclaim", "split"}:
+        return None
+    return who, [int(n) for n in re.findall(r"\d+", match.group("numbers"))]
 
 
 def parse_expense(

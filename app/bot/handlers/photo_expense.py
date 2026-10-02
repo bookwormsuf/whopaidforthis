@@ -26,6 +26,7 @@ from telegram.ext import ContextTypes, filters
 
 from app.bot.deps import Deps, get_deps
 from app.bot.formatting import unsupported_currency_text
+from app.bot.handlers.tags import join_tagged, tags_as_text
 from app.bot.render.draft import render_draft
 from app.models.category import Category
 from app.models.receipt import Receipt
@@ -154,10 +155,15 @@ async def photo_expense_handler(update: Update, context: ContextTypes.DEFAULT_TY
     participants_text = payer_text = None
     if message.caption:
         bot_username = context.bot.username or ""
+        caption, tagged_users = tags_as_text(message, caption=True)
         caption_override = parse_caption_description(
-            message.caption, trip.trip_currency, trip.home_currency, bot_username
+            caption, trip.trip_currency, trip.home_currency, bot_username
         )
-        participants_text, payer_text = parse_caption_clauses(message.caption, bot_username)
+        participants_text, payer_text = parse_caption_clauses(caption, bot_username)
+        try:
+            await join_tagged(deps, trip, tagged_users, now)
+        except LedgerUnavailable:
+            logger.exception("photo_expense: could not join a tagged user")
 
     outcome = await read_receipt_photo(deps, trip, context.bot, largest.file_id, message_time)
     if outcome.status == "too_large":
