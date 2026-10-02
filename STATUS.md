@@ -596,4 +596,3 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   stay their own. Spec §6 and §9 amended; README updated.
 - Checks: `uv run pytest -q` 423 passed; ruff clean. No separate `/review` run (a small change
   during go-live); covered by 8 new tests.
-\n
