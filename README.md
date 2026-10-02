@@ -35,7 +35,7 @@ Each trip Sheet has these tabs (headers use the trip's currency codes, e.g. `JPY
 | Summary | formulas only | who owes whom, totals, by category / day / payer |
 | Expenses | one confirmed or cancelled expense | payer, description, original amount, trip and home amounts, rate, split method, status |
 | Splits | one person's share of one expense | share in trip and home currency |
-| Line Items | one line from a receipt | amount, who had it, `claimed` / `everyone` / `proportional`, kind |
+| Line Items | one line from a receipt | amount, who had it, `claimed` / `everyone` / `proportional` for a By items split (`unassigned` otherwise), kind |
 | Users | one trip user | Telegram user ID, name, joined |
 | Exchange Rates | one cached rate | requested date, rate date, rate |
 | Trip | the trip's settings | currencies, timezone |
@@ -159,7 +159,10 @@ The bot writes to Google Sheets using a **service account**, not your personal G
 2. Create a service account under IAM & Admin → Service Accounts, then add a JSON key for it.
    Download the key file.
 3. Put the whole contents of that JSON file, on one line, into `GOOGLE_SERVICE_ACCOUNT_JSON` in
-   your `.env`. Not a file path — the JSON text itself.
+   your `.env`. Not a file path — the JSON text itself. Keep the key file outside the repo, and
+   print it as one line with
+   `python3 -c "import json,sys;print(json.dumps(json.load(open(sys.argv[1]))))" path/to/key.json`;
+   paste the output as the value, wrapped in single quotes.
 4. Create one blank Google Sheet named `whopaid control` for the bot's own bookkeeping (it holds
    the map of Telegram group → trip Sheet). Share it with the service account's email (the
    `client_email` field in the JSON key, looks like `something@project.iam.gserviceaccount.com`)
@@ -267,20 +270,20 @@ The bot runs on Fly.io as one machine, long-polling Telegram. **Stop the local b
 deploying, and never run both at once** — two pollers on the same bot token make Telegram
 return 409 and both go deaf.
 
-1. `fly auth login` (opens a browser; you already have flyctl installed).
+1. Install flyctl (`brew install flyctl`, or see [fly.io/docs/flyctl/install](https://fly.io/docs/flyctl/install/))
+   and run `fly auth login`.
 2. `fly launch --no-deploy --copy-config --name whopaid-bot --region sin`. Answer **No** to
    Postgres, Redis and any other add-on.
    If Fly says the name is taken, accept the name it suggests (or use `whopaid-bot-<4 chars>`);
    `--copy-config` writes it into `fly.toml`, and every later command uses that name.
-3. `./scripts/set-fly-secrets.sh` . It prints the variable names it set, never the values.
+3. `./scripts/set-fly-secrets.sh` copies the secrets from `.env` to Fly. It prints the variable
+   names it set, never the values.
 4. `./scripts/deploy.sh`. Wait for "deployed successfully".
-5. `fly status`. Exactly one machine, state `started`.
+5. `fly status`. Exactly one machine, state `started`. If `fly machine list` shows two, run
+   `fly scale count 1`.
 6. `fly logs`. You see `whopaid started`.
-7. Close your laptop. From your phone, send `/help` and `500 coffee` in the test group, confirm
-   it. Reopen the laptop; the Sheet has the row.
-8. `fly machine list` shows one machine. If two, run `fly scale count 1`.
-9. Make a trivial change with the agent, commit it, `./scripts/deploy.sh` again, confirm `/help`
-   shows the new version.
+7. Stop any local copy of the bot, then send `/help` and `500 coffee` in your test group and
+   confirm it; the Sheet gets the row.
 
 ### Updating
 
@@ -336,7 +339,7 @@ Amir:    /settle
 bot:     Amir → Ada S$17.01
 ```
 
-Screenshots from the test group go in `docs/images/` (test group only, no real names).
+Screenshots of these steps from a test group (no real names) belong in `docs/images/`.
 
 ## Settlement logic
 

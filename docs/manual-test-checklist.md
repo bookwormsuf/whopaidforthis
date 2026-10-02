@@ -32,18 +32,27 @@ Result is `pass`, or `fail` with the step numbers. Fixes go in `STATUS.md`.
    too** yourself says "You're already in ✅". **Everyone's in** removes the buttons.
 6. The Users tab has one row for you, User ID in column A (unhide it), Joined TRUE. A second
    `/join` doesn't add a row.
+6a. The Sheet layout: Summary is the first tab and opens by default, with "Who owes whom" and the
+   positive/negative note; Read Me is last; header rows are frozen; Summary shows no `#REF!`; ID
+   columns are hidden (Summary User ID; Expenses, Splits and Line Items IDs; Users User ID).
+6b. On a spare Sheet (shared with the service account), `/settrip <spare url>` → **Switch Sheet**
+   → JPY, SGD, Asia/Tokyo → Create builds every tab once. Switch back to the test Sheet the same
+   way; nothing in it is duplicated.
 
 ### Text expenses (Sprint 2)
 7. `1200 yen ramen` → card with ¥1,200, S$, your name, date and rate. **Just me** → **Confirm** →
    `Saved ✅ …`. Expenses, Splits and Exchange Rates each have a new row.
 8. `I paid ¥4,850 for dinner`, `taxi 3200`, `750 coffee` all parse. `S$12 grab` reads
-   `Grab — S$12.00`, home currency only. Cancel each.
+   `Grab — S$12.00`, home currency only; confirm it and check its Expenses row has Original
+   Currency `SGD` and SGD Amount 12.00. Cancel the others.
 9. `lol that ramen was so good` → silence. `500 baht massage` → "I can only record JPY or SGD
    for this trip."
 10. `6000 split dinner` → "Dinner" with Just me / Everyone / Choose people. Cancel.
 11. `/recent`, `/today`, `/summary` match the Sheet.
 12. Send an expense and tap **Cancel**: nothing is written. Tap a button on an old saved card:
     there are none.
+12a. Send an expense and leave the card open. Restart the bot (`fly machine restart <id>`, or a
+    deploy), then tap **Just me**: "This expense expired, please send it again".
 
 ### Receipts (Sprints 4 and 6)
 13. A clear receipt → card with merchant, total, S$, date and item count. **Just me** →

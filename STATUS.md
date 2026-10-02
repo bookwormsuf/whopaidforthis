@@ -17,7 +17,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 4 Receipt photos, total only | written (+ §7/§10 amendments) | done | green (302) | 2026-10-01, findings fixed | 2026-10-01, all eight pass | 2026-10-01 | Sprint 4 closed. Next: run sprint 5 / agent |
 | 5 Splitting and balances | written (+ §6 amendment) | done | green (363) | 2026-10-01, findings fixed | 2026-10-02, all six single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 5 closed. Next: merge Sprint 6 / Sufyan approves |
 | 6 Item claiming | written (+ §7 amendment) | done | green (404) | 2026-10-01, findings fixed | 2026-10-02, single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 6 closed. Next: run sprint 7 / agent |
-| 7 Hardening and go-live | written | done | green (404) | 2026-10-02, findings fixed | – | – | Regression run (incl. deferred two-person checks) and go-live / Sufyan |
+| 7 Hardening and go-live | written | done | green (404) | 2026-10-02, findings fixed (two need Sufyan) | – | – | Regression run (incl. deferred two-person checks) and go-live / Sufyan |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -543,6 +543,15 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   only, no real names).
 - Still open from Sprint 6: the included-tax (内税) misread; no fix approved.
 - Checks: `uv run pytest -q` 404 passed; ruff and format clean.
+- Review (`/review`): seven findings.
+  - Fixed: STATUS recorded the review before it ran.
+  - Fixed: the regression checklist missed the restart/expired card, the Sheet layout, switching
+    Sheet without duplicates, and the SGD Original Currency column.
+  - Fixed: the README didn't say how to put the JSON key on one line.
+  - Fixed: the Deployment steps were Sufyan's personal checklist; they now install flyctl and
+    read for a stranger.
+  - Fixed: Line Items `unassigned` was missing from the data model.
+  - Needs Sufyan: screenshots (`docs/images/`), and the LICENSE name (handle or real name).
 - Next action / owner: run `docs/manual-test-checklist.md` (with the second person for Part B)
   and the go-live steps / Sufyan.
 
