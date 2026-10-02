@@ -461,3 +461,19 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   shared dish, B's taps, and B pressing Done).
 - Next action / owner: Sprint 5 checklist and sign-off / Sufyan; then merge the Sprint 6 PR and do
   its single-person checklist / Sufyan.
+
+### 2026-10-02 — Sprint 5 checklist: Users rows shifted, `split everyone` silent
+
+- Performed by: Sufyan (Telegram, Sheets), Claude (fix).
+- Step 2 found a bug: `6000 yen dinner split everyone` got no reply; a plain expense worked.
+- Cause: appending to the Users tab without a table range let Google skip the hidden User ID
+  column, so every row landed one column to the right. The bot never found the existing row (a
+  new row on every message) and reading the user list crashed on the empty ID. Sprint 5 is the
+  first feature to read that list; a non-Sheets error had no reply.
+- Fix (hotfix PR, merged and deployed on its own): appends anchored at `A1`, unreadable Users
+  rows skipped with a warning, and any unexpected error now replies "Something went wrong,
+  please try again." (a toast for a button). Merged into the Sprint 6 branch too.
+- Checks: `uv run pytest -q` 365 passed on `main`, 399 on the Sprint 6 branch; ruff clean.
+- Next action / owner: delete the shifted rows on the test Sheet's Users tab, `/join`, then
+  redo the checklist from step 2 / Sufyan.
+
