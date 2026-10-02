@@ -38,6 +38,9 @@ class CandidateTotalExtraction(BaseModel):
     label_as_printed: str
     amount_minor: int = Field(ge=0)
     is_grand_total_guess: bool
+    # The amount exactly as printed, e.g. "¥6,850" (added 2026-10-02): lets
+    # `to_receipt` catch a reading off by a factor of 100 (yen read as cents).
+    amount_as_printed: str | None = None
 
 
 class ReceiptExtraction(BaseModel):
