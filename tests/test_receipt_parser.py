@@ -13,12 +13,14 @@ import pytest
 from PIL import Image
 from pydantic import ValidationError
 
+from app.models.receipt import CandidateTotal, ReceiptLineItem
 from app.models.trip import Trip
 from app.services.images import prepare_image
 from app.services.llm_schemas import ReceiptExtraction
 from app.services.receipt_parser import (
     AnthropicReceiptReader,
     ReceiptUnreadable,
+    drop_included_tax,
     needs_reconciliation,
     reconcile,
     resolve_receipt_currency,
@@ -357,3 +359,50 @@ def test_needs_reconciliation_only_beyond_tolerance() -> None:
     assert not needs_reconciliation(1000, None)
     assert not needs_reconciliation(1000, 1005)
     assert needs_reconciliation(1000, 1006)
+
+
+# -- Included tax read as an extra tax line (decided 2026-10-02) ----------------
+
+
+def _li(description: str, amount: int, kind: str = "item") -> ReceiptLineItem:
+    return ReceiptLineItem(description=description, quantity=1, amount_minor=amount, kind=kind)
+
+
+def _total(amount: int, guess: bool = True) -> CandidateTotal:
+    return CandidateTotal(label_as_printed="合計", amount_minor=amount, is_grand_total_guess=guess)
+
+
+def test_included_tax_line_is_dropped_when_that_matches_the_total() -> None:
+    lines = [_li("寿司", 1455), _li("寿司", 162), _li("消費税等(内税)", 119, "tax")]
+    assert drop_included_tax(lines, [_total(1617)]) == lines[:2]
+
+
+def test_real_tax_line_is_kept() -> None:
+    lines = [_li("Ramen", 1000), _li("Tax", 100, "tax")]
+    assert drop_included_tax(lines, [_total(1100)]) == lines
+
+
+def test_tax_kept_when_dropping_it_matches_only_a_subtotal() -> None:
+    lines = [_li("Ramen", 1000), _li("Tax", 100, "tax")]
+    # Lines make 1,100, the total says 1,150; 1,000 is only a subtotal, not a guess.
+    assert drop_included_tax(lines, [_total(1150), _total(1000, guess=False)]) == lines
+
+
+def test_to_receipt_applies_it() -> None:
+    extraction = ReceiptExtraction(
+        merchant="Sushi",
+        currency="JPY",
+        transaction_datetime=None,
+        line_items=[
+            {"description": "寿司", "quantity": 1, "amount_minor": 1617, "kind": "item"},
+            {"description": "消費税等(内税)", "quantity": 1, "amount_minor": 147, "kind": "tax"},
+        ],
+        candidate_totals=[
+            {"label_as_printed": "合計", "amount_minor": 1617, "is_grand_total_guess": True}
+        ],
+        description="Sushi",
+        category="food",
+        confidence=0.9,
+    )
+    receipt = to_receipt(extraction, "JPY")
+    assert [i.kind for i in receipt.line_items] == ["item"]
