@@ -323,7 +323,7 @@ class SheetsLedgerStore:
                     value_input_option=ValueInputOption.raw,
                 )
             else:
-                await _with_retries(bindings_ws.append_row, values)
+                await _with_retries(bindings_ws.append_row, values, table_range="A1")
         self._binding_cache[trip.chat_id] = trip
         self._not_bound_cache.pop(trip.chat_id, None)
         self._inaccessible_cache.pop(trip.chat_id, None)
@@ -443,7 +443,14 @@ class SheetsLedgerStore:
                     value_input_option=ValueInputOption.raw,
                 )
             else:
-                await _with_retries(ws.append_row, values, value_input_option=ValueInputOption.raw)
+                # `table_range="A1"`: without it Google guesses where the table starts
+                # and skips the hidden User ID column, shifting the row right by one.
+                await _with_retries(
+                    ws.append_row,
+                    values,
+                    value_input_option=ValueInputOption.raw,
+                    table_range="A1",
+                )
         return merged
 
     async def list_users(self, trip: Trip, joined_only: bool = False) -> list[TripUser]:
@@ -451,7 +458,15 @@ class SheetsLedgerStore:
         rows = await _with_retries(
             ws.get_all_values, value_render_option=ValueRenderOption.unformatted
         )
-        users = [_row_to_user(row) for row in rows[1:] if _row_nonempty(row)]
+        users = []
+        for number, row in enumerate(rows[1:], start=2):
+            if not _row_nonempty(row):
+                continue
+            try:
+                users.append(_row_to_user(row))
+            except (ValueError, TypeError, IndexError):
+                # One bad row (e.g. edited by hand) must not take every command down.
+                logger.warning("list_users: skipping unreadable Users row %s", number)
         if joined_only:
             return [user for user in users if user.joined]
         return users
@@ -626,4 +641,6 @@ class SheetsLedgerStore:
             rate.provider,
             rate.retrieved_at.isoformat(),
         ]
-        await _with_retries(ws.append_row, row, value_input_option=ValueInputOption.raw)
+        await _with_retries(
+            ws.append_row, row, value_input_option=ValueInputOption.raw, table_range="A1"
+        )
