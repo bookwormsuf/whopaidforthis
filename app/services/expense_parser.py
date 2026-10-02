@@ -20,7 +20,10 @@ from app.services.currencies import HOME_OR_USD, decimals_for, resolve_alias
 _MAX_WORDS = 12
 
 # "S$" must be tried before the lone "$" so it isn't split into "S" + "$".
-_CURRENCY_PREFIX_ALT = r"S\$|[¥$£€₩฿]"
+# A symbol, letters (`SGD`, `S`), or both (`S$`, `$SGD`) glued to the number. A
+# letter prefix that isn't a currency (e.g. `taxi3200`) means the word is not an
+# amount; see `_prefix_currency`.
+_CURRENCY_PREFIX_ALT = r"[¥$£€₩฿]?[A-Za-z]{1,3}[¥$£€₩฿]?|[¥$£€₩฿]"
 _WORD_AMOUNT_RE = re.compile(
     rf"^(?P<prefix>{_CURRENCY_PREFIX_ALT})?"
     r"(?P<number>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
@@ -120,6 +123,19 @@ def _match_currency_token(token: str, trip_currency: str, home_currency: str) ->
     return _UNSUPPORTED
 
 
+def _prefix_currency(prefix: str, trip_currency: str, home_currency: str) -> str | None:
+    """The currency of a prefix glued to a number: the prefix as written (`S$`, `¥`,
+    `SGD`), else its letters alone, so `$SGD559.57` reads as SGD.
+    """
+    token = _match_currency_token(prefix, trip_currency, home_currency)
+    if token is not None:
+        return token
+    letters = "".join(c for c in prefix if c.isalpha())
+    if letters and letters != prefix:
+        return _match_currency_token(letters, trip_currency, home_currency)
+    return None
+
+
 def _category_for(text: str) -> Category:
     for pattern, category in _CATEGORY_KEYWORDS:
         if pattern.search(text):
@@ -157,7 +173,9 @@ def _locate_amount(
         consumed = {index}
         currency_token = None
         if prefix:
-            currency_token = _match_currency_token(prefix, trip_currency, home_currency)
+            currency_token = _prefix_currency(prefix, trip_currency, home_currency)
+            if currency_token is None and any(c.isalpha() for c in prefix):
+                continue  # `taxi3200`, `part1`: letters that aren't a currency
         if currency_token is None and suffix:
             currency_token = _match_currency_token(suffix, trip_currency, home_currency)
         if currency_token is None and index + 1 < len(words):

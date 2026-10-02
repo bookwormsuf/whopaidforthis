@@ -558,3 +558,13 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Next action / owner: run `docs/manual-test-checklist.md` (with the second person for Part B)
   and the go-live steps / Sufyan.
 
+### 2026-10-02 — Go-live: `$SGD559.57` read as ¥1
+
+- Performed by: Sufyan (real group), Claude (fix).
+- `$SGD559.57 Hotel part 1` became a ¥1 draft: a currency written in letters and glued to the
+  number (`$SGD559.57`, `SGD559.57`) wasn't recognised, so the `1` in "part 1" was taken as the
+  amount. Cancelled before saving.
+- Fix: a glued prefix may be letters, a symbol or both; its letters are tried as a currency code
+  (`$SGD` → SGD). Letters that aren't a currency (`taxi3200`) still don't make an amount.
+- Checks: `uv run pytest -q` 414 passed; ruff clean.
+
