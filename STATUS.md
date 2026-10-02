@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-10-02 (sprint 5 signed off; sprint 6 built, awaiting merge)
+Updated: 2026-10-02 (sprint 6 signed off)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -16,8 +16,8 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 3 First deployment | written | done | green (247) | 2026-10-01, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 3 closed. Next: run sprint 4 / agent |
 | 4 Receipt photos, total only | written (+ §7/§10 amendments) | done | green (302) | 2026-10-01, findings fixed | 2026-10-01, all eight pass | 2026-10-01 | Sprint 4 closed. Next: run sprint 5 / agent |
 | 5 Splitting and balances | written (+ §6 amendment) | done | green (363) | 2026-10-01, findings fixed | 2026-10-02, all six single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 5 closed. Next: merge Sprint 6 / Sufyan approves |
-| 6 Item claiming | written | done (built ahead, PR open, not merged) | green (397) | 2026-10-01, findings fixed | – | – | Sign off sprint 5 first; then merge and the single-person checklist / Sufyan |
-| 7 Hardening and go-live | written | not started | – | – | – | – | after sprint 6; needs all friends |
+| 6 Item claiming | written (+ §7 amendment) | done | green (404) | 2026-10-01, findings fixed | 2026-10-02, single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 6 closed. Next: run sprint 7 / agent |
+| 7 Hardening and go-live | written | not started | – | – | – | – | after sprint 6; needs all friends; must include the deferred two-person checks from Sprints 5 and 6 |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -504,4 +504,21 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   the reconciliation prompt (with `Fix items`) if they don't add up to it. Spec §7 amended.
 - Checks: `uv run pytest -q` 404 passed; ruff clean.
 - Next action / owner: merge / Sufyan approves; Sprint 6 single-person checklist / Sufyan.
+
+### 2026-10-02 — Sprint 6 checklist and sign-off
+
+- Performed by: Sufyan (Telegram, Sheets), recorded by Claude.
+- Checklist (single-person steps, per the 2026-10-01 decision): new version in `/help`; a bare
+  `split` drops from the description; a receipt caption's `split everyone`; receipt totals,
+  `Other amount`, and the item flow reachable alone; Line Items rows; `/balances`. All pass.
+- Line Items rows for receipts shared by Just me / Equally / Custom read `unassigned`, as
+  designed; only a By items split records claims.
+- Open, carried to Sprint 7: a receipt's included tax (内税) was once read as a separate `tax`
+  line. Proposed fix: drop a tax line when leaving it out makes the lines match the printed total
+  exactly. Not yet approved.
+- Deferred to Sprint 7 (automated until then): Sprint 6 steps 1, 2 and 5 with a second person
+  (shared dish, their taps, their Done).
+- Disposition: Sufyan said "sign off sprint 6". Sprint 6 closed.
+- Next action / owner: run sprint 7 / agent, with the deferred two-person checks from Sprints 5
+  and 6 listed in its checklist.
 
