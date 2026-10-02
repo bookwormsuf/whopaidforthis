@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-10-01 (sprint 5 built and reviewed)
+Updated: 2026-10-02 (sprint 5 signed off; sprint 6 built, awaiting merge)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -15,8 +15,8 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 2 Text expenses, just me | written (+ carry-overs) | done | green (236) | 2026-09-29, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 2 closed. Next: run sprint 3 / agent |
 | 3 First deployment | written | done | green (247) | 2026-10-01, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 3 closed. Next: run sprint 4 / agent |
 | 4 Receipt photos, total only | written (+ §7/§10 amendments) | done | green (302) | 2026-10-01, findings fixed | 2026-10-01, all eight pass | 2026-10-01 | Sprint 4 closed. Next: run sprint 5 / agent |
-| 5 Splitting and balances | written | done | green (363) | 2026-10-01, findings fixed | – | – | Merge and deploy, then the single-person checklist / Sufyan; two-person steps deferred to Sprint 7 |
-| 6 Item claiming | written | not started | – | – | – | – | after sprint 5; needs tester B |
+| 5 Splitting and balances | written (+ §6 amendment) | done | green (363) | 2026-10-01, findings fixed | 2026-10-02, all six single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 5 closed. Next: merge Sprint 6 / Sufyan approves |
+| 6 Item claiming | written | done (built ahead, PR open, not merged) | green (397) | 2026-10-01, findings fixed | – | – | Sign off sprint 5 first; then merge and the single-person checklist / Sufyan |
 | 7 Hardening and go-live | written | not started | – | – | – | – | after sprint 6; needs all friends |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
@@ -412,3 +412,85 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   a real second account's balance in steps 1, 6 and 7.
 - Next action / owner: merge and deploy / Sufyan approves; then the single-person checklist /
   Sufyan.
+
+### 2026-10-01 — Sprint 5 merged and deployed
+
+- Performed by: Claude, with Sufyan's approval before his flight.
+- Sprint 5 PR merged to `main`; the GitHub Actions deploy run succeeded.
+- Not yet done: the sprint 5 single-person checklist / Sufyan.
+
+### 2026-10-01 — Sprint 6 build and review (built ahead of the sprint 5 sign-off)
+
+- Performed by: Claude, in a cloud session, while Sufyan was travelling.
+- Process exception, approved by Sufyan: Sprint 6 was built before Sprint 5's sign-off. It sits on an
+  open PR and is not merged; sprint 5 checklist findings come first.
+- Scope and reason: Sprint 6 "Agent builds" list, per `docs/sprints/06-item-claiming.md`, with
+  automated multi-user tests in place of a second tester (2026-10-01 decision).
+- Evidence / outputs:
+  - `split_items` and `allocate_proportional` in `app/services/splitting.py`.
+  - Draft state `items`: `By items`, item taps, `Rest → everyone`, `Done`, `Fix items`, and the
+    reply shortcuts `mine 1,4`, `split 5 everyone`, `unclaim 2`.
+  - `app/bot/keyboards/items.py`, with initials.
+  - The itemised preview line `items ¥a + tax ¥b − discount ¥c = ¥d`.
+  - Line Items rows with assigned user IDs and `claimed` / `everyone` / `proportional`.
+  - README section "Itemised receipts".
+  - Carried from Sprint 5: a receipt caption's `split ...` and `paid by` now apply.
+  - Tests: `tests/test_item_claiming.py` (checklist steps 1 to 7 with two or three users) and
+    unit and property tests for the split.
+- Checks: `uv run pytest -q` 397 passed; ruff and format clean. Not run against Telegram.
+- Review (`/review`): three findings, all fixed.
+  - A negative "Unlisted" item (lines more than the total) could block Done. It is now taken
+    off its claimants in proportion to their other items.
+  - Pressing `Rest → everyone` added the presser as a participant. It no longer does.
+  - Any reply to the item card added the sender as a participant. Now only a claim that
+    applies does.
+- Decisions and readings of the pins:
+  - A total picked automatically within ±5 of the lines gets an "Unlisted" item for the gap
+    when By items is chosen, so the split still reconciles exactly and the gap is visible.
+  - `Use total anyway` turns By items off for that receipt (spec §7).
+  - `Fix items` opens the item card with everyone joined as participants, or the caption's
+    participants if it named them.
+  - `Rest → everyone` is open to any joined user, like the item buttons; `Done` is the
+    initiator's only.
+  - A tap on an item that went to everyone makes it the tapper's alone.
+  - Service charge shows as its own `+ service` term in the preview line.
+  - The item card has no Cancel button, per the exact §9 layout; Cancel is on the preview.
+  - A text-shortcut problem (`No item 9`) is shown on the card, since a reply cannot get a toast
+    and a second message is not allowed.
+- Deferred two-person checks for Sprint 7: steps 1, 2 and 5 with a real second account (the
+  shared dish, B's taps, and B pressing Done).
+- Next action / owner: Sprint 5 checklist and sign-off / Sufyan; then merge the Sprint 6 PR and do
+  its single-person checklist / Sufyan.
+
+### 2026-10-02 — Sprint 5 checklist: Users rows shifted, `split everyone` silent
+
+- Performed by: Sufyan (Telegram, Sheets), Claude (fix).
+- Step 2 found a bug: `6000 yen dinner split everyone` got no reply; a plain expense worked.
+- Cause: appending to the Users tab without a table range let Google skip the hidden User ID
+  column, so every row landed one column to the right. The bot never found the existing row (a
+  new row on every message) and reading the user list crashed on the empty ID. Sprint 5 is the
+  first feature to read that list; a non-Sheets error had no reply.
+- Fix (hotfix PR, merged and deployed on its own): appends anchored at `A1`, unreadable Users
+  rows skipped with a warning, and any unexpected error now replies "Something went wrong,
+  please try again." (a toast for a button). Merged into the Sprint 6 branch too.
+- Checks: `uv run pytest -q` 365 passed on `main`, 399 on the Sprint 6 branch; ruff clean.
+- Next action / owner: delete the shifted rows on the test Sheet's Users tab, `/join`, then
+  redo the checklist from step 2 / Sufyan.
+
+### 2026-10-02 — Sprint 5 checklist and sign-off
+
+- Performed by: Sufyan (Telegram, Sheets), recorded by Claude.
+- Checklist (single-person steps, per the 2026-10-01 decision): `/help` shows the new version;
+  `split everyone` saves with one participant (after the Users-tab hotfix); Choose people, the
+  empty-selection toast, Next and Edit; an unknown `paid by` name and `Not sure, choose people`;
+  `/balances`, `/mine`, `/settle` ("All square"); `/undo` moves `/balances`. All six pass.
+- Found and fixed along the way: the Users-tab column shift (hotfix, see above) and a clearer
+  join card (the count includes the person who sent `/join`; a second tap says "You're already
+  in"). Both merged and deployed on their own.
+- Decided: a bare `split` (`6000 split dinner`) is dropped from the description and selects
+  nobody. Spec §6 amended; ships with Sprint 6.
+- Deferred to Sprint 7 (automated until then): the two-person steps 1, 4, 5, 6 and 7.
+- Disposition: Sufyan said "sign off sprint 5". Sprint 5 closed.
+- Next action / owner: approve the Sprint 6 merge / Sufyan; then the Sprint 6 single-person
+  checklist / Sufyan.
+

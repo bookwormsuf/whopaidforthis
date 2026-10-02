@@ -78,10 +78,38 @@ caption `dinner` saves as "Dinner" rather than whatever the LLM extracted.
 messages, each producing its own draft — there's no "this is one receipt across 3 photos"
 merging in this sprint.
 
-Line items are extracted and stored in the Sheet's `Line Items` tab for your own reference,
-but aren't yet splittable by item — a receipt is shared equally or with custom amounts, like
-a text expense (per-item claiming is a later sprint). Item amounts are always shown in the trip
-currency; for a receipt paid in the home currency they are converted at that expense's rate.
+Line items are stored in the Sheet's `Line Items` tab. Item amounts there are always in the
+trip currency; for a receipt paid in the home currency they are converted at that expense's
+rate. A caption can also carry `split everyone`, `split between me Amir` or `paid by Amir`,
+exactly as in a text expense.
+
+## Itemised receipts
+
+On a receipt with 1 to 40 items, the split-method card offers **By items** next to Equally and
+Custom. The item card has one button per item, `3 Gyoza ¥600 · AB`, with the initials of whoever
+claimed it, and shows what is still unclaimed. Tax, service charge and discount lines are listed
+in the text, never as buttons.
+
+- **Anyone who has joined** taps the items they had; tapping again un-claims. A shared dish is
+  tapped by each person who shared it and split equally between them. Tapping adds you to the
+  expense if you weren't in it.
+- **Rest → everyone** gives every unclaimed item to everyone in the expense. Tap one of those
+  items to make it just yours again.
+- **Done** (only the sender) works once nothing is unclaimed or after Rest → everyone. Until
+  then it reads `Done (unclaimed: ¥x)` and tells you what is left.
+- Reply to the item card with `mine 1,4`, `split 5 everyone` or `unclaim 2` instead of tapping.
+
+Tax, service charge and discounts are spread in proportion to what each person's items cost
+(largest-remainder method, so the yen add up exactly); someone with no items pays none of them.
+The preview shows `items ¥a + tax ¥b − discount ¥c = ¥d` per person, and **Edit** returns to the
+item card with the claims kept. The `Line Items` tab records who had each item and whether it
+was `claimed`, went to `everyone`, or was spread `proportional`ly.
+
+If the lines don't add up to the receipt total you picked, **Fix items** on that prompt opens the
+item card with an extra **Unlisted** item for the difference (negative if the lines come to
+more), to be claimed like any other. A total the bot picked on its own is at most 5 off the
+lines; that small gap also becomes an Unlisted item. **Use total anyway** keeps the total but
+turns By items off for that receipt.
 
 ## Splitting model
 

@@ -52,14 +52,15 @@ def participants_keyboard(draft: Draft) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def split_method_keyboard(draft_id: str) -> InlineKeyboardMarkup:
-    """`[Equally] [Custom]` (`By items` arrives in Sprint 6)."""
-    return InlineKeyboardMarkup(
-        [
-            [_button(draft_id, "Equally", "equal"), _button(draft_id, "Custom", "custom")],
-            [_cancel(draft_id)],
-        ]
-    )
+def split_method_keyboard(draft_id: str, by_items: bool) -> InlineKeyboardMarkup:
+    """`[Equally] [By items] [Custom]`; `By items` only when the draft has 1 to 40
+    claimable items (spec §8, sprint 6 pin).
+    """
+    row = [_button(draft_id, "Equally", "equal")]
+    if by_items:
+        row.append(_button(draft_id, "By items", "byitems"))
+    row.append(_button(draft_id, "Custom", "custom"))
+    return InlineKeyboardMarkup([row, [_cancel(draft_id)]])
 
 
 def custom_keyboard(draft_id: str, balanced: bool) -> InlineKeyboardMarkup:

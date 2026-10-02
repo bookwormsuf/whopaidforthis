@@ -25,13 +25,14 @@ def choose_total_keyboard(
 
 
 def reconcile_keyboard(draft_id: str) -> InlineKeyboardMarkup:
-    """`Use total anyway` / `Cancel` only, this sprint (`Fix items` is sprint 6)."""
+    """`Fix items` / `Use total anyway` / `Cancel` (spec §7)."""
     return InlineKeyboardMarkup(
         [
             [
+                InlineKeyboardButton("Fix items", callback_data=f"{draft_id}:fix:-"),
                 InlineKeyboardButton("Use total anyway", callback_data=f"{draft_id}:usetotal:-"),
-                InlineKeyboardButton("Cancel", callback_data=f"{draft_id}:cancel:-"),
-            ]
+            ],
+            [InlineKeyboardButton("Cancel", callback_data=f"{draft_id}:cancel:-")],
         ]
     )
 

@@ -18,6 +18,13 @@ def fmt_money(amount_minor: int, currency: str) -> str:
     return Money(amount_minor=amount_minor, currency=currency).format()
 
 
+def fmt_signed_money(amount_minor: int, currency: str) -> str:
+    """Like `fmt_money`, but a negative amount reads `−¥300`, not `¥-300`."""
+    if amount_minor < 0:
+        return f"−{fmt_money(-amount_minor, currency)}"
+    return fmt_money(amount_minor, currency)
+
+
 def fmt_amount_pair(trip_amount_minor: int, home_amount_minor: int, trip: Trip) -> str:
     """Trip currency then home, e.g. `¥1,200 (S$9.72)` (spec §12: per-expense amounts
     show trip currency first). Internal to `format_expense_amount` below; kept

@@ -182,7 +182,15 @@ def _locate_amount(
 
 
 def _description_words(words: list[str], consumed: frozenset[int]) -> str:
-    leftover = [word for index, word in enumerate(words) if index not in consumed]
+    """The words left once the amount is taken out, minus a leading `for` and any
+    bare `split` (spec §6, amended 2026-10-02: `6000 split dinner` is "Dinner" and
+    asks who shares it, as if `split` were not there).
+    """
+    leftover = [
+        word
+        for index, word in enumerate(words)
+        if index not in consumed and word.casefold() != "split"
+    ]
     if leftover and leftover[0].lower() == "for":
         leftover = leftover[1:]
     return " ".join(leftover).strip()
@@ -208,6 +216,17 @@ def parse_caption_description(
     if not leftover_text:
         return None
     return leftover_text.title(), _category_for(leftover_text)
+
+
+def parse_caption_clauses(text: str, bot_username: str) -> tuple[str | None, str | None]:
+    """A receipt caption's trailing `split ...` and `paid by ...` clauses, as
+    `(participants_text, payer_text)` (spec §13: the caption's participants override
+    after the receipt is read). Either is `None` when absent.
+    """
+    _working, participants_text, payer_text = _extract_trailing(
+        _strip_bot_mention(text, bot_username)
+    )
+    return participants_text, payer_text
 
 
 def parse_amount_only(text: str, trip_currency: str, home_currency: str) -> tuple[int, str] | None:
@@ -249,6 +268,29 @@ def parse_custom_line(
     if not name_text:
         return None
     return CustomLine(name_text, located.amount_minor, located.currency)
+
+
+_ITEM_COMMAND_RE = re.compile(
+    r"^(?P<verb>mine|unclaim|split)\s+(?P<numbers>\d+(?:\s*,\s*\d+|\s+\d+)*)"
+    r"(?P<everyone>\s+(?:everyone|all))?$",
+    re.IGNORECASE,
+)
+
+
+def parse_item_command(line: str) -> tuple[str, list[int]] | None:
+    """An item-card text shortcut (spec §9): `mine 1,4`, `unclaim 2`,
+    `split 5 everyone`. Returns `(verb, item numbers)`, verb one of `mine`,
+    `unclaim`, `everyone`; `None` if the line is not one of these.
+    """
+    match = _ITEM_COMMAND_RE.match(line.strip())
+    if match is None:
+        return None
+    verb = match.group("verb").lower()
+    has_everyone = match.group("everyone") is not None
+    if (verb == "split") != has_everyone:
+        return None  # `split` needs `everyone`; `mine`/`unclaim` must not have it
+    numbers = [int(n) for n in re.findall(r"\d+", match.group("numbers"))]
+    return ("everyone" if verb == "split" else verb), numbers
 
 
 def parse_expense(

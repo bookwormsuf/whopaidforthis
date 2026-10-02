@@ -1,6 +1,6 @@
 """Pure splitting functions, no I/O. Spec references: pinned-decisions §4, §5.
 
-`split_equal` and `split_custom` are used from Sprint 5; `split_items` is Sprint 6.
+`split_equal` and `split_custom` are used from Sprint 5; `split_items` from Sprint 6.
 Split inputs are a `SplitSpec` union (`Equal`, `Custom`, `Items`, plus the
 placeholder `Percent`), discriminated by `kind`, so a new method is one more member
 and one more branch in `split_shares`, without touching callers.
@@ -8,12 +8,14 @@ and one more branch in `split_shares`, without touching callers.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Annotated, Literal
 
 from pydantic import Field, TypeAdapter
 
+from app.models.receipt import ReceiptLineItem
 from app.services.conversion import reciprocal_rate
 from app.services.currencies import decimals_for
 
@@ -59,7 +61,13 @@ class Custom:
 
 @dataclass(frozen=True)
 class Items:
-    claims: dict[str, list[int]] = field(default_factory=dict)  # item_id -> claimant IDs
+    """`claims` maps a claimable line item (its index in the draft's line items, as
+    a string) to its claimants. `everyone` lists the items that went to all
+    participants via `Rest → everyone`, so the Line Items row can say so.
+    """
+
+    claims: dict[str, list[int]] = field(default_factory=dict)
+    everyone: tuple[str, ...] = ()
     kind: Literal["items"] = "items"
 
 
@@ -98,13 +106,145 @@ def split_shares(
     total_minor: int,
     participant_ids: list[int],
     payer_id: int,
+    line_items: Sequence[ReceiptLineItem] = (),
 ) -> dict[int, int]:
-    """Shares of `total_minor` (in the expense's original currency) per `spec`."""
+    """Shares of `total_minor` (in the expense's original currency) per `spec`.
+    `line_items` is needed only for `Items`.
+    """
     if isinstance(spec, Equal):
         return split_equal(total_minor, participant_ids, payer_id)
     if isinstance(spec, Custom):
         return split_custom(spec.amounts_by_participant, total_minor)
+    if isinstance(spec, Items):
+        return split_items(line_items, spec, participant_ids, payer_id, total_minor).shares
     raise SplitError(f"split method {spec.kind} is not available yet")
+
+
+def allocate_proportional(
+    amount_minor: int, weights: dict[int, int], payer_id: int
+) -> dict[int, int]:
+    """Splits `amount_minor` across `weights` in proportion, by the largest-remainder
+    method (spec §5): each gets the floor of its exact share, then the leftover units
+    go one each to the largest fractional remainders, ties by ascending user ID with
+    the payer last. A zero weight gets zero. A negative amount (a discount) is
+    allocated as its magnitude, then negated.
+    """
+    if any(w < 0 for w in weights.values()):
+        raise SplitError("proportional weights must not be negative")
+    total_weight = sum(weights.values())
+    if amount_minor == 0:
+        return {uid: 0 for uid in weights}
+    if total_weight == 0:
+        raise SplitError("nothing to allocate an adjustment against")
+    sign = -1 if amount_minor < 0 else 1
+    magnitude = abs(amount_minor)
+    base = {uid: magnitude * w // total_weight for uid, w in weights.items()}
+    remainders = {uid: magnitude * w % total_weight for uid, w in weights.items()}
+    leftover = magnitude - sum(base.values())
+    order = sorted(
+        (uid for uid, w in weights.items() if w > 0),
+        key=lambda uid: (-remainders[uid], uid == payer_id, uid),
+    )
+    for uid in order[:leftover]:
+        base[uid] += 1
+    return {uid: sign * value for uid, value in base.items()}
+
+
+AdjustmentKind = Literal["tax", "service_charge", "discount"]
+
+
+@dataclass(frozen=True)
+class ItemsSplit:
+    """The result of `split_items`: per-person item subtotals, each adjustment
+    kind's allocation, and the final shares (subtotal + tax + service - discount).
+    `assignments` maps each line item's index to `(user IDs, allocation method)` for
+    the Line Items tab.
+    """
+
+    subtotals: dict[int, int]
+    adjustments: dict[AdjustmentKind, dict[int, int]]
+    shares: dict[int, int]
+    assignments: dict[int, tuple[list[int], str]]
+
+
+def split_items(
+    line_items: Sequence[ReceiptLineItem],
+    spec: Items,
+    participant_ids: list[int],
+    payer_id: int,
+    total_minor: int,
+) -> ItemsSplit:
+    """Spec §5 `split_items`: each claimable item is split equally (same remainder
+    rule as `split_equal`) among its claimants; an item with no claimants goes to all
+    participants. Each adjustment line is then allocated across participants in
+    proportion to their item subtotal, by the largest-remainder method. A negative
+    item is taken off its claimants in proportion to their other items. Raises
+    `SplitError` unless the shares add up to `total_minor` exactly -- never fixes a
+    mismatch silently.
+    """
+    if not participant_ids:
+        raise SplitError("split_items requires at least one participant")
+    everyone = set(spec.everyone)
+    subtotals = {uid: 0 for uid in participant_ids}
+    assignments: dict[int, tuple[list[int], str]] = {}
+
+    def claimants_of(index: int) -> tuple[list[int], str]:
+        key = str(index)
+        claimants = list(dict.fromkeys(spec.claims.get(key, [])))
+        if not claimants or key in everyone:
+            return list(participant_ids), "everyone"
+        return claimants, "claimed"
+
+    # Positive items first: each split equally between its claimants.
+    for index, item in enumerate(line_items):
+        if item.kind != "item" or item.amount_minor < 0:
+            continue
+        claimants, method = claimants_of(index)
+        for uid, part in split_equal(item.amount_minor, claimants, payer_id).items():
+            subtotals[uid] = subtotals.get(uid, 0) + part
+        assignments[index] = (sorted(claimants), method)
+
+    # A negative item (an "Unlisted" correction when the lines came to more than
+    # the total) reduces its claimants in proportion to what their items cost, so a
+    # claimant with nothing else is not pushed below zero; with no such items
+    # between them it is split equally.
+    for index, item in enumerate(line_items):
+        if item.kind != "item" or item.amount_minor >= 0:
+            continue
+        claimants, method = claimants_of(index)
+        claim_weights = {uid: max(subtotals.get(uid, 0), 0) for uid in claimants}
+        if sum(claim_weights.values()) > 0:
+            parts = allocate_proportional(item.amount_minor, claim_weights, payer_id)
+        else:
+            parts = {
+                uid: -part
+                for uid, part in split_equal(-item.amount_minor, claimants, payer_id).items()
+            }
+        for uid, part in parts.items():
+            subtotals[uid] = subtotals.get(uid, 0) + part
+        assignments[index] = (sorted(claimants), method)
+
+    # Adjustments are spread over positive subtotals only.
+    weights = {uid: max(value, 0) for uid, value in subtotals.items()}
+    weighted_ids = sorted(uid for uid, w in weights.items() if w > 0)
+    adjustments: dict[AdjustmentKind, dict[int, int]] = {}
+    shares = dict(subtotals)
+    for index, item in enumerate(line_items):
+        if item.kind == "item":
+            continue
+        amount = -abs(item.amount_minor) if item.kind == "discount" else item.amount_minor
+        allocated = allocate_proportional(amount, weights, payer_id)
+        bucket = adjustments.setdefault(item.kind, {})
+        for uid, part in allocated.items():
+            bucket[uid] = bucket.get(uid, 0) + part
+            shares[uid] += part
+        assignments[index] = (weighted_ids, "proportional")
+
+    if sum(shares.values()) != total_minor:
+        raise SplitError(
+            f"item shares sum to {sum(shares.values())}, receipt total is {total_minor}"
+        )
+    return ItemsSplit(subtotals, adjustments, shares, assignments)
 
 
 def shares_in_both_currencies(

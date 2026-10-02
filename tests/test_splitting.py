@@ -8,6 +8,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from app.models.receipt import ReceiptLineItem
 from app.services.conversion import both_amounts, convert_minor
 from app.services.splitting import (
     SPLIT_SPEC_ADAPTER,
@@ -16,10 +17,12 @@ from app.services.splitting import (
     Items,
     Percent,
     SplitError,
+    allocate_proportional,
     convert_shares,
     shares_in_both_currencies,
     split_custom,
     split_equal,
+    split_items,
     split_shares,
 )
 
@@ -115,7 +118,12 @@ def test_split_custom_exact_sum_gate() -> None:
 
 @pytest.mark.parametrize(
     "spec",
-    [Equal(), Custom({1: 4000, 2: 5000}), Items({"e-01": [1, 2]}), Percent({1: 0.5, 2: 0.5})],
+    [
+        Equal(),
+        Custom({1: 4000, 2: 5000}),
+        Items({"0": [1, 2]}, everyone=("1",)),
+        Percent({1: 0.5, 2: 0.5}),
+    ],
 )
 def test_split_spec_round_trips(spec) -> None:
     dumped = SPLIT_SPEC_ADAPTER.dump_python(spec, mode="json")
@@ -127,7 +135,7 @@ def test_split_shares_dispatches_on_spec() -> None:
     assert split_shares(Equal(), 100, [1, 2, 3], payer_id=1) == {1: 33, 2: 34, 3: 33}
     assert split_shares(Custom({1: 60, 2: 40}), 100, [1, 2], payer_id=1) == {1: 60, 2: 40}
     with pytest.raises(SplitError):
-        split_shares(Items(), 100, [1, 2], payer_id=1)
+        split_shares(Percent(), 100, [1, 2], payer_id=1)
 
 
 @given(
@@ -168,3 +176,106 @@ def test_shares_in_both_currencies_sum_to_both_totals(
     assert sum(trip_shares.values()) == trip_total
     assert sum(home_shares.values()) == home_total
     assert trip_shares.keys() == home_shares.keys() == set(participant_ids)
+
+
+# -- split_items and allocate_proportional (sprint 6, spec §5) -----------------
+
+
+def _li(amount: int, kind: str = "item") -> ReceiptLineItem:
+    return ReceiptLineItem(description=kind, quantity=1, amount_minor=amount, kind=kind)
+
+
+def test_shared_item_between_two_and_three_with_remainders() -> None:
+    items = [_li(1001), _li(1000)]
+    spec = Items(claims={"0": [1, 2], "1": [1, 2, 3]})
+    result = split_items(items, spec, [1, 2, 3], payer_id=1, total_minor=2001)
+    # 1001 / 2: the spare yen skips the payer (1) -> 2. 1000 / 3: 333 r 1 -> 2.
+    assert result.subtotals == {1: 500 + 333, 2: 501 + 334, 3: 333}
+    assert sum(result.shares.values()) == 2001
+
+
+def test_proportional_tax_example_from_the_brief() -> None:
+    # 2000 / 1000 with 300 tax -> 200 / 100.
+    items = [_li(2000), _li(1000), _li(300, "tax")]
+    spec = Items(claims={"0": [1], "1": [2]})
+    result = split_items(items, spec, [1, 2], payer_id=1, total_minor=3300)
+    assert result.adjustments["tax"] == {1: 200, 2: 100}
+    assert result.shares == {1: 2200, 2: 1100}
+
+
+def test_largest_remainder_tie_break_ascending_id_payer_last() -> None:
+    # 1 unit across three equal weights: remainders tie; lowest ID that isn't the
+    # payer gets it.
+    assert allocate_proportional(1, {1: 100, 2: 100, 3: 100}, payer_id=1) == {1: 0, 2: 1, 3: 0}
+    assert allocate_proportional(2, {1: 100, 2: 100, 3: 100}, payer_id=2) == {1: 1, 2: 0, 3: 1}
+    # The largest remainder wins over the tie-break: 10 * 2/3 = 6.67, 10 * 1/3 = 3.33.
+    assert allocate_proportional(10, {1: 1, 2: 2}, payer_id=2) == {1: 3, 2: 7}
+
+
+def test_zero_subtotal_participant_gets_zero_adjustment() -> None:
+    items = [_li(1000), _li(100, "service_charge")]
+    spec = Items(claims={"0": [1]})
+    result = split_items(items, spec, [1, 2], payer_id=1, total_minor=1100)
+    assert result.adjustments["service_charge"] == {1: 100, 2: 0}
+    assert result.shares == {1: 1100, 2: 0}
+
+
+def test_discount_allocation() -> None:
+    items = [_li(1500), _li(500), _li(-200, "discount")]
+    spec = Items(claims={"0": [1], "1": [2]})
+    result = split_items(items, spec, [1, 2], payer_id=1, total_minor=1800)
+    assert result.adjustments["discount"] == {1: -150, 2: -50}
+    assert result.shares == {1: 1350, 2: 450}
+
+
+def test_split_items_raises_when_total_does_not_reconcile() -> None:
+    with pytest.raises(SplitError):
+        split_items([_li(1000)], Items(claims={"0": [1]}), [1], payer_id=1, total_minor=1001)
+
+
+def test_unclaimed_item_goes_to_everyone() -> None:
+    result = split_items([_li(300)], Items(), [1, 2, 3], payer_id=1, total_minor=300)
+    assert result.shares == {1: 100, 2: 100, 3: 100}
+    assert result.assignments == {0: ([1, 2, 3], "everyone")}
+
+
+def test_negative_item_comes_off_claimants_in_proportion() -> None:
+    items = [_li(2000), _li(1000), _li(-300)]
+    spec = Items(claims={"0": [1], "1": [2]})  # the -300 is unclaimed -> everyone
+    result = split_items(items, spec, [1, 2, 3], payer_id=1, total_minor=2700)
+    assert result.shares == {1: 1800, 2: 900, 3: 0}
+
+
+@given(
+    item_amounts=st.lists(st.integers(min_value=0, max_value=50_000), min_size=1, max_size=12),
+    adjustments=st.lists(
+        st.tuples(
+            st.sampled_from(["tax", "service_charge", "discount"]),
+            st.integers(min_value=0, max_value=5_000),
+        ),
+        max_size=4,
+    ),
+    participant_ids=st.lists(
+        st.integers(min_value=1, max_value=50), min_size=1, max_size=6, unique=True
+    ),
+    data=st.data(),
+)
+def test_split_items_always_sums_to_receipt_total(
+    item_amounts, adjustments, participant_ids, data
+) -> None:
+    items = [_li(a) for a in item_amounts] + [_li(a, k) for k, a in adjustments]
+    claims = {
+        str(i): data.draw(st.lists(st.sampled_from(participant_ids), max_size=3, unique=True))
+        for i in range(len(item_amounts))
+    }
+    payer = data.draw(st.sampled_from([*participant_ids, 999]))
+    total = sum(item_amounts) + sum(-a if k == "discount" else a for k, a in adjustments)
+    if sum(item_amounts) == 0 and any(a for _k, a in adjustments):
+        with pytest.raises(SplitError):
+            split_items(items, Items(claims=claims), participant_ids, payer, total)
+        return
+    result = split_items(items, Items(claims=claims), participant_ids, payer, total)
+    assert sum(result.shares.values()) == total
+    for kind, allocation in result.adjustments.items():
+        expected = sum(-a if k == "discount" else a for k, a in adjustments if k == kind)
+        assert sum(allocation.values()) == expected

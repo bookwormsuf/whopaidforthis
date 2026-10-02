@@ -9,6 +9,9 @@ Spec references: pinned-decisions §3, §8, sprint 2, 4 and 5 pins. States:
   `preview` when exactly one person is selected;
 - `custom`: the initiator replies with `<name> <amount>` lines until the amounts add
   up, then `Confirm` -> `preview`;
+- `items` (sprint 6, spec §9): anyone joined taps the receipt items they had, then the
+  initiator presses `Done` -> `preview`; `Fix items` on the reconciliation prompt
+  opens it with an "Unlisted" item for the difference;
 - `preview` -> `Confirm` (commit) / `Edit` (back to `participants`) / `Cancel`;
 - receipt-only states `choose_total`, `reconcile`, `manual_amount` (sprint 4) and
   `rate_failed`.
@@ -34,12 +37,13 @@ from ulid import ULID
 from app.models.category import Category
 from app.models.exchange_rate import ExchangeRate
 from app.models.expense import Expense, ExpenseSplit
+from app.models.money import Money
 from app.models.receipt import CandidateTotal, Receipt, ReceiptLineItem
 from app.models.trip import Trip
 from app.services.conversion import both_amounts
 from app.services.currencies import symbol_for
 from app.services.exchange_rates import RateService, RateUnavailable
-from app.services.expense_parser import ParsedExpense, parse_custom_line
+from app.services.expense_parser import ParsedExpense, parse_custom_line, parse_item_command
 from app.services.ledger_store import LedgerStore, LedgerUnavailable
 from app.services.names import Person, is_everyone, resolve_name, resolve_names
 from app.services.receipt_parser import (
@@ -52,8 +56,11 @@ from app.services.splitting import (
     Custom,
     Equal,
     Items,
+    ItemsSplit,
     Percent,
+    SplitError,
     shares_in_both_currencies,
+    split_items,
     split_shares,
 )
 
@@ -67,6 +74,7 @@ DraftState = Literal[
     "participants",
     "split_method",
     "custom",
+    "items",
     "choose_total",
     "reconcile",
     "manual_amount",
@@ -115,6 +123,9 @@ class DraftToast(DraftError):
 
 
 NOBODY_SELECTED_TEXT = "Pick at least one person"
+NOT_JOINED_TEXT = "Send /join first to claim items"
+MAX_CLAIMABLE_ITEMS = 40
+UNLISTED_DESCRIPTION = "Unlisted"
 CUSTOM_NOT_BALANCED_TEXT = "The amounts don't add up yet"
 
 
@@ -179,6 +190,13 @@ class Draft:
     participants_clause: Literal["names", "everyone"] | None = None
     # The last custom-split reply's problems, shown on the card until the next reply.
     custom_error: str | None = None
+    # Item claiming (sprint 6, spec §9). Keys are indices into `line_items`.
+    item_claims: dict[int, tuple[int, ...]] = field(default_factory=dict)
+    everyone_items: frozenset[int] = frozenset()
+    rest_everyone: bool = False  # `Rest → everyone` pressed: unclaimed go to everyone
+    items_error: str | None = None  # the last text shortcut's problem, shown on the card
+    # `Use total anyway` keeps the receipt total but turns off `By items` (spec §7).
+    items_allowed: bool = True
     rate: ExchangeRate | None = None
     trip_amount_minor: int = 0
     home_amount_minor: int = 0
@@ -223,12 +241,66 @@ def original_total(draft: Draft, trip: Trip) -> int:
     return draft.home_amount_minor
 
 
+def claimable_indices(draft: Draft) -> list[int]:
+    """Indices into `line_items` of the claimable items, in receipt order. An
+    item's number on the card (`mine 1,4`) is its position here, from 1.
+    """
+    return [i for i, item in enumerate(draft.line_items) if item.kind == "item"]
+
+
+def by_items_available(draft: Draft) -> bool:
+    """`By items` is offered for 1 to 40 claimable items (sprint 6 pin), and not
+    after `Use total anyway` (spec §7).
+    """
+    return draft.items_allowed and 1 <= len(claimable_indices(draft)) <= MAX_CLAIMABLE_ITEMS
+
+
+def unclaimed_indices(draft: Draft) -> list[int]:
+    return [
+        i
+        for i in claimable_indices(draft)
+        if i not in draft.everyone_items and not draft.item_claims.get(i)
+    ]
+
+
+def unclaimed_total(draft: Draft) -> int:
+    return sum(draft.line_items[i].amount_minor for i in unclaimed_indices(draft))
+
+
+def items_spec(draft: Draft) -> Items:
+    """The draft's claims as an `Items` split. Unclaimed items, which `Done` allows
+    only after `Rest → everyone`, go to everyone.
+    """
+    unclaimed = set(unclaimed_indices(draft))
+    return Items(
+        claims={str(i): list(c) for i, c in draft.item_claims.items() if c},
+        everyone=tuple(str(i) for i in sorted(draft.everyone_items | unclaimed)),
+    )
+
+
+def draft_items_split(draft: Draft, trip: Trip) -> ItemsSplit:
+    assert isinstance(draft.split, Items)
+    return split_items(
+        draft.line_items,
+        draft.split,
+        draft.participant_ids,
+        draft.payer_id,
+        original_total(draft, trip),
+    )
+
+
 def draft_shares(draft: Draft, trip: Trip) -> dict[int, tuple[int, int]]:
     """Each participant's `(share_trip, share_home)` for the draft's split, in
     participant order. Both columns sum exactly to the expense amounts (spec §4/§5).
     """
     spec = draft.split or Equal()
-    shares = split_shares(spec, original_total(draft, trip), draft.participant_ids, draft.payer_id)
+    shares = split_shares(
+        spec,
+        original_total(draft, trip),
+        draft.participant_ids,
+        draft.payer_id,
+        line_items=draft.line_items,
+    )
     trip_shares, home_shares = shares_in_both_currencies(
         shares,
         original_currency=draft.currency,
@@ -465,6 +537,15 @@ class DraftService:
             splits=splits,
         )
 
+    @staticmethod
+    def _assignments(draft: Draft, trip: Trip) -> dict[int, tuple[list[int], str]] | None:
+        """Line Items `Assigned User IDs` and `Allocation Method` for an itemised
+        split; `None` for any other split (rows stay `unassigned`).
+        """
+        if not isinstance(draft.split, Items):
+            return None
+        return draft_items_split(draft, trip).assignments
+
     async def confirm(self, draft_id: str, presser_id: int) -> Draft:
         """Idempotent: if a previous attempt's `append_expense` raised after the row
         was actually written server-side, a retry does not double-append -- it
@@ -479,7 +560,9 @@ class DraftService:
         await self._drafts.put(replace(draft, state="committing"))
         if not await self._ledger.expense_exists(trip, expense.expense_id):
             try:
-                await self._ledger.append_expense(trip, expense, draft.line_items)
+                await self._ledger.append_expense(
+                    trip, expense, draft.line_items, self._assignments(draft, trip)
+                )
             except LedgerUnavailable:
                 logger.exception("draft %s: could not append expense", draft.draft_id)
                 await self._drafts.put(replace(draft, state="preview"))
@@ -767,13 +850,193 @@ class DraftService:
 
     async def edit(self, draft_id: str, presser_id: int) -> Draft:
         """`Edit` on the preview: back to the participants card with the current
-        participants selected; amount, description and payer are kept (spec §8).
+        participants selected; amount, description and payer are kept (spec §8). An
+        itemised split goes back to the item card instead.
         """
         draft = await self._get_active(draft_id, presser_id)
         if draft.state != "preview":
             raise DraftError(f"cannot edit from state {draft.state}")
+        if isinstance(draft.split, Items):
+            # Itemised: back to the item card with the claims intact (sprint 6 pin).
+            updated = replace(draft, state="items", split=None)
+            await self._drafts.put(updated)
+            return updated
         trip = await self._trip_for(draft)
         return await self._to_participants(draft, trip, list(draft.participant_ids))
+
+    # -- Item claiming (sprint 6, spec §9) -------------------------------------
+
+    async def _get_open(self, draft_id: str) -> Draft:
+        """Like `_get_active` without the initiator check: item claims are open to
+        any joined user (spec §8/§9).
+        """
+        draft = await self._drafts.get(draft_id)
+        if draft is None:
+            raise DraftExpired()
+        if draft.state == "committed":
+            raise AlreadySaved()
+        if draft.state == "cancelled":
+            raise AlreadyCancelled()
+        return draft
+
+    async def _to_items(self, draft: Draft) -> Draft:
+        """Opens the item card. A receipt whose lines don't add up to its total (an
+        automatic pick within ±5, spec §7) gets an "Unlisted" item for the gap, so
+        the itemised shares still reconcile exactly and the gap is visible.
+        """
+        total = draft.amount_minor
+        updated = replace(
+            draft,
+            state="items",
+            split=None,
+            line_items=self._with_unlisted(draft.line_items, total),
+            items_error=None,
+        )
+        await self._drafts.put(updated)
+        return updated
+
+    async def choose_by_items(self, draft_id: str, presser_id: int) -> Draft:
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "split_method":
+            raise DraftError(f"cannot choose By items from state {draft.state}")
+        if not by_items_available(draft):
+            raise DraftError("By items is not available for this draft")
+        return await self._to_items(draft)
+
+    async def _joined_presser(self, draft: Draft, presser_id: int) -> Draft:
+        """Checks the presser is a joined user (item buttons are open to them, spec
+        §8). Raises `DraftToast` otherwise. Does not add them to the participants.
+        """
+        if draft.state != "items":
+            raise DraftError(f"cannot claim items in state {draft.state}")
+        if presser_id not in {p.user_id for p in draft.people}:
+            trip = await self._trip_for(draft)
+            draft = replace(draft, people=await self._joined_people(trip, draft))
+            if presser_id not in {p.user_id for p in draft.people}:
+                raise DraftToast(NOT_JOINED_TEXT)
+        return draft
+
+    @staticmethod
+    def _as_participant(draft: Draft, user_id: int) -> Draft:
+        """Someone who claims an item takes part (sprint 6 pin)."""
+        if user_id in draft.participant_ids:
+            return draft
+        return replace(draft, participant_ids=[*draft.participant_ids, user_id])
+
+    @staticmethod
+    def _claim(draft: Draft, index: int, user_id: int, claimed: bool | None) -> Draft:
+        """Sets (`True`), clears (`False`) or toggles (`None`) one claim. An item that
+        went to everyone becomes just this person's when they tap it, which is how
+        `Rest → everyone` is reversed per item; clearing it makes it unclaimed.
+        """
+        claims = dict(draft.item_claims)
+        everyone = set(draft.everyone_items)
+        current = claims.get(index, ())
+        if index in everyone:
+            everyone.discard(index)
+            current = ()
+            if claimed is None:
+                claimed = True
+        has = user_id in current
+        want = (not has) if claimed is None else claimed
+        if want and not has:
+            current = (*current, user_id)
+        elif not want and has:
+            current = tuple(uid for uid in current if uid != user_id)
+        claims[index] = current
+        return replace(draft, item_claims=claims, everyone_items=frozenset(everyone))
+
+    async def toggle_item(self, draft_id: str, presser_id: int, index: int) -> Draft:
+        """An item button: toggles the presser's claim."""
+        draft = await self._get_open(draft_id)
+        if index not in claimable_indices(draft):
+            raise DraftError("not a claimable item")
+        draft = await self._joined_presser(draft, presser_id)
+        draft = self._claim(draft, index, presser_id, None)
+        if presser_id in draft.item_claims.get(index, ()):
+            draft = self._as_participant(draft, presser_id)
+        updated = replace(draft, items_error=None)
+        await self._drafts.put(updated)
+        return updated
+
+    async def rest_to_everyone(self, draft_id: str, presser_id: int) -> Draft:
+        """`Rest → everyone`: every currently unclaimed item goes to all current
+        participants, and anything left unclaimed later goes to everyone at `Done`.
+        Pressing it does not make the presser a participant.
+        """
+        draft = await self._get_open(draft_id)
+        draft = await self._joined_presser(draft, presser_id)
+        updated = replace(
+            draft,
+            everyone_items=draft.everyone_items | set(unclaimed_indices(draft)),
+            rest_everyone=True,
+            items_error=None,
+        )
+        await self._drafts.put(updated)
+        return updated
+
+    async def apply_item_command(self, draft_id: str, presser_id: int, text: str) -> Draft:
+        """A text shortcut replied to the item card (spec §9): `mine 1,4`,
+        `split 5 everyone`, `unclaim 2`. Numbers are the item numbers on the card.
+        Unknown numbers or an unrecognised line are shown on the card.
+        """
+        draft = await self._get_open(draft_id)
+        draft = await self._joined_presser(draft, presser_id)
+        numbered = claimable_indices(draft)
+        problems: list[str] = []
+        for line in (raw.strip() for raw in text.splitlines()):
+            if not line:
+                continue
+            command = parse_item_command(line)
+            if command is None:
+                problems.append(f"Couldn't read '{line}'")
+                continue
+            verb, numbers = command
+            unknown = [n for n in numbers if not 1 <= n <= len(numbered)]
+            if unknown:
+                problems.append("No item " + ", ".join(str(n) for n in unknown))
+                continue
+            for n in numbers:
+                index = numbered[n - 1]
+                if verb == "mine":
+                    draft = self._as_participant(
+                        self._claim(draft, index, presser_id, True), presser_id
+                    )
+                elif verb == "unclaim":
+                    draft = self._claim(draft, index, presser_id, False)
+                else:
+                    claims = dict(draft.item_claims)
+                    claims.pop(index, None)
+                    draft = replace(
+                        draft, item_claims=claims, everyone_items=draft.everyone_items | {index}
+                    )
+        updated = replace(draft, items_error="; ".join(problems) or None)
+        await self._drafts.put(updated)
+        return updated
+
+    async def items_done(self, draft_id: str, presser_id: int) -> Draft:
+        """`Done` (initiator only): refused with a toast while items are unclaimed
+        and `Rest → everyone` was not pressed; otherwise runs `split_items` and shows
+        the preview.
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "items":
+            raise DraftError(f"cannot press Done from state {draft.state}")
+        trip = await self._trip_for(draft)
+        unclaimed = unclaimed_indices(draft)
+        if unclaimed and not draft.rest_everyone:
+            numbered = claimable_indices(draft)
+            numbers = ", ".join(str(numbered.index(i) + 1) for i in unclaimed)
+            amount = Money(amount_minor=unclaimed_total(draft), currency=draft.currency).format()
+            raise DraftToast(f"Still unclaimed: {amount} (items {numbers})")
+        updated = replace(draft, state="preview", split=items_spec(draft), items_error=None)
+        try:
+            draft_items_split(updated, trip)
+        except SplitError:
+            logger.exception("draft %s: itemised split does not reconcile", draft.draft_id)
+            raise DraftToast("These items don't add up to the receipt total") from None
+        await self._drafts.put(updated)
+        return updated
 
     async def pick_name(self, draft_id: str, presser_id: int, user_id: int) -> Draft:
         """A candidate button on the "Who did you mean" card."""
@@ -875,6 +1138,8 @@ class DraftService:
         transaction_date: date,
         date_source: Literal["receipt", "message"],
         caption_override: tuple[str, Category] | None = None,
+        participants_text: str | None = None,
+        payer_text: str | None = None,
     ) -> Draft:
         await self._ensure_not_duplicate(trip, chat_id, message_id)
         base = dict(
@@ -892,6 +1157,8 @@ class DraftService:
             photo_file_id=photo_file_id,
             date_source=date_source,
             caption_override=caption_override,
+            pending_participants_text=participants_text,
+            pending_payer_text=payer_text,
             **self._receipt_fields(receipt, caption_override),
         )
         return await self._start_total_selection(base, trip, receipt)
@@ -908,6 +1175,8 @@ class DraftService:
         trip: Trip,
         transaction_date: date,
         caption_override: tuple[str, Category] | None = None,
+        participants_text: str | None = None,
+        payer_text: str | None = None,
     ) -> Draft:
         """The receipt could not be read (spec §7): "Couldn't read that receipt" with
         `Try again` / `Enter amount manually`.
@@ -935,6 +1204,8 @@ class DraftService:
             photo_file_id=photo_file_id,
             participant_ids=[initiator_id],
             caption_override=caption_override,
+            pending_participants_text=participants_text,
+            pending_payer_text=payer_text,
         )
         await self._drafts.put(draft)
         return draft
@@ -962,6 +1233,9 @@ class DraftService:
             adjustments_sum_minor=draft.adjustments_sum_minor,
             currency=draft.currency,
             caption_override=draft.caption_override,
+            items_allowed=draft.items_allowed,
+            pending_participants_text=draft.pending_participants_text,
+            pending_payer_text=draft.pending_payer_text,
             created_at=draft.created_at,
         )
 
@@ -990,8 +1264,8 @@ class DraftService:
             participant_ids=[base["initiator_id"]],
             **base,
         )
-        await self._drafts.put(draft)
-        return draft
+        # A caption's "split ..."/"paid by ..." apply now, as for a text expense.
+        return await self._apply_clauses(draft, trip)
 
     async def choose_total(self, draft_id: str, presser_id: int, index: int) -> Draft:
         """The initiator picked one of the candidate totals. A picked total that does
@@ -1023,9 +1297,50 @@ class DraftService:
         if draft.state != "reconcile":
             raise DraftError(f"cannot use_total_anyway from state {draft.state}")
         trip = await self._trip_for(draft)
-        return await self._finalize_receipt_amount(
-            self._base_from_draft(draft), trip, draft.amount_minor
+        base = self._base_from_draft(draft)
+        base.update(items_allowed=False)
+        return await self._finalize_receipt_amount(base, trip, draft.amount_minor)
+
+    async def fix_items(self, draft_id: str, presser_id: int) -> Draft:
+        """`Fix items` on the reconciliation prompt (spec §7, sprint 6 pin): keeps the
+        receipt total, adds an "Unlisted" item for the difference (positive or
+        negative) and opens the item card with everyone joined as participants.
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "reconcile":
+            raise DraftError(f"cannot fix items from state {draft.state}")
+        trip = await self._trip_for(draft)
+        base = self._base_from_draft(draft)
+        base.update(line_items=self._with_unlisted(draft.line_items, draft.amount_minor))
+        finalized = await self._finalize_receipt_amount(base, trip, draft.amount_minor)
+        if finalized.state in ("rate_failed", "resolve_name"):
+            return finalized  # Retry or the name question first; By items comes after
+        if finalized.state == "detected":
+            # No caption clause chose participants: everyone joined takes part.
+            people = await self._joined_people(trip, finalized)
+            finalized = replace(
+                finalized, people=people, participant_ids=[p.user_id for p in people]
+            )
+        return await self._to_items(finalized)
+
+    @staticmethod
+    def _with_unlisted(
+        line_items: list[ReceiptLineItem], total_minor: int
+    ) -> list[ReceiptLineItem]:
+        """`line_items` plus an "Unlisted" item for whatever the receipt total has
+        that the lines don't (or minus what they have too much), if anything.
+        """
+        items_sum, adjustments_sum = line_item_sums(line_items)
+        difference = total_minor - items_sum - adjustments_sum
+        if difference == 0:
+            return list(line_items)
+        unlisted = ReceiptLineItem(
+            description=UNLISTED_DESCRIPTION,
+            quantity=1,
+            amount_minor=difference,
+            kind="item",
         )
+        return [*line_items, unlisted]
 
     async def begin_retry(self, draft_id: str, presser_id: int) -> Draft:
         """Validates a `Try again` press (initiator, right state, no read already in

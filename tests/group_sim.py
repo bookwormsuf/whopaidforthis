@@ -8,19 +8,31 @@ message, Bo presses a button on Ada's card, someone runs `/balances`.
 
 from __future__ import annotations
 
+import io
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+from PIL import Image
+
+from app.bot.handlers.photo_expense import photo_expense_handler
 from app.bot.handlers.text_expense import draft_callback, text_expense_handler
 from app.models.trip import Trip
 from app.models.user import TripUser
 from app.services.ledger_store import InMemoryLedgerStore
-from tests.helpers import make_deps
+from app.services.llm_schemas import ReceiptExtraction
+from tests.helpers import FakeReceiptReader, make_deps
 
 CHAT_ID = -100
+
+
+def _jpeg_bytes() -> bytes:
+    image = Image.new("RGB", (100, 100), color=(10, 20, 30))
+    buf = io.BytesIO()
+    image.save(buf, format="JPEG")
+    return buf.getvalue()
 
 
 @dataclass(frozen=True)
@@ -68,6 +80,7 @@ class FakeGroup:
     deps: object
     cards: dict[int, Card] = field(default_factory=dict)
     replies: list[str] = field(default_factory=list)
+    reader: FakeReceiptReader | None = None
     _next_message_id: int = 100
     _next_update_id: int = 1
 
@@ -85,7 +98,9 @@ class FakeGroup:
         )
         await ledger.save_binding(trip)
         await ledger.initialise_trip_sheet(trip)
-        group = cls(ledger=ledger, trip=trip, deps=make_deps(ledger))
+        reader = FakeReceiptReader()
+        group = cls(ledger=ledger, trip=trip, deps=make_deps(ledger, receipt_reader=reader))
+        group.reader = reader
         for member in members:
             await group.join(member)
         return group
@@ -118,6 +133,12 @@ class FakeGroup:
             self.cards[message_id] = Card(message_id, text, reply_markup)
 
         context.bot.edit_message_text = AsyncMock(side_effect=edit_message_text)
+        context.bot.get_file = AsyncMock(
+            return_value=SimpleNamespace(
+                file_size=1000,
+                download_as_bytearray=AsyncMock(return_value=bytearray(_jpeg_bytes())),
+            )
+        )
         return context
 
     def _reply_recorder(self) -> AsyncMock:
@@ -155,6 +176,21 @@ class FakeGroup:
         before = set(self.cards)
         update = self._update(member, text, reply_to.message_id if reply_to else None)
         await text_expense_handler(update, self._context())
+        new = [mid for mid in self.cards if mid not in before]
+        return self.cards[new[-1]] if new else None
+
+    async def send_receipt(
+        self, member: Member, extraction: ReceiptExtraction, caption: str | None = None
+    ) -> Card | None:
+        """`member` sends a receipt photo that the (fake) reader reads as `extraction`."""
+        assert self.reader is not None
+        self.reader._extraction = extraction
+        before = set(self.cards)
+        update = self._update(member, "", None)
+        update.effective_message.text = None
+        update.effective_message.caption = caption
+        update.effective_message.photo = [SimpleNamespace(file_id="photo", file_size=1000)]
+        await photo_expense_handler(update, self._context())
         new = [mid for mid in self.cards if mid not in before]
         return self.cards[new[-1]] if new else None
 
