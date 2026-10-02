@@ -182,7 +182,15 @@ def _locate_amount(
 
 
 def _description_words(words: list[str], consumed: frozenset[int]) -> str:
-    leftover = [word for index, word in enumerate(words) if index not in consumed]
+    """The words left once the amount is taken out, minus a leading `for` and any
+    bare `split` (spec §6, amended 2026-10-02: `6000 split dinner` is "Dinner" and
+    asks who shares it, as if `split` were not there).
+    """
+    leftover = [
+        word
+        for index, word in enumerate(words)
+        if index not in consumed and word.casefold() != "split"
+    ]
     if leftover and leftover[0].lower() == "for":
         leftover = leftover[1:]
     return " ".join(leftover).strip()

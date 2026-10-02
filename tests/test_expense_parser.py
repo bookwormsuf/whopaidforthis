@@ -215,3 +215,13 @@ def test_item_commands() -> None:
     assert parse_item_command("mine 1 everyone") is None
     assert parse_item_command("mine") is None
     assert parse_item_command("1200 yen ramen") is None
+
+
+def test_bare_split_is_dropped_and_selects_nobody() -> None:
+    for text in ("6000 split dinner", "6000 dinner split", "split 6000 dinner"):
+        result = parse_expense(text, "JPY", "SGD", BOT)
+        assert result is not None, text
+        assert (result.description, result.participants_text) == ("Dinner", None), text
+    # The clauses still work.
+    assert parse_expense("6000 dinner split all", "JPY", "SGD", BOT).participants_text == "all"
+    assert parse_expense("6000 split", "JPY", "SGD", BOT).description == "Expense"
