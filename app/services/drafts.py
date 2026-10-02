@@ -1394,10 +1394,14 @@ class DraftService:
         return updated
 
     async def request_manual_amount(self, draft_id: str, presser_id: int) -> Draft:
+        """`Enter amount manually` on an unreadable receipt, or `Other amount` on
+        "Which is the final total?" when none of the candidates is right: the card
+        then asks for a reply with the amount.
+        """
         draft = await self._get_active(draft_id, presser_id)
-        if draft.state != "manual_amount":
+        if draft.state not in ("manual_amount", "choose_total"):
             raise DraftError(f"cannot request_manual_amount from state {draft.state}")
-        updated = replace(draft, awaiting_manual_amount=True)
+        updated = replace(draft, state="manual_amount", awaiting_manual_amount=True)
         await self._drafts.put(updated)
         return updated
 
@@ -1405,14 +1409,30 @@ class DraftService:
         self, draft_id: str, presser_id: int, trip: Trip, amount_minor: int, currency: str
     ) -> Draft:
         """The initiator replied to the `manual_amount` card with an amount (spec
-        §8): produces a normal text-style draft, source_type `receipt`, no line items.
-        The description stays the caption's, if there was one.
+        §8). The typed amount is the total. A receipt that was read keeps its line
+        items when the amount is in the receipt's currency, and gets the
+        reconciliation prompt if the lines don't add up to it, as for a picked
+        total; otherwise this is a normal text-style draft with no line items. The
+        description stays the caption's, if there was one.
         """
         draft = await self._get_active(draft_id, presser_id)
         if draft.state != "manual_amount":
             raise DraftError(f"cannot set_manual_amount from state {draft.state}")
         base = self._base_from_draft(draft)
-        base.update(
-            line_items=[], items_sum_minor=None, adjustments_sum_minor=None, currency=currency
-        )
+        keep_items = bool(draft.line_items) and currency == draft.currency
+        if not keep_items:
+            base.update(
+                line_items=[], items_sum_minor=None, adjustments_sum_minor=None, currency=currency
+            )
+        elif draft.items_sum_minor is not None and reconcile(
+            draft.items_sum_minor, draft.adjustments_sum_minor or 0, amount_minor
+        ):
+            updated = Draft(
+                state="reconcile",
+                amount_minor=amount_minor,
+                participant_ids=[draft.initiator_id],
+                **base,
+            )
+            await self._drafts.put(updated)
+            return updated
         return await self._finalize_receipt_amount(base, trip, amount_minor)

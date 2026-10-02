@@ -13,15 +13,24 @@ from app.models.receipt import CandidateTotal
 def choose_total_keyboard(
     draft_id: str, candidates: list[CandidateTotal], currency: str
 ) -> InlineKeyboardMarkup:
-    """Up to 3 candidate totals plus `Cancel` (spec §7)."""
+    """Up to 3 candidate totals, then `Other amount` (type the total if none of
+    them is right) and `Cancel` (spec §7, amended 2026-10-02).
+    """
     row = [
         InlineKeyboardButton(
             fmt_money(candidate.amount_minor, currency), callback_data=f"{draft_id}:total:{index}"
         )
         for index, candidate in enumerate(candidates)
     ]
-    row.append(InlineKeyboardButton("Cancel", callback_data=f"{draft_id}:cancel:-"))
-    return InlineKeyboardMarkup([row])
+    return InlineKeyboardMarkup(
+        [
+            row,
+            [
+                InlineKeyboardButton("Other amount", callback_data=f"{draft_id}:manual:-"),
+                InlineKeyboardButton("Cancel", callback_data=f"{draft_id}:cancel:-"),
+            ],
+        ]
+    )
 
 
 def reconcile_keyboard(draft_id: str) -> InlineKeyboardMarkup:
