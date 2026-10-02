@@ -72,6 +72,7 @@ You can skip the buttons in the message itself:
 - `6000 yen dinner split everyone` (or `split all`)
 - `6000 yen dinner split between me Amir and John` (also `among`, `with`)
 - `3000 yen lunch paid by Amir` — the payer doesn't have to be a participant
+- `3000 yen lunch @amir` — tagging someone means they paid (in a receipt caption too)
 
 Names match a joined user's username, first name or full name, ignoring case; `me` is you. If a
 name matches nobody or more than one person, the card asks "Who did you mean by 'Jon'?" with
@@ -96,6 +97,8 @@ in the text, never as buttons.
 - **Done** (only the sender) works once nothing is unclaimed or after Rest → everyone. Until
   then it reads `Done (unclaimed: ¥x)` and tells you what is left.
 - Reply to the item card with `mine 1,4`, `split 5 everyone` or `unclaim 2` instead of tapping.
+- **The sender can tap for someone else**: pick their name in the "Tapping for" row under the
+  items, and the sender's taps go to them until **Me** is picked again. Or reply `amir 1,3`.
 
 Tax, service charge and discounts are spread in proportion to what each person's items cost
 (largest-remainder method, so the yen add up exactly); someone with no items pays none of them.

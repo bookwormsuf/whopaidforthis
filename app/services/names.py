@@ -20,6 +20,9 @@ from typing import Literal
 from app.models.user import TripUser
 
 _ME_WORDS = frozenset({"me", "myself", "i"})
+# A tag for a Telegram user without a username, written by the bot layer as
+# `@id<user ID>` (see `app.bot.handlers.text_expense.tags_as_text`).
+_ID_TAG_RE = re.compile(r"^id(\d+)$")
 _JOINER_WORDS = frozenset({"and", "&"})
 # Longest run of words tried as one full display name ("Amir Rahman").
 _MAX_NAME_WORDS = 3
@@ -77,6 +80,11 @@ def resolve_name(token: str, people: Iterable[Person], sender_id: int) -> NameMa
         return NameMatch(token, "exact", (sender_id,))
     if not key:
         return NameMatch(token, "unknown", ())
+    id_tag = _ID_TAG_RE.match(key)
+    if id_tag and token.strip().startswith("@"):
+        wanted = int(id_tag.group(1))
+        if any(p.user_id == wanted for p in people):
+            return NameMatch(token, "exact", (wanted,))
     ids = tuple(dict.fromkeys(p.user_id for p in people if _matches(p, key)))
     if len(ids) == 1:
         return NameMatch(token, "exact", ids)

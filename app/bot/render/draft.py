@@ -238,6 +238,16 @@ def _render_items(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
         "Everyone taps what they had; tap a shared dish each. Or reply "
         "<code>mine 1,4</code>, <code>split 5 everyone</code>, <code>unclaim 2</code>.",
     ]
+    if len(draft.people) > 1:
+        sender = escape(draft.initiator_name.split()[0] if draft.initiator_name else "")
+        if draft.claiming_for is not None:
+            name = escape(person_for(draft, draft.claiming_for).display_name)
+            lines.append(f"{sender}'s taps go to <b>{name}</b>. Tap Me to stop.")
+        else:
+            lines.append(
+                f"{sender} can tap items for someone else: pick their name below, or reply "
+                "<code>alvin 1,3</code>."
+            )
     if draft.items_error:
         lines.append(f"⚠️ {escape(draft.items_error, quote=False)}")
     return "\n".join(lines), items_keyboard(draft)

@@ -18,6 +18,7 @@ from app.bot.deps import get_deps
 from app.bot.formatting import unsupported_currency_text
 from app.bot.handlers.photo_expense import handle_manual_amount_reply, read_receipt_photo
 from app.bot.handlers.split import handle_custom_split_reply, handle_item_reply
+from app.bot.handlers.tags import join_tagged, tags_as_text
 from app.bot.render.draft import render_draft
 from app.models.user import TripUser
 from app.services.drafts import (
@@ -103,7 +104,8 @@ async def text_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return  # unbound group: stay silent for plain text, unlike a command
 
     bot_username = context.bot.username or ""
-    parsed = parse_expense(message.text, trip.trip_currency, trip.home_currency, bot_username)
+    text, tagged_users = tags_as_text(message)
+    parsed = parse_expense(text, trip.trip_currency, trip.home_currency, bot_username)
     if parsed is None:
         return  # not an expense candidate: stay silent (spec §6)
     if parsed.error == "unsupported_currency":
@@ -118,6 +120,7 @@ async def text_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     try:
         # Sending an expense joins the sender (spec §3, added this sprint).
         joined_user = await deps.ledger.upsert_user(trip, tg_user, joined=True)
+        await join_tagged(deps, trip, tagged_users, now)
     except LedgerUnavailable:
         logger.exception("text_expense: could not join sender")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
@@ -267,6 +270,13 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await answer()
                 return
             draft = await deps.draft_service.toggle_item(draft_id, presser.id, index)
+        elif action == "for":
+            try:
+                user_id = int(_arg)
+            except ValueError:
+                await answer()
+                return
+            draft = await deps.draft_service.set_claiming_for(draft_id, presser.id, user_id)
         elif action == "rest":
             draft = await deps.draft_service.rest_to_everyone(draft_id, presser.id)
         elif action == "done":

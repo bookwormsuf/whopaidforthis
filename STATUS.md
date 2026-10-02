@@ -583,3 +583,16 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Checks: `uv run pytest -q` 415 passed; ruff clean.
 - Next action / owner: after deploying, the second member sends `/join` again / Sufyan.
 
+
+
+### 2026-10-02 — Tags mean the payer; the sender gives items to others
+
+- Performed by: Claude, at Sufyan's request during go-live.
+- A tagged person in an expense message or receipt caption is the payer, unless `paid by` is
+  given. A tag of someone without a username is resolved by user ID and joins them. Tags are
+  not part of the description.
+- On the item card, a "Tapping for" row (sender only) makes the sender's taps count for the
+  picked person, and the sender's reply `<name> 1,3` gives items to that person. Others' taps
+  stay their own. Spec §6 and §9 amended; README updated.
+- Checks: `uv run pytest -q` 423 passed; ruff clean. No separate `/review` run (a small change
+  during go-live); covered by 8 new tests.

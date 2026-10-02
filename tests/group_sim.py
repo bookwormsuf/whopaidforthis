@@ -35,6 +35,13 @@ def _jpeg_bytes() -> bytes:
     return buf.getvalue()
 
 
+class _Entity:
+    """A text-mention entity: hashable, carrying the tagged user."""
+
+    def __init__(self, user: SimpleNamespace) -> None:
+        self.user = user
+
+
 @dataclass(frozen=True)
 class Member:
     id: int
@@ -171,10 +178,28 @@ class FakeGroup:
 
     # -- what a test does -------------------------------------------------
 
-    async def send(self, member: Member, text: str, reply_to: Card | None = None) -> Card | None:
-        """`member` sends `text`; returns the draft card the bot replied with, if any."""
+    def _text_mentions(self, mentions: dict[str, Member] | None):
+        """A stand-in for `Message.parse_entities`: tags of people with no username,
+        as Telegram shows them (their name), mapped to who they are.
+        """
+        entities = {
+            _Entity(self._tg_user(member)): shown for shown, member in (mentions or {}).items()
+        }
+        return lambda types=None: entities
+
+    async def send(
+        self,
+        member: Member,
+        text: str,
+        reply_to: Card | None = None,
+        mentions: dict[str, Member] | None = None,
+    ) -> Card | None:
+        """`member` sends `text`; returns the draft card the bot replied with, if any.
+        `mentions` are tags of people with no username, by the name shown.
+        """
         before = set(self.cards)
         update = self._update(member, text, reply_to.message_id if reply_to else None)
+        update.effective_message.parse_entities = self._text_mentions(mentions)
         await text_expense_handler(update, self._context())
         new = [mid for mid in self.cards if mid not in before]
         return self.cards[new[-1]] if new else None
@@ -189,6 +214,7 @@ class FakeGroup:
         update = self._update(member, "", None)
         update.effective_message.text = None
         update.effective_message.caption = caption
+        update.effective_message.parse_caption_entities = self._text_mentions(None)
         update.effective_message.photo = [SimpleNamespace(file_id="photo", file_size=1000)]
         await photo_expense_handler(update, self._context())
         new = [mid for mid in self.cards if mid not in before]

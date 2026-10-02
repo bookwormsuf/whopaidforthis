@@ -66,6 +66,25 @@ def item_button_text(draft: Draft, number: int, index: int, initials: dict[int, 
     return text
 
 
+def tapping_for_rows(draft: Draft) -> list[list[InlineKeyboardButton]]:
+    """The "Tapping for" row (added 2026-10-02): one button per joined person, ✓ on
+    whoever the sender's item taps currently count for ("Me" for the sender). Only
+    the sender can press these; with one person there is nothing to pick.
+    """
+    if len(draft.people) < 2:
+        return []
+    current = draft.claiming_for or draft.initiator_id
+    buttons = []
+    for person in draft.people:
+        label = "Me" if person.user_id == draft.initiator_id else person.first_name
+        if person.user_id == current:
+            label = f"✓ {label}"
+        buttons.append(
+            InlineKeyboardButton(label, callback_data=f"{draft.draft_id}:for:{person.user_id}")
+        )
+    return [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
+
+
 def items_keyboard(draft: Draft) -> InlineKeyboardMarkup:
     initials = draft_initials(draft)
     rows = [
@@ -77,6 +96,7 @@ def items_keyboard(draft: Draft) -> InlineKeyboardMarkup:
         ]
         for number, index in enumerate(claimable_indices(draft), start=1)
     ]
+    rows += tapping_for_rows(draft)
     if unclaimed_indices(draft) and not draft.rest_everyone:
         done = f"Done (unclaimed: {fmt_signed_money(unclaimed_total(draft), draft.currency)})"
     else:
