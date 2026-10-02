@@ -406,3 +406,68 @@ def test_to_receipt_applies_it() -> None:
     )
     receipt = to_receipt(extraction, "JPY")
     assert [i.kind for i in receipt.line_items] == ["item"]
+
+
+# -- Amounts read 100 times off (found at go-live, 2026-10-02) ---------------------
+
+
+def _scaled_extraction(item: int, total: int, printed: str | None) -> ReceiptExtraction:
+    return ReceiptExtraction(
+        merchant="bills",
+        currency="JPY",
+        transaction_datetime=None,
+        line_items=[
+            {
+                "description": "Orecchiette",
+                "quantity": 1,
+                "unit_amount_minor": item,
+                "amount_minor": item,
+                "kind": "item",
+            }
+        ],
+        candidate_totals=[
+            {
+                "label_as_printed": "合計",
+                "amount_minor": total,
+                "is_grand_total_guess": True,
+                "amount_as_printed": printed,
+            }
+        ],
+        description="Lunch",
+        category="food",
+        confidence=0.9,
+    )
+
+
+def test_yen_read_as_cents_is_rescaled() -> None:
+    receipt = to_receipt(_scaled_extraction(685000, 685000, "¥6,850"), "JPY")
+    assert receipt.candidate_totals[0].amount_minor == 6850
+    assert receipt.line_items[0].amount_minor == 6850
+    assert receipt.line_items[0].unit_amount_minor == 6850
+
+
+def test_cents_read_as_dollars_is_rescaled() -> None:
+    receipt = to_receipt(_scaled_extraction(12, 12, "S$12.00"), "SGD")
+    assert receipt.candidate_totals[0].amount_minor == 1200
+    assert receipt.line_items[0].amount_minor == 1200
+
+
+def test_correct_or_unprinted_amounts_are_left_alone() -> None:
+    assert (
+        to_receipt(_scaled_extraction(6850, 6850, "¥6,850"), "JPY").line_items[0].amount_minor
+        == 6850
+    )
+    assert (
+        to_receipt(_scaled_extraction(685000, 685000, None), "JPY").line_items[0].amount_minor
+        == 685000
+    )
+    assert (
+        to_receipt(_scaled_extraction(6850, 6850, "合計"), "JPY").line_items[0].amount_minor == 6850
+    )
+
+
+def test_prompt_explains_minor_units() -> None:
+    from app.services.receipt_parser import SYSTEM_PROMPT_TEMPLATE
+
+    assert "never 685000" in SYSTEM_PROMPT_TEMPLATE
+    assert "amount_as_printed" in SYSTEM_PROMPT_TEMPLATE

@@ -596,3 +596,14 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   stay their own. Spec §6 and §9 amended; README updated.
 - Checks: `uv run pytest -q` 423 passed; ruff clean. No separate `/review` run (a small change
   during go-live); covered by 8 new tests.
+
+### 2026-10-02 — Go-live: a ¥6,850 receipt read as ¥685,000
+
+- Performed by: Sufyan (real group), Claude (fix).
+- A clear receipt totalling ¥6,850 became a ¥685,000 draft: the reader gave yen as if they had
+  cents. Cancelled before saving.
+- Fix: the prompt spells out minor units per currency, and each candidate total now carries its
+  amount as printed. When the printed amount shows the reading is exactly 100 times off,
+  every amount is rescaled. Spec §7 amended (one new optional schema field).
+- Checks: `uv run pytest -q` 427 passed; ruff clean.
+

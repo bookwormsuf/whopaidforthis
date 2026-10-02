@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 from typing import Literal, Protocol
 from zoneinfo import ZoneInfo
 
@@ -26,6 +29,7 @@ from pydantic import ValidationError
 
 from app.models.receipt import CandidateTotal, Receipt, ReceiptLineItem
 from app.models.trip import Trip
+from app.services.currencies import decimals_for
 from app.services.images import PreparedImage
 from app.services.llm_schemas import ReceiptExtraction
 
@@ -55,6 +59,11 @@ Japanese receipt conventions, when this is a Japanese receipt:
 - A tax amount printed as already included -- 内税, (内 消費税等), 税込, "incl. tax" --
   is part of the item prices. Do not list it as a `tax` line item; only list tax that is
   added on top of the items.
+
+Amounts (`amount_minor`, `unit_amount_minor`) are integers in the currency's smallest
+unit. JPY has no smaller unit: ¥6,850 is 6850, never 685000. SGD and USD have cents:
+S$12.50 is 1250. For each candidate total, also copy the amount exactly as printed into
+`amount_as_printed`, e.g. "¥6,850".
 
 List every priced line as a line item, with a `kind`: `item` for a regular purchased
 item, `tax` for a tax line, `service_charge` for a service charge, `discount` for a
@@ -160,6 +169,7 @@ def to_receipt(extraction: ReceiptExtraction, currency: str) -> Receipt:
             printed = datetime.fromisoformat(extraction.transaction_datetime)
         except ValueError:
             printed = None
+    extraction = _fix_unit_scale(extraction, currency)
     try:
         candidate_totals = [
             CandidateTotal(
@@ -192,6 +202,62 @@ def to_receipt(extraction: ReceiptExtraction, currency: str) -> Receipt:
         )
     except ValidationError as exc:
         raise ReceiptUnreadable("reading is not a usable receipt") from exc
+
+
+def _printed_minor(printed: str | None, currency: str) -> int | None:
+    """`"¥6,850"` -> 6850 (JPY), `"S$12.50"` -> 1250 (SGD); `None` if unreadable."""
+    if not printed:
+        return None
+    digits = re.sub(r"[^\d.]", "", printed.replace(",", ""))
+    if not digits or digits.count(".") > 1:
+        return None
+    try:
+        value = Decimal(digits) * (Decimal(10) ** decimals_for(currency))
+    except (InvalidOperation, ValueError):
+        return None
+    return int(value) if value == value.to_integral_value() else None
+
+
+def _fix_unit_scale(extraction: ReceiptExtraction, currency: str) -> ReceiptExtraction:
+    """The reader sometimes gives yen as if they had cents (¥6,850 as 685000), or
+    the reverse. When a candidate's printed amount shows its `amount_minor` is off by
+    exactly 100 times, every amount on the reading is rescaled (decided 2026-10-02
+    at go-live). Otherwise the reading is unchanged.
+    """
+    factor = None
+    for candidate in extraction.candidate_totals:
+        printed = _printed_minor(candidate.amount_as_printed, currency)
+        if not printed or not candidate.amount_minor or printed == candidate.amount_minor:
+            continue
+        if candidate.amount_minor == printed * 100:
+            factor = Fraction(1, 100)
+        elif candidate.amount_minor * 100 == printed:
+            factor = Fraction(100)
+        break
+    if factor is None:
+        return extraction
+
+    def scale(amount: int | None) -> int | None:
+        return None if amount is None else int(round(amount * factor))
+
+    logger.warning("receipt: amounts read %s times off; rescaled", "100" if factor < 1 else "1/100")
+    return extraction.model_copy(
+        update={
+            "line_items": [
+                item.model_copy(
+                    update={
+                        "amount_minor": scale(item.amount_minor),
+                        "unit_amount_minor": scale(item.unit_amount_minor),
+                    }
+                )
+                for item in extraction.line_items
+            ],
+            "candidate_totals": [
+                c.model_copy(update={"amount_minor": scale(c.amount_minor)})
+                for c in extraction.candidate_totals
+            ],
+        }
+    )
 
 
 def drop_included_tax(
