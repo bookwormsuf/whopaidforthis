@@ -17,7 +17,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 4 Receipt photos, total only | written (+ §7/§10 amendments) | done | green (302) | 2026-10-01, findings fixed | 2026-10-01, all eight pass | 2026-10-01 | Sprint 4 closed. Next: run sprint 5 / agent |
 | 5 Splitting and balances | written (+ §6 amendment) | done | green (363) | 2026-10-01, findings fixed | 2026-10-02, all six single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 5 closed. Next: merge Sprint 6 / Sufyan approves |
 | 6 Item claiming | written (+ §7 amendment) | done | green (404) | 2026-10-01, findings fixed | 2026-10-02, single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 6 closed. Next: run sprint 7 / agent |
-| 7 Hardening and go-live | written | done | green (408) | 2026-10-02, findings fixed (two need Sufyan) | – | – | Regression run (incl. deferred two-person checks) and go-live / Sufyan |
+| 7 Hardening and go-live | written | done | green (408) | 2026-10-02, findings fixed (screenshots after the trip) | – | – | Regression run (incl. deferred two-person checks) and go-live / Sufyan |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -537,7 +537,7 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   - Example names are made up.
   - `docs/manual-test-checklist.md`: every sprint's checklist as one regression run, with a
     results table. Part B is the two-person checks deferred from Sprints 5 and 6.
-  - `LICENSE`: MIT, copyright "bookwormsuf" (the GitHub handle), pending Sufyan's choice of name.
+  - `LICENSE`: MIT, copyright "bookwormsuf" (the GitHub handle), confirmed by Sufyan.
 - Not done: screenshots for "Example usage". The agent cannot take Telegram screenshots; the
   README has a text transcript and a note that screenshots go in `docs/images/` (test group
   only, no real names).
@@ -553,7 +553,8 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   - Fixed: the Deployment steps were Sufyan's personal checklist; they now install flyctl and
     read for a stranger.
   - Fixed: Line Items `unassigned` was missing from the data model.
-  - Needs Sufyan: screenshots (`docs/images/`), and the LICENSE name (handle or real name).
+  - Sufyan decided: the LICENSE keeps "bookwormsuf"; he adds curated screenshots to
+    `docs/images/` once home, after the trip.
 - Next action / owner: run `docs/manual-test-checklist.md` (with the second person for Part B)
   and the go-live steps / Sufyan.
 
