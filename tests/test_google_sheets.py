@@ -46,6 +46,7 @@ class FakeWorksheet:
         self.frozen_rows: int | None = None
         self.id = next(_next_gid)
         self.get_all_values_calls: list[object] = []
+        self.append_kwargs: list[dict] = []
 
     def get_values(self, range_name: str | None = None) -> list[list[object]]:
         if range_name == "A1:Z1":
@@ -90,6 +91,7 @@ class FakeWorksheet:
         self.frozen_rows = rows
 
     def append_row(self, values: list[object], **kwargs: object) -> None:
+        self.append_kwargs.append(kwargs)
         self.rows.append(values)
 
 
@@ -382,6 +384,25 @@ async def test_upsert_user_writes_native_int_id_and_bool_joined() -> None:
     assert isinstance(row[0], int)
     assert row[5] is True
     assert isinstance(row[5], bool)
+    # Anchored at A1: otherwise Google skips the hidden User ID column and the row
+    # lands one column to the right (seen live, 2026-10-02).
+    assert users_ws.append_kwargs[0]["table_range"] == "A1"
+
+
+async def test_list_users_skips_an_unreadable_row() -> None:
+    now = datetime.now(UTC).isoformat()
+    store = _store()
+    users_ws = FakeWorksheet(
+        "Users",
+        rows=[
+            ["Telegram User ID", "Username", "Display Name", "First Seen", "Last Seen", "Joined"],
+            ["", 42, "ada", "Ada", now, now, True],  # shifted one column right
+            [42, "ada", "Ada", now, now, True],
+        ],
+    )
+    store._open = AsyncMock(return_value=FakeSpreadsheet([users_ws]))  # type: ignore[method-assign]
+    users = await store.list_users(_trip_jpy_sgd(), joined_only=True)
+    assert [u.user_id for u in users] == [42]
 
 
 async def test_upsert_user_is_serialised_by_a_per_sheet_lock(
