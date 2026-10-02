@@ -222,6 +222,46 @@ def test_add_joined_so_far_grows_without_duplicates_and_returns_count() -> None:
     assert count == 2
 
 
+def test_join_reply_counts_the_person_who_sent_join() -> None:
+    from app.bot.handlers.callbacks import add_joined_so_far
+
+    text, count = add_joined_so_far("Joined ✅ Sufyan", "Amir")
+    assert text == "Joined ✅ Sufyan\nJoined so far: Sufyan, Amir"
+    assert count == 2
+
+
+async def test_join_button_tells_someone_already_named_they_are_in() -> None:
+    from app.bot.handlers.callbacks import ALREADY_IN_TEXT, join_button_callback
+
+    ledger = InMemoryLedgerStore()
+    trip = Trip(
+        chat_id=-100,
+        sheet_id="sheet-id-1234567890",
+        name="Trip",
+        trip_currency="JPY",
+        home_currency="SGD",
+        timezone="Asia/Tokyo",
+        created_at=datetime.now(UTC),
+    )
+    await ledger.save_binding(trip)
+    await ledger.initialise_trip_sheet(trip)
+    context = MagicMock()
+    context.application.bot_data = {"deps": make_deps(ledger)}
+    update = MagicMock()
+    update.callback_query.data = "join:-100:tap"
+    update.callback_query.from_user = SimpleNamespace(
+        id=1, first_name="Sufyan", last_name=None, username="s"
+    )
+    update.callback_query.message.text_html = "Joined ✅ Sufyan"
+    update.callback_query.answer = AsyncMock()
+    update.callback_query.edit_message_text = AsyncMock()
+
+    await join_button_callback(update, context)
+
+    update.callback_query.answer.assert_awaited_once_with(ALREADY_IN_TEXT)
+    update.callback_query.edit_message_text.assert_not_awaited()
+
+
 async def test_join_button_uses_text_html_and_escapes_ampersand_in_new_name() -> None:
     """message.text_html (not .text) is edited, so existing HTML markup survives;
     a joiner's own name is escaped going in, even when it contains an HTML-special

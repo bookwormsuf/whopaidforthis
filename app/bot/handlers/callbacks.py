@@ -22,30 +22,49 @@ from app.services.ledger_store import LedgerUnavailable
 
 logger = logging.getLogger(__name__)
 
+_JOINED_PREFIX = "Joined ✅ "
 _JOINED_SO_FAR_PREFIX = "Joined so far: "
+ALREADY_IN_TEXT = "You're already in ✅"
 _EVERYONE_IN_LINE = "Everyone's in. Latecomers can type /join."
 _CLOSED_TEXT = "Joining is closed here, type /join."
 _NOT_JOINED_TEXT = "Only trip users can do this"
 
 
+def names_on_message(text: str) -> list[str]:
+    """Everyone this join message already names: the person in its first line
+    `Joined ✅ <name>` (a `/join` reply), then the "Joined so far" line.
+    """
+    lines = text.split("\n")
+    names: list[str] = []
+    if lines and lines[0].startswith(_JOINED_PREFIX):
+        names.append(lines[0][len(_JOINED_PREFIX) :].strip())
+    for line in lines:
+        if line.startswith(_JOINED_SO_FAR_PREFIX):
+            names += [n.strip() for n in line[len(_JOINED_SO_FAR_PREFIX) :].split(",")]
+    return [n for n in dict.fromkeys(names) if n]
+
+
 def add_joined_so_far(text: str, name: str) -> tuple[str, int]:
     """Append `name` to the message's "Joined so far: A, B, C" line, no duplicates.
 
-    If the line does not exist yet, it is added as a new last line. Returns the new
-    text and the resulting count of names on that line. Pure function, unit-tested
-    directly.
+    The line counts everyone the message names, so on a `/join` reply
+    (`Joined ✅ Sufyan`) the first tap gives "Joined so far: Sufyan, Amir" and a
+    count of 2, matching the "I'm in too (2 joined)" label in spec §3. If the line
+    does not exist yet, it is added as a new last line. Returns the new text and the
+    count. Pure function, unit-tested directly.
     """
+    names = names_on_message(text)
+    if name not in names:
+        names.append(name)
+    line = _JOINED_SO_FAR_PREFIX + ", ".join(names)
     lines = text.split("\n")
-    for index, line in enumerate(lines):
-        if line.startswith(_JOINED_SO_FAR_PREFIX):
-            names = [n.strip() for n in line[len(_JOINED_SO_FAR_PREFIX) :].split(",") if n.strip()]
-            if name not in names:
-                names.append(name)
-            lines[index] = _JOINED_SO_FAR_PREFIX + ", ".join(names)
+    for index, existing in enumerate(lines):
+        if existing.startswith(_JOINED_SO_FAR_PREFIX):
+            lines[index] = line
             return "\n".join(lines), len(names)
     if text and not text.endswith("\n"):
         text += "\n"
-    return text + f"{_JOINED_SO_FAR_PREFIX}{name}", 1
+    return text + line, len(names)
 
 
 def is_closed(text: str) -> bool:
@@ -106,6 +125,10 @@ async def join_button_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     tg_user = TripUser.from_telegram_user(presser, datetime.now(UTC))
+    if current_text is not None and escape(tg_user.display_name) in names_on_message(current_text):
+        # Already named here (e.g. the person who sent /join): nothing to add.
+        await query.answer(ALREADY_IN_TEXT)
+        return
     try:
         joined_user = await deps.ledger.upsert_user(trip, tg_user, joined=True)
     except LedgerUnavailable:
