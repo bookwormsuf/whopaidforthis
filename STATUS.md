@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-10-01 (sprint 5 deployed; sprint 6 built ahead, unmerged)
+Updated: 2026-10-02 (sprint 5 signed off; sprint 6 built, awaiting merge)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -15,7 +15,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 2 Text expenses, just me | written (+ carry-overs) | done | green (236) | 2026-09-29, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 2 closed. Next: run sprint 3 / agent |
 | 3 First deployment | written | done | green (247) | 2026-10-01, findings fixed | 2026-10-01, all nine pass | 2026-10-01 | Sprint 3 closed. Next: run sprint 4 / agent |
 | 4 Receipt photos, total only | written (+ §7/§10 amendments) | done | green (302) | 2026-10-01, findings fixed | 2026-10-01, all eight pass | 2026-10-01 | Sprint 4 closed. Next: run sprint 5 / agent |
-| 5 Splitting and balances | written | done, deployed 2026-10-01 | green (363) | 2026-10-01, findings fixed | – | – | Single-person checklist / Sufyan; two-person steps deferred to Sprint 7 |
+| 5 Splitting and balances | written (+ §6 amendment) | done | green (363) | 2026-10-01, findings fixed | 2026-10-02, all six single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 5 closed. Next: merge Sprint 6 / Sufyan approves |
 | 6 Item claiming | written | done (built ahead, PR open, not merged) | green (397) | 2026-10-01, findings fixed | – | – | Sign off sprint 5 first; then merge and the single-person checklist / Sufyan |
 | 7 Hardening and go-live | written | not started | – | – | – | – | after sprint 6; needs all friends |
 
@@ -476,4 +476,21 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Checks: `uv run pytest -q` 365 passed on `main`, 399 on the Sprint 6 branch; ruff clean.
 - Next action / owner: delete the shifted rows on the test Sheet's Users tab, `/join`, then
   redo the checklist from step 2 / Sufyan.
+
+### 2026-10-02 — Sprint 5 checklist and sign-off
+
+- Performed by: Sufyan (Telegram, Sheets), recorded by Claude.
+- Checklist (single-person steps, per the 2026-10-01 decision): `/help` shows the new version;
+  `split everyone` saves with one participant (after the Users-tab hotfix); Choose people, the
+  empty-selection toast, Next and Edit; an unknown `paid by` name and `Not sure, choose people`;
+  `/balances`, `/mine`, `/settle` ("All square"); `/undo` moves `/balances`. All six pass.
+- Found and fixed along the way: the Users-tab column shift (hotfix, see above) and a clearer
+  join card (the count includes the person who sent `/join`; a second tap says "You're already
+  in"). Both merged and deployed on their own.
+- Decided: a bare `split` (`6000 split dinner`) is dropped from the description and selects
+  nobody. Spec §6 amended; ships with Sprint 6.
+- Deferred to Sprint 7 (automated until then): the two-person steps 1, 4, 5, 6 and 7.
+- Disposition: Sufyan said "sign off sprint 5". Sprint 5 closed.
+- Next action / owner: approve the Sprint 6 merge / Sufyan; then the Sprint 6 single-person
+  checklist / Sufyan.
 
