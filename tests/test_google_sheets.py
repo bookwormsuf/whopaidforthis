@@ -380,13 +380,39 @@ async def test_upsert_user_writes_native_int_id_and_bool_joined() -> None:
     await store.upsert_user(trip, user, joined=True)
 
     row = users_ws.rows[1]
-    assert row[0] == 42
-    assert isinstance(row[0], int)
+    assert row[0] == 42  # a number cell, not text
     assert row[5] is True
     assert isinstance(row[5], bool)
-    # Anchored at A1: otherwise Google skips the hidden User ID column and the row
-    # lands one column to the right (seen live, 2026-10-02).
-    assert users_ws.append_kwargs[0]["table_range"] == "A1"
+    # Written with appendCells, not values.append: that skipped the hidden User ID
+    # column, then with an A1 range overwrote the header row (both seen live).
+    request = spreadsheet.batch_update_calls[-1]["requests"][0]["appendCells"]
+    assert request["sheetId"] == users_ws.id
+    assert users_ws.append_kwargs == []
+
+
+async def test_upsert_user_restores_a_lost_header_row() -> None:
+    from app.models.user import TripUser
+
+    now = datetime.now(UTC)
+    store = _store()
+    # The header was overwritten by a user's row (seen live, 2026-10-02).
+    users_ws = FakeWorksheet(
+        "Users", rows=[[7, "bo", "Bo", now.isoformat(), now.isoformat(), True]]
+    )
+    users_ws.insert_row = lambda values, index, **kw: users_ws.rows.insert(index - 1, values)
+    spreadsheet = FakeSpreadsheet([users_ws])
+    store._open = AsyncMock(return_value=spreadsheet)  # type: ignore[method-assign]
+    trip = _trip_jpy_sgd()
+
+    assert [u.user_id for u in await store.list_users(trip, joined_only=True)] == [7]
+
+    ada = TripUser(
+        user_id=42, username="ada", display_name="Ada", first_seen=now, last_seen=now, joined=True
+    )
+    await store.upsert_user(trip, ada, joined=True)
+    assert users_ws.rows[0][0] == "Telegram User ID"
+    assert [r[0] for r in users_ws.rows[1:]] == [7, 42]
+    assert [u.user_id for u in await store.list_users(trip, joined_only=True)] == [7, 42]
 
 
 async def test_list_users_skips_an_unreadable_row() -> None:
