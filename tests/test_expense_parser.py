@@ -225,3 +225,30 @@ def test_bare_split_is_dropped_and_selects_nobody() -> None:
     # The clauses still work.
     assert parse_expense("6000 dinner split all", "JPY", "SGD", BOT).participants_text == "all"
     assert parse_expense("6000 split", "JPY", "SGD", BOT).description == "Expense"
+
+
+# -- Currency glued to the amount (found at go-live, 2026-10-02) ---------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "$SGD559.57 Hotel part 1",
+        "SGD559.57 Hotel part 1",
+        "S$559.57 Hotel part 1",
+        "559.57SGD Hotel part 1",
+        "sgd559.57 hotel part 1",
+    ],
+)
+def test_currency_glued_to_amount(text: str) -> None:
+    result = parse_expense(text, "JPY", "SGD", BOT)
+    assert result is not None
+    assert (result.amount_minor, result.currency) == (55957, "SGD")
+    assert result.description == "Hotel Part 1"
+
+
+def test_letters_glued_to_a_number_that_are_not_a_currency() -> None:
+    result = parse_expense("taxi3200 3200", "JPY", "SGD", BOT)
+    assert (result.amount_minor, result.description) == (3200, "Taxi3200")
+    assert parse_expense("part1 lol", "JPY", "SGD", BOT) is None
+    assert parse_expense("JPY1200 ramen", "JPY", "SGD", BOT).amount_minor == 1200
