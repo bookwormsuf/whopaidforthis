@@ -127,7 +127,17 @@ def _parse_int(value: Any) -> int:
         raise TypeError("expected an int, got a bool")
     if isinstance(value, int):
         return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
     return int(str(value).strip())
+
+
+def _is_id(value: Any, wanted: int) -> bool:
+    """Whether a cell holds `wanted`, however the Sheet returned it (int, float, text)."""
+    try:
+        return _parse_int(value) == wanted
+    except (ValueError, TypeError):
+        return False
 
 
 def _parse_bool(value: Any) -> bool:
@@ -323,7 +333,7 @@ class SheetsLedgerStore:
                     value_input_option=ValueInputOption.raw,
                 )
             else:
-                await _with_retries(bindings_ws.append_row, values, table_range="A1")
+                await self._append_row(control, bindings_ws, values)
         self._binding_cache[trip.chat_id] = trip
         self._not_bound_cache.pop(trip.chat_id, None)
         self._inaccessible_cache.pop(trip.chat_id, None)
@@ -416,21 +426,32 @@ class SheetsLedgerStore:
 
     # -- Users ----------------------------------------------------------------
 
-    async def _users_worksheet(self, sheet_id: str) -> Worksheet:
-        spreadsheet = await self._open(sheet_id)
-        return await _with_retries(spreadsheet.worksheet, "Users")
-
     async def upsert_user(self, trip: Trip, user: TripUser, joined: bool | None) -> TripUser:
+        """Updates the user's row in place, or appends one. Rows are matched by the
+        user ID in column A anywhere in the tab, header or not, and a missing header
+        row is put back first (a 2026-10-02 bug overwrote it on live Sheets).
+        """
         async with self._lock_for(trip.sheet_id):
-            ws = await self._users_worksheet(trip.sheet_id)
+            spreadsheet = await self._open(trip.sheet_id)
+            ws = await _with_retries(spreadsheet.worksheet, "Users")
             rows = await _with_retries(
                 ws.get_all_values, value_render_option=ValueRenderOption.unformatted
             )
+            header = headers_for(trip.trip_currency, trip.home_currency)["Users"]
+            if not rows or not rows[0] or str(rows[0][0]) != header[0]:
+                await _with_retries(
+                    ws.insert_row, header, 1, value_input_option=ValueInputOption.raw
+                )
+                rows = [header, *rows]
+                logger.warning("upsert_user: restored the missing Users header row")
             existing: TripUser | None = None
             row_index: int | None = None
             for index, row in enumerate(rows[1:], start=2):
-                if row and str(row[0]) == str(user.user_id):
-                    existing = _row_to_user(row)
+                if row and _is_id(row[0], user.user_id):
+                    try:
+                        existing = _row_to_user(row)
+                    except (ValueError, TypeError, IndexError):
+                        existing = None  # unreadable: overwrite it with good values
                     row_index = index
                     break
             merged = merge_user(existing, user, joined)
@@ -443,30 +464,27 @@ class SheetsLedgerStore:
                     value_input_option=ValueInputOption.raw,
                 )
             else:
-                # `table_range="A1"`: without it Google guesses where the table starts
-                # and skips the hidden User ID column, shifting the row right by one.
-                await _with_retries(
-                    ws.append_row,
-                    values,
-                    value_input_option=ValueInputOption.raw,
-                    table_range="A1",
-                )
+                await self._append_row(spreadsheet, ws, values)
         return merged
 
     async def list_users(self, trip: Trip, joined_only: bool = False) -> list[TripUser]:
-        ws = await self._users_worksheet(trip.sheet_id)
+        spreadsheet = await self._open(trip.sheet_id)
+        ws = await _with_retries(spreadsheet.worksheet, "Users")
         rows = await _with_retries(
             ws.get_all_values, value_render_option=ValueRenderOption.unformatted
         )
         users = []
-        for number, row in enumerate(rows[1:], start=2):
+        # Every row, the first included: if a header row was lost, row 1 is a user.
+        # The header itself fails to parse and is skipped like any unreadable row.
+        for number, row in enumerate(rows, start=1):
             if not _row_nonempty(row):
                 continue
             try:
                 users.append(_row_to_user(row))
             except (ValueError, TypeError, IndexError):
-                # One bad row (e.g. edited by hand) must not take every command down.
-                logger.warning("list_users: skipping unreadable Users row %s", number)
+                if number > 1:
+                    # One bad row (e.g. edited by hand) must not take every command down.
+                    logger.warning("list_users: skipping unreadable Users row %s", number)
         if joined_only:
             return [user for user in users if user.joined]
         return users
@@ -482,6 +500,22 @@ class SheetsLedgerStore:
 
     def _row_to_cells(self, row: list[Any]) -> dict[str, Any]:
         return {"values": [self._cell(value) for value in row]}
+
+    async def _append_row(self, spreadsheet: Any, ws: Worksheet, values: list[Any]) -> None:
+        """Appends one row with `appendCells`, which always writes after the last row
+        with data, starting in column A, with typed cells (numbers, booleans, text --
+        the same as RAW input). Not `values.append`: its table detection skips a
+        hidden first column, which shifted Users rows right, and with `A1` as the
+        table range it overwrote the header row (both seen live, 2026-10-02).
+        """
+        request = {
+            "appendCells": {
+                "sheetId": ws.id,
+                "rows": [self._row_to_cells(values)],
+                "fields": "userEnteredValue",
+            }
+        }
+        await _with_retries(spreadsheet.batch_update, {"requests": [request]})
 
     async def append_expense(
         self,
@@ -648,6 +682,4 @@ class SheetsLedgerStore:
             rate.provider,
             rate.retrieved_at.isoformat(),
         ]
-        await _with_retries(
-            ws.append_row, row, value_input_option=ValueInputOption.raw, table_range="A1"
-        )
+        await self._append_row(spreadsheet, ws, row)

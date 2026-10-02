@@ -568,3 +568,18 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   (`$SGD` → SGD). Letters that aren't a currency (`taxi3200`) still don't make an amount.
 - Checks: `uv run pytest -q` 414 passed; ruff clean.
 
+### 2026-10-02 — Go-live: Users header overwritten, Everyone's in refused
+
+- Performed by: Sufyan (real group), Claude (fix).
+- In the real group, `Everyone's in` said only trip users could press it, and the Users tab's
+  row 1 held Sufyan's details instead of the headers; the second member's row was gone.
+- Cause: the earlier hotfix anchored `values.append` at `A1`. On the Users tab, whose column A is
+  hidden, Google then treated the table as empty and overwrote row 1 on every append. The bot
+  reads row 1 as headers, so it saw nobody joined. Expenses were never affected (they use
+  `appendCells`).
+- Fix: Users, Exchange Rates and Bindings rows are appended with `appendCells` like Expenses.
+  `upsert_user` puts a lost header row back, and `list_users` reads row 1 as a user if it isn't
+  the header. User IDs match whether the Sheet returns them as int, float or text.
+- Checks: `uv run pytest -q` 415 passed; ruff clean.
+- Next action / owner: after deploying, the second member sends `/join` again / Sufyan.
+
