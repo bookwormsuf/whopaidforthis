@@ -417,18 +417,20 @@ async def test_home_currency_line_items_written_in_trip_currency() -> None:
 
 
 async def test_single_total_far_from_items_asks_to_reconcile() -> None:
-    """Only one total printed, but the line items are well off it (e.g. an included
-    tax read as an extra tax line): no total question, but the reconciliation prompt.
+    """Only one total printed, but the line items are well off it (e.g. an item the
+    reader missed): no total question, but the reconciliation prompt. (An included
+    tax read as an extra tax line is dropped before this, see
+    `test_receipt_parser.py::test_included_tax_line_is_dropped_when_that_matches_the_total`.)
     """
     service, ledger, trip = await _setup()
     receipt = _receipt(
         line_items=[
             {"description": "Sushi", "quantity": 1, "amount_minor": 1000, "kind": "item"},
-            {"description": "Tax (incl.)", "quantity": 1, "amount_minor": 90, "kind": "tax"},
+            {"description": "Tax", "quantity": 1, "amount_minor": 90, "kind": "tax"},
         ],
         candidate_totals=[
-            {"label_as_printed": "合計", "amount_minor": 1000, "is_grand_total_guess": True},
-            {"label_as_printed": "現金計", "amount_minor": 1000, "is_grand_total_guess": True},
+            {"label_as_printed": "合計", "amount_minor": 1200, "is_grand_total_guess": True},
+            {"label_as_printed": "現金計", "amount_minor": 1200, "is_grand_total_guess": True},
         ],
         description="Sushi",
         category="food",
@@ -447,7 +449,7 @@ async def test_single_total_far_from_items_asks_to_reconcile() -> None:
         date_source="receipt",
     )
     assert draft.state == "reconcile"
-    assert draft.amount_minor == 1000
+    assert draft.amount_minor == 1200
     proceeded = await service.use_total_anyway(draft.draft_id, presser_id=42)
     assert proceeded.state == "detected"
-    assert proceeded.amount_minor == 1000
+    assert proceeded.amount_minor == 1200

@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-10-02 (sprint 6 signed off)
+Updated: 2026-10-02 (sprint 7 built; go-live checklist pending)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -17,7 +17,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 4 Receipt photos, total only | written (+ §7/§10 amendments) | done | green (302) | 2026-10-01, findings fixed | 2026-10-01, all eight pass | 2026-10-01 | Sprint 4 closed. Next: run sprint 5 / agent |
 | 5 Splitting and balances | written (+ §6 amendment) | done | green (363) | 2026-10-01, findings fixed | 2026-10-02, all six single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 5 closed. Next: merge Sprint 6 / Sufyan approves |
 | 6 Item claiming | written (+ §7 amendment) | done | green (404) | 2026-10-01, findings fixed | 2026-10-02, single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 6 closed. Next: run sprint 7 / agent |
-| 7 Hardening and go-live | written | not started | – | – | – | – | after sprint 6; needs all friends; must include the deferred two-person checks from Sprints 5 and 6 |
+| 7 Hardening and go-live | written | done | green (408) | 2026-10-02, findings fixed (screenshots after the trip) | – | – | Regression run (incl. deferred two-person checks) and go-live / Sufyan |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -521,4 +521,40 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Disposition: Sufyan said "sign off sprint 6". Sprint 6 closed.
 - Next action / owner: run sprint 7 / agent, with the deferred two-person checks from Sprints 5
   and 6 listed in its checklist.
+
+### 2026-10-02 — Sprint 7 build and review
+
+- Performed by: Claude, in a cloud session.
+- Scope and reason: Sprint 7 "Agent builds" list, per `docs/sprints/07-hardening-and-go-live.md`.
+- Secret scan: gitleaks v8.30.1, `gitleaks detect --source . --log-opts="--all"` over every
+  branch (26 commits): no leaks found. Nothing to rotate or rewrite.
+- Evidence / outputs:
+  - README rewritten in the pinned order: what it is, architecture (Mermaid), data model,
+    splitting, BotFather, groups, privacy mode, Google Cloud and Sheets, sharing, LLM, FX,
+    environment variables, local testing, deployment, example usage, settlement, limitations,
+    stopping after the trip.
+  - The limitations list includes all six pinned items.
+  - Example names are made up.
+  - `docs/manual-test-checklist.md`: every sprint's checklist as one regression run, with a
+    results table. Part B is the two-person checks deferred from Sprints 5 and 6.
+  - `LICENSE`: MIT, copyright "bookwormsuf" (the GitHub handle), confirmed by Sufyan.
+- Not done: screenshots for "Example usage". The agent cannot take Telegram screenshots; the
+  README has a text transcript and a note that screenshots go in `docs/images/` (test group
+  only, no real names).
+- Included-tax fix (approved by Sufyan 2026-10-02): when a receipt's lines match no grand-total
+  guess, but leaving out exactly one tax line makes them match one exactly, that line is
+  dropped as tax already inside the prices (内税). Spec §7 amended; four tests.
+- Checks: `uv run pytest -q` 408 passed; ruff and format clean.
+- Review (`/review`): seven findings.
+  - Fixed: STATUS recorded the review before it ran.
+  - Fixed: the regression checklist missed the restart/expired card, the Sheet layout, switching
+    Sheet without duplicates, and the SGD Original Currency column.
+  - Fixed: the README didn't say how to put the JSON key on one line.
+  - Fixed: the Deployment steps were Sufyan's personal checklist; they now install flyctl and
+    read for a stranger.
+  - Fixed: Line Items `unassigned` was missing from the data model.
+  - Sufyan decided: the LICENSE keeps "bookwormsuf"; he adds curated screenshots to
+    `docs/images/` once home, after the trip.
+- Next action / owner: run `docs/manual-test-checklist.md` (with the second person for Part B)
+  and the go-live steps / Sufyan.
 

@@ -161,28 +161,30 @@ def to_receipt(extraction: ReceiptExtraction, currency: str) -> Receipt:
         except ValueError:
             printed = None
     try:
+        candidate_totals = [
+            CandidateTotal(
+                label_as_printed=c.label_as_printed,
+                amount_minor=c.amount_minor,
+                is_grand_total_guess=c.is_grand_total_guess,
+            )
+            for c in extraction.candidate_totals
+        ]
+        line_items = [
+            ReceiptLineItem(
+                description=item.description,
+                quantity=item.quantity,
+                unit_amount_minor=item.unit_amount_minor,
+                amount_minor=item.amount_minor,
+                kind=item.kind,
+            )
+            for item in extraction.line_items
+        ]
         return Receipt(
             merchant=extraction.merchant,
             currency=currency,
             transaction_datetime=printed,
-            line_items=[
-                ReceiptLineItem(
-                    description=item.description,
-                    quantity=item.quantity,
-                    unit_amount_minor=item.unit_amount_minor,
-                    amount_minor=item.amount_minor,
-                    kind=item.kind,
-                )
-                for item in extraction.line_items
-            ],
-            candidate_totals=[
-                CandidateTotal(
-                    label_as_printed=c.label_as_printed,
-                    amount_minor=c.amount_minor,
-                    is_grand_total_guess=c.is_grand_total_guess,
-                )
-                for c in extraction.candidate_totals
-            ],
+            line_items=drop_included_tax(line_items, candidate_totals),
+            candidate_totals=candidate_totals,
             description=extraction.description,
             category=extraction.category,
             confidence=extraction.confidence,
@@ -190,6 +192,28 @@ def to_receipt(extraction: ReceiptExtraction, currency: str) -> Receipt:
         )
     except ValidationError as exc:
         raise ReceiptUnreadable("reading is not a usable receipt") from exc
+
+
+def drop_included_tax(
+    line_items: list[ReceiptLineItem], candidate_totals: list[CandidateTotal]
+) -> list[ReceiptLineItem]:
+    """Removes a tax line that is already inside the prices (内税, "tax included"),
+    which the reader sometimes lists as an extra `tax` line despite the prompt.
+    Decided 2026-10-02: when the lines match no printed grand total, but leaving out
+    exactly one tax line makes them match a grand-total guess exactly, that line is
+    dropped. Otherwise the lines are returned unchanged.
+    """
+    if not line_items:
+        return line_items
+    guesses = {c.amount_minor for c in candidate_totals if c.is_grand_total_guess}
+    items_sum, adjustments_sum = line_item_sums(line_items)
+    computed = items_sum + adjustments_sum
+    if not guesses or computed in guesses:
+        return line_items
+    for index, item in enumerate(line_items):
+        if item.kind == "tax" and computed - item.amount_minor in guesses:
+            return line_items[:index] + line_items[index + 1 :]
+    return line_items
 
 
 def line_item_sums(line_items: list[ReceiptLineItem]) -> tuple[int, int]:
