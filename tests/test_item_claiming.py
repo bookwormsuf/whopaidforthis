@@ -373,3 +373,34 @@ async def test_a_reply_that_claims_nothing_does_not_add_the_sender() -> None:
     await group.send(CY, "mine 2", reply_to=card)
     draft = await group.deps.draft_service._drafts.get(card.draft_id)
     assert CY.id in draft.participant_ids
+
+
+# -- Other amount on "Which is the final total?" (added 2026-10-02) ------------
+
+
+async def test_other_amount_typed_total_keeps_items_and_reconciles() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    receipt = _receipt([("Ramen", 1000, "item"), ("Udon", 800, "item")], 1800, 2000)
+    card = await group.send_receipt(ADA, receipt)
+    assert card.buttons == ["¥2,000", "¥1,800", "Other amount", "Cancel"]
+    await group.press(ADA, card, "Other amount")
+    assert "Reply to this message with the amount." in card.text
+
+    await group.send(ADA, "1900", reply_to=card)
+    card = group.cards[card.message_id]
+    # The lines (¥1,800) don't make ¥1,900: the usual prompt, with Fix items.
+    assert "difference ¥100" in card.text
+    await group.press(ADA, card, "Fix items")
+    assert _item_buttons(card)[-1] == "3 Unlisted ¥100"
+
+
+async def test_other_amount_matching_the_lines_goes_to_the_card() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    receipt = _receipt([("Ramen", 1000, "item"), ("Udon", 800, "item")], 1700, 2000)
+    card = await group.send_receipt(ADA, receipt)
+    await group.press(ADA, card, "Other amount")
+    await group.send(ADA, "1800", reply_to=card)
+    card = group.cards[card.message_id]
+    assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
+    await group.press(ADA, card, "Everyone")
+    assert "By items" in card.buttons

@@ -494,3 +494,14 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Next action / owner: approve the Sprint 6 merge / Sufyan; then the Sprint 6 single-person
   checklist / Sufyan.
 
+### 2026-10-02 — Sprint 6 merged; Other amount on the total question
+
+- Performed by: Claude, with Sufyan's approval.
+- Sprint 6 merged to `main` after the Sprint 5 sign-off; the deploy succeeded.
+- Testing plan kept: Sprint 6's two-person steps stay automated until Sprint 7 (Sufyan, 2026-10-02).
+- Added at Sufyan's request: "Which is the final total?" now has `Other amount`, which asks for
+  a reply with the total. A typed total in the receipt's currency keeps the line items and gets
+  the reconciliation prompt (with `Fix items`) if they don't add up to it. Spec §7 amended.
+- Checks: `uv run pytest -q` 404 passed; ruff clean.
+- Next action / owner: merge / Sufyan approves; Sprint 6 single-person checklist / Sufyan.
+
