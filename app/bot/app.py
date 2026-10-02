@@ -62,6 +62,8 @@ from app.services.receipt_parser import AnthropicReceiptReader
 
 logger = logging.getLogger(__name__)
 
+SOMETHING_WENT_WRONG_TEXT = "Something went wrong, please try again."
+
 # Commands with their own handler in group 0. Anything else, in a group, falls through
 # to the "Run /settrip first" gate below (spec §13, sprint 1 pin "Unbound groups").
 _KNOWN_COMMANDS = {
@@ -125,23 +127,41 @@ async def _unbound_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """PTB-wide fallback: log every unhandled error, and give the user one line for
-    LedgerUnavailable instead of leaving them without a reply (spec §14: the bot never
-    raises to the user). Never logs message text.
+    """PTB-wide fallback: log every unhandled error and give the user one line --
+    "Couldn't reach Google Sheets" for `LedgerUnavailable`, else "Something went
+    wrong" -- instead of leaving them without a reply (spec §14: the bot never
+    raises to the user). A button press gets it as a toast. Never logs message text.
     """
     error = context.error
     update_id = update.update_id if isinstance(update, Update) else None
     logger.exception("unhandled error on update %s", update_id, exc_info=error)
 
-    if not isinstance(error, LedgerUnavailable):
+    if isinstance(update, Update) and update.callback_query is not None:
+        # A button press: a toast, so the button stops spinning.
+        try:
+            await update.callback_query.answer(
+                LEDGER_UNAVAILABLE_TEXT
+                if isinstance(error, LedgerUnavailable)
+                else SOMETHING_WENT_WRONG_TEXT
+            )
+        except Exception:
+            logger.exception("error handler: could not answer the callback query")
         return
     message = update.effective_message if isinstance(update, Update) else None
     if message is None:
         return
+    # Only commands, expense candidates, photos and draft replies reach a handler
+    # that can fail here (the seen-users handler catches its own errors), so a
+    # reply never answers ordinary chat.
+    text = (
+        LEDGER_UNAVAILABLE_TEXT
+        if isinstance(error, LedgerUnavailable)
+        else SOMETHING_WENT_WRONG_TEXT
+    )
     try:
-        await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
+        await message.reply_text(text, parse_mode="HTML")
     except Exception:
-        logger.exception("error handler: could not notify user of LedgerUnavailable")
+        logger.exception("error handler: could not notify the user")
 
 
 def build_application(token: str, deps: Deps) -> Application:

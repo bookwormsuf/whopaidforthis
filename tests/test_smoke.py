@@ -13,7 +13,12 @@ import pytest
 from pydantic import ValidationError
 from telegram import Update
 
-from app.bot.app import STOP_SIGNALS, _error_handler, build_application
+from app.bot.app import (
+    SOMETHING_WENT_WRONG_TEXT,
+    STOP_SIGNALS,
+    _error_handler,
+    build_application,
+)
 from app.bot.deps import Deps
 from app.bot.handlers.basic import HELP_TEXT, help_command
 from app.config.settings import Settings, load_settings
@@ -282,6 +287,7 @@ def test_build_application_registers_error_handler() -> None:
 async def test_error_handler_replies_one_liner_for_ledger_unavailable() -> None:
     update = MagicMock(spec=Update)
     update.update_id = 123
+    update.callback_query = None
     update.effective_message.reply_text = AsyncMock()
     context = MagicMock()
     context.error = LedgerUnavailable("boom")
@@ -293,15 +299,32 @@ async def test_error_handler_replies_one_liner_for_ledger_unavailable() -> None:
     )
 
 
-async def test_error_handler_stays_silent_for_other_errors() -> None:
+async def test_error_handler_says_something_went_wrong_for_other_errors() -> None:
     update = MagicMock(spec=Update)
     update.update_id = 123
+    update.callback_query = None
     update.effective_message.reply_text = AsyncMock()
     context = MagicMock()
     context.error = ValueError("some other bug")
 
     await _error_handler(update, context)
 
+    update.effective_message.reply_text.assert_awaited_once_with(
+        SOMETHING_WENT_WRONG_TEXT, parse_mode="HTML"
+    )
+
+
+async def test_error_handler_answers_a_button_press_with_a_toast() -> None:
+    update = MagicMock(spec=Update)
+    update.update_id = 123
+    update.callback_query.answer = AsyncMock()
+    update.effective_message.reply_text = AsyncMock()
+    context = MagicMock()
+    context.error = ValueError("some other bug")
+
+    await _error_handler(update, context)
+
+    update.callback_query.answer.assert_awaited_once_with(SOMETHING_WENT_WRONG_TEXT)
     update.effective_message.reply_text.assert_not_awaited()
 
 
