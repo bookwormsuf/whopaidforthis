@@ -125,9 +125,7 @@ async def join_button_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
 
     tg_user = TripUser.from_telegram_user(presser, datetime.now(UTC))
-    if current_text is not None and escape(tg_user.display_name) in names_on_message(
-        current_text
-    ):
+    if current_text is not None and escape(tg_user.display_name) in names_on_message(current_text):
         # Already named here (e.g. the person who sent /join): nothing to add.
         await query.answer(ALREADY_IN_TEXT)
         return
