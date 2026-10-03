@@ -15,7 +15,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from app.bot.deps import get_deps
-from app.bot.formatting import fmt_expense_line, fmt_money, format_expense_amount
+from app.bot.formatting import fmt_expense_bullet, fmt_money, format_expense_amount
 from app.bot.handlers.join import require_trip
 from app.models.expense import ExpenseRecord
 from app.models.trip import Trip
@@ -60,7 +60,7 @@ async def recent_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not last_five:
         await message.reply_text(NO_RECENT_EXPENSES_TEXT, parse_mode="HTML")
         return
-    text = "\n".join(fmt_expense_line(e, trip) for e in last_five)
+    text = "<b>Recent expenses</b>\n" + "\n".join(fmt_expense_bullet(e, trip) for e in last_five)
     await message.reply_text(text, parse_mode="HTML")
 
 
@@ -87,10 +87,10 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     total_trip = sum(e.trip_amount_minor for e in todays)
     total_home = sum(e.home_amount_minor for e in todays)
-    lines = [fmt_expense_line(e, trip) for e in todays]
+    lines = ["<b>Today</b>"] + [fmt_expense_bullet(e, trip) for e in todays]
     # Totals show home currency first (spec §12), unlike the per-expense lines above.
     lines.append(
-        f"Total: {fmt_money(total_home, trip.home_currency)} "
+        f"Spent today: <b>{fmt_money(total_home, trip.home_currency)}</b> "
         f"({fmt_money(total_trip, trip.trip_currency)})"
     )
     await message.reply_text("\n".join(lines), parse_mode="HTML")

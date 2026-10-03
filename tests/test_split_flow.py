@@ -58,8 +58,8 @@ async def test_step1_split_everyone_two_people() -> None:
     assert "Shared by Ada, Bo" in card.text
 
     await group.press(ADA, card, "Equally")
-    assert "Ada 💳 — ¥3,000 · S$24.30" in card.text
-    assert "Bo — ¥3,000 · S$24.30" in card.text
+    assert "• Ada ¥3,000 (S$24.30)" in card.text
+    assert "• Bo ¥3,000 (S$24.30)" in card.text
     assert card.buttons == ["Confirm", "Edit", "Cancel"]
 
     draft_id = await _confirm(group, ADA, card)
@@ -69,10 +69,12 @@ async def test_step1_split_everyone_two_people() -> None:
 
     balances = await group.command(ADA, balances_command)
     assert balances.splitlines() == [
-        "<b>Balances</b> (SGD)",
-        "Ada: paid S$48.60 · share S$24.30 · <b>+S$24.30</b>",
-        "Bo: paid S$0.00 · share S$24.30 · <b>−S$24.30</b>",
-        "Settle with /settle",
+        "<b>Who owes what</b> (SGD)",
+        "• Ada is owed <b>S$24.30</b>",
+        "   (paid S$48.60, share S$24.30)",
+        "• Bo owes <b>S$24.30</b>",
+        "   (paid S$0.00, share S$24.30)",
+        "Settle up with /settle",
     ]
 
 
@@ -101,7 +103,7 @@ async def test_step2_two_people_even_split() -> None:
     card = await group.send(ADA, "4850 yen dinner")
     await group.press(ADA, card, "Everyone")
     await group.press(ADA, card, "Equally")
-    assert "Ada 💳 — ¥2,425" in card.text and "Bo — ¥2,425" in card.text
+    assert "• Ada ¥2,425" in card.text and "• Bo ¥2,425" in card.text
 
 
 # -- Checklist step 3: choose people, payer not a participant ----------------
@@ -120,7 +122,7 @@ async def test_step3_choose_people_deselect_self() -> None:
 
     # One participant: straight to the preview, no split-method card.
     await group.press(ADA, card, "Next")
-    assert "Bo — ¥6,000" in card.text
+    assert "• Bo ¥6,000" in card.text
     assert "Ada 💳" not in card.text  # the payer has no share line
 
     draft_id = await _confirm(group, ADA, card)
@@ -147,11 +149,11 @@ async def test_step4_paid_by_and_split_between_from_tester_b() -> None:
     card = await group.send(BO, "3000 yen lunch paid by Ada split between me and Ada")
     # Both names resolved: participants card skipped, split method asked.
     assert card.buttons == ["Equally", "Custom", "Cancel"]
-    assert "Paid by Ada" in card.text
+    assert "Ada paid" in card.text
 
     await group.press(BO, card, "Equally")
-    assert "Ada 💳 — ¥1,500" in card.text
-    assert "Bo — ¥1,500" in card.text
+    assert "• Ada ¥1,500" in card.text
+    assert "• Bo ¥1,500" in card.text
 
     draft_id = card.draft_id
     await _confirm(group, BO, card)
@@ -206,7 +208,7 @@ async def test_step6_custom_split_by_replies() -> None:
 
     assert await group.send(ADA, "Me 4000", reply_to=card) is None  # no new draft
     card = group.cards[card.message_id]
-    assert "Ada — ¥4,000" in card.text and "Bo — –" in card.text
+    assert "• Ada ¥4,000" in card.text and "• Bo –" in card.text
     assert "Remaining: ¥5,000 ❌" in card.text
     assert "Confirm" not in card.buttons
 
@@ -216,7 +218,7 @@ async def test_step6_custom_split_by_replies() -> None:
     assert card.buttons == ["Confirm", "Cancel"]
 
     await group.press(ADA, card, "Confirm")  # custom card -> preview
-    assert "Ada 💳 — ¥4,000" in card.text and "Bo — ¥5,000" in card.text
+    assert "• Ada ¥4,000" in card.text and "• Bo ¥5,000" in card.text
     draft_id = card.draft_id
     await _confirm(group, ADA, card)
     expense = group.ledger.expense_for(draft_id)
@@ -289,14 +291,14 @@ async def test_edit_returns_to_participants_keeping_amount_and_payer() -> None:
     await group.press(BO, card, "Equally")
     await group.press(BO, card, "Edit")
     assert card.buttons == ["✓ Ada", "✓ Bo", "Cy", "Next", "Cancel"]
-    assert "¥6,000" in card.text and "Paid by Ada" in card.text
+    assert "¥6,000" in card.text and "Ada paid" in card.text
 
     await group.press(BO, card, "Cy")
     await group.press(BO, card, "Next")
     await group.press(BO, card, "Equally")
     assert "¥6,000" in card.text
-    assert "Ada 💳 — ¥2,000" in card.text
-    assert "Bo — ¥2,000" in card.text and "Cy — ¥2,000" in card.text
+    assert "• Ada ¥2,000" in card.text
+    assert "• Bo ¥2,000" in card.text and "• Cy ¥2,000" in card.text
 
 
 # -- Name questions ------------------------------------------------------------
@@ -340,7 +342,7 @@ async def test_unknown_payer_not_sure_keeps_sender_and_chooses_people() -> None:
     assert "Not sure, choose people" in card.buttons
     await group.press(ADA, card, "Not sure, choose people")
     assert card.buttons == ["✓ Ada", "✓ Bo", "Next", "Cancel"]
-    assert "Paid by Ada" in card.text
+    assert "Ada paid" in card.text
 
 
 async def test_ambiguous_payer_pick() -> None:
@@ -349,7 +351,7 @@ async def test_ambiguous_payer_pick() -> None:
     group = await FakeGroup.create(ADA, jo_tan, jo_lim)
     card = await group.send(ADA, "6000 yen dinner paid by jo")
     await group.press(ADA, card, "Jo Lim")
-    assert "Paid by Jo Lim" in card.text
+    assert "Jo Lim paid" in card.text
     assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
 
 
@@ -369,18 +371,27 @@ async def test_steps7_and_8_balances_settle_and_undo() -> None:
     # Home: dinner S$72.90 = 24.30 each; taxi S$24.30 = 12.15 each.
     # Ada +48.60; Bo 24.30 - 24.30 - 12.15 = -12.15; Cy -24.30 - 12.15 = -36.45.
     balances = await group.command(CY, balances_command)
-    assert balances.splitlines()[1:4] == [
-        "Ada: paid S$72.90 · share S$24.30 · <b>+S$48.60</b>",
-        "Bo: paid S$24.30 · share S$36.45 · <b>−S$12.15</b>",
-        "Cy: paid S$0.00 · share S$36.45 · <b>−S$36.45</b>",
+    assert balances.splitlines()[1:7] == [
+        "• Ada is owed <b>S$48.60</b>",
+        "   (paid S$72.90, share S$24.30)",
+        "• Bo owes <b>S$12.15</b>",
+        "   (paid S$24.30, share S$36.45)",
+        "• Cy owes <b>S$36.45</b>",
+        "   (paid S$0.00, share S$36.45)",
     ]
     settle = await group.command(CY, settle_command)
-    assert settle.splitlines() == ["Cy → Ada S$36.45", "Bo → Ada S$12.15"]
+    assert settle.splitlines() == [
+        "<b>To settle up:</b>",
+        "• Cy pays Ada <b>S$36.45</b>",
+        "• Bo pays Ada <b>S$12.15</b>",
+    ]
 
     mine = await group.command(BO, mine_command)
-    assert "Paid S$24.30 · Share S$36.45 · Net <b>−S$12.15</b>" in mine
-    assert "Dinner" in mine and "you S$24.30" in mine
-    assert "Taxi" in mine and "you S$12.15" in mine
+    assert "You paid S$24.30 for the group." in mine
+    assert "Your share of everything is S$36.45." in mine
+    assert "➡️ You owe <b>S$12.15</b> overall." in mine
+    assert "Dinner" in mine and "your share S$24.30" in mine
+    assert "Taxi" in mine and "your share S$12.15" in mine
 
     # Step 8: Bo undoes the taxi; balances move back to the dinner alone.
     await group.command(BO, undo_command)
@@ -389,10 +400,13 @@ async def test_steps7_and_8_balances_settle_and_undo() -> None:
     await undo_callback(_undo_press(group, BO, taxi_id), group._context())
 
     balances = await group.command(CY, balances_command)
-    assert balances.splitlines()[1:4] == [
-        "Ada: paid S$72.90 · share S$24.30 · <b>+S$48.60</b>",
-        "Bo: paid S$0.00 · share S$24.30 · <b>−S$24.30</b>",
-        "Cy: paid S$0.00 · share S$24.30 · <b>−S$24.30</b>",
+    assert balances.splitlines()[1:7] == [
+        "• Ada is owed <b>S$48.60</b>",
+        "   (paid S$72.90, share S$24.30)",
+        "• Bo owes <b>S$24.30</b>",
+        "   (paid S$0.00, share S$24.30)",
+        "• Cy owes <b>S$24.30</b>",
+        "   (paid S$0.00, share S$24.30)",
     ]
 
 
@@ -429,7 +443,7 @@ async def test_home_currency_custom_split() -> None:
     card = group.cards[card.message_id]
     assert "Remaining: S$0.00 ✅" in card.text
     await group.press(ADA, card, "Confirm")
-    assert "Bo — S$20.00" in card.text  # home-currency expense: home only
+    assert "• Bo S$20.00" in card.text  # home-currency expense: home only
     draft_id = card.draft_id
     await _confirm(group, ADA, card)
     expense = group.ledger.expense_for(draft_id)
@@ -486,7 +500,7 @@ async def test_who_paid_step_when_nobody_is_tagged() -> None:
     # Only the sender answers it.
     assert await group.press(BO, card, "Bo") == "Only Ada can edit this"
     await group.press(ADA, card, "Bo")
-    assert "Paid by Bo" in card.text
+    assert "Bo paid" in card.text
     assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
     await group.press(ADA, card, "Everyone")
     await group.press(ADA, card, "Equally")
@@ -499,10 +513,19 @@ async def test_no_who_paid_step_when_tagged_or_paid_by() -> None:
     group = await FakeGroup.create(ADA, BO)
     for text in ("6000 yen dinner @bo", "6000 yen dinner paid by bo"):
         card = await group.send(ADA, text, who_paid=False)
-        assert "Paid by Bo" in card.text and not card.text.endswith("Who paid?"), text
+        assert "Bo paid" in card.text and not card.text.endswith("Who paid?"), text
 
 
 async def test_no_who_paid_step_when_alone() -> None:
     group = await FakeGroup.create(ADA)
     card = await group.send(ADA, "6000 yen dinner", who_paid=False)
     assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
+
+
+async def test_saved_line_with_a_blank_name() -> None:
+    blank = Member(9, " ", None)
+    group = await FakeGroup.create(blank)
+    card = await group.send(blank, "1200 yen ramen")
+    await group.press(blank, card, "Just me")
+    await group.press(blank, card, "Confirm")
+    assert card.text.startswith("Saved ✅ Ramen ¥1,200")

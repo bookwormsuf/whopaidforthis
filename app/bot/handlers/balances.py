@@ -15,7 +15,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from app.bot.deps import get_deps
-from app.bot.formatting import fmt_expense_line, fmt_money
+from app.bot.formatting import fmt_expense_bullet, fmt_money
 from app.bot.handlers.join import require_trip
 from app.models.expense import ExpenseRecord, SplitRecord
 from app.models.trip import Trip
@@ -30,7 +30,7 @@ UNBALANCED_TEXT = (
     "⚠️ The Sheet's shares don't add up to its expenses (off by {amount}). "
     "Was a Splits or Expenses row edited by hand? Fix it, or /undo and re-send the expense."
 )
-SETTLE_HINT = "Settle with /settle"
+SETTLE_HINT = "Settle up with /settle"
 
 
 class _Ledger:
@@ -69,19 +69,21 @@ async def _load(context: ContextTypes.DEFAULT_TYPE, trip: Trip, chat_id: int) ->
     return _Ledger(expenses, splits, names)
 
 
-def _signed(amount_minor: int, currency: str) -> str:
-    if amount_minor > 0:
-        return f"+{fmt_money(amount_minor, currency)}"
-    if amount_minor < 0:
-        return f"−{fmt_money(-amount_minor, currency)}"
-    return fmt_money(0, currency)
+def _standing(name: str, balance: Balance, currency: str) -> str:
+    """ "Ada is owed S$31.20" / "Amir owes S$31.20" / "Cy is all square"."""
+    net = balance.net_minor
+    if net > 0:
+        return f"{escape(name)} is owed <b>{fmt_money(net, currency)}</b>"
+    if net < 0:
+        return f"{escape(name)} owes <b>{fmt_money(-net, currency)}</b>"
+    return f"{escape(name)} is all square"
 
 
 def _balance_line(name: str, balance: Balance, currency: str) -> str:
     return (
-        f"{escape(name)}: paid {fmt_money(balance.paid_minor, currency)} · "
-        f"share {fmt_money(balance.share_minor, currency)} · "
-        f"<b>{_signed(balance.net_minor, currency)}</b>"
+        f"• {_standing(name, balance, currency)}\n"
+        f"   (paid {fmt_money(balance.paid_minor, currency)}, "
+        f"share {fmt_money(balance.share_minor, currency)})"
     )
 
 
@@ -102,7 +104,9 @@ async def _loaded(update: Update, context: ContextTypes.DEFAULT_TYPE, command: s
 
 
 async def balances_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Paid / Share / Net per user with any activity, net descending (sprint 5 pin)."""
+    """Who is owed and who owes, per user with any activity, most owed first, each
+    with paid and share underneath (sprint 8 wording).
+    """
     loaded = await _loaded(update, context, "balances")
     if loaded is None:
         return
@@ -116,7 +120,7 @@ async def balances_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     ordered = sorted(
         balances.values(), key=lambda b: (-b.net_minor, ledger.name(b.user_id).casefold())
     )
-    lines = [f"<b>Balances</b> ({trip.home_currency})"]
+    lines = [f"<b>Who owes what</b> ({trip.home_currency})"]
     lines += [_balance_line(ledger.name(b.user_id), b, trip.home_currency) for b in ordered]
     off_by = unbalanced_by(balances)
     if off_by:
@@ -126,8 +130,8 @@ async def balances_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def mine_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """The caller's paid, share and net, then their last 3 expenses (paid by them
-    or shared with them), each with their own share.
+    """The caller's paid, share and bottom line in plain sentences (sprint 8), then
+    their last 3 expenses (paid by them or shared with them) with their own share.
     """
     loaded = await _loaded(update, context, "mine")
     if loaded is None:
@@ -143,22 +147,34 @@ async def mine_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         (e for e in ledger.expenses if e.payer_user_id == user.id or e.expense_id in my_shares),
         key=lambda e: e.created_at,
     )[-3:]
+    net = balance.net_minor
+    if net > 0:
+        bottom = f"➡️ You're owed <b>{fmt_money(net, home)}</b> overall."
+    elif net < 0:
+        bottom = f"➡️ You owe <b>{fmt_money(-net, home)}</b> overall."
+    else:
+        bottom = "➡️ You're all square."
     lines = [
         f"<b>{escape(ledger.name(user.id))}</b>",
-        f"Paid {fmt_money(balance.paid_minor, home)} · Share {fmt_money(balance.share_minor, home)}"
-        f" · Net <b>{_signed(balance.net_minor, home)}</b>",
+        f"You paid {fmt_money(balance.paid_minor, home)} for the group.",
+        f"Your share of everything is {fmt_money(balance.share_minor, home)}.",
+        bottom,
     ]
     if mine:
-        lines.append("")
-        lines.append("Last 3:")
+        lines += ["", "Recent:"]
         for expense in mine:
-            share = my_shares.get(expense.expense_id, 0)
-            lines.append(f"{fmt_expense_line(expense, trip)} · you {fmt_money(share, home)}")
+            if expense.expense_id in my_shares:
+                detail = f"your share {fmt_money(my_shares[expense.expense_id], home)}"
+            else:
+                detail = "you're not in this one"
+            lines.append(fmt_expense_bullet(expense, trip, detail))
     await message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
 async def settle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """One line per transfer, `Amir → Sufyan S$31.20`, or "All square 🎉"."""
+    """ "To settle up:" then one bullet per transfer, `Amir pays Ada S$31.20`
+    (sprint 8), or "All square 🎉".
+    """
     loaded = await _loaded(update, context, "settle")
     if loaded is None:
         return
@@ -178,9 +194,9 @@ async def settle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if not transfers:
         await message.reply_text(ALL_SQUARE_TEXT, parse_mode="HTML")
         return
-    lines = [
-        f"{escape(ledger.name(t.from_user_id))} → {escape(ledger.name(t.to_user_id))} "
-        f"{fmt_money(t.amount_minor, trip.home_currency)}"
+    lines = ["<b>To settle up:</b>"] + [
+        f"• {escape(ledger.name(t.from_user_id))} pays {escape(ledger.name(t.to_user_id))} "
+        f"<b>{fmt_money(t.amount_minor, trip.home_currency)}</b>"
         for t in transfers
     ]
     await message.reply_text("\n".join(lines), parse_mode="HTML")

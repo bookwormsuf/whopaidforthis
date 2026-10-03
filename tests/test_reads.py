@@ -121,8 +121,8 @@ async def test_recent_last_five_oldest_first() -> None:
     await recent_command(update, context)
 
     (text,), kwargs = update.effective_message.reply_text.call_args
-    lines = text.split("\n")
-    assert len(lines) == 5  # last 5 only
+    bullets = [line for line in text.split("\n") if line.startswith("• ")]
+    assert len(bullets) == 5  # last 5 only
 
 
 async def test_today_filters_by_trip_timezone_across_date_boundary() -> None:
@@ -153,7 +153,7 @@ async def test_today_filters_by_trip_timezone_across_date_boundary() -> None:
     update.effective_message.reply_text.assert_awaited_once()
     (text,), kwargs = update.effective_message.reply_text.call_args
     assert "Ramen" in text
-    assert "Total:" in text
+    assert "Spent today:" in text
 
 
 async def test_summary_counts_only_confirmed() -> None:
@@ -235,7 +235,7 @@ async def test_recent_line_shows_home_only_for_home_currency_expense() -> None:
     await recent_command(update, context)
 
     (text,), kwargs = update.effective_message.reply_text.call_args
-    assert text == "20 Sep · Grab · S$12.00 · Ada"
+    assert text == "<b>Recent expenses</b>\n• 20 Sep · Grab S$12.00\n   Ada paid"
     assert "¥" not in text
 
 
@@ -249,7 +249,7 @@ async def test_recent_line_keeps_trip_currency_pair() -> None:
     await recent_command(update, context)
 
     (text,), kwargs = update.effective_message.reply_text.call_args
-    assert text == "20 Sep · Ramen · ¥1,200 · S$0.10 · Ada"
+    assert text == "<b>Recent expenses</b>\n• 20 Sep · Ramen ¥1,200 (S$0.10)\n   Ada paid"
 
 
 async def test_undo_cancel_this_line_shows_home_only_for_home_currency_expense() -> None:

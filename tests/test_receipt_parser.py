@@ -445,7 +445,7 @@ def test_service_problem_names_api_failures() -> None:
 
 def test_negative_amounts_and_zero_quantities_do_not_reject_the_reading() -> None:
     extraction = ReceiptExtraction(
-        merchant="GLITCH",
+        merchant="MOON",
         currency="JPY",
         transaction_datetime=None,
         line_items=[
@@ -469,3 +469,16 @@ def test_negative_amounts_and_zero_quantities_do_not_reject_the_reading() -> Non
     ]
     assert [c.amount_minor for c in receipt.candidate_totals] == [4300]
     assert receipt.confidence == 1.0
+
+
+def test_long_reader_titles_fall_back_to_the_shop_name() -> None:
+    from app.services.receipt_parser import _short_title
+
+    long = "Coffee purchase at Moon Coffee Osaka - Colombia iced drip and hot drip"
+    assert _short_title(long, "MOON COFFEE OSAKA") == "MOON COFFEE OSAKA"
+    assert _short_title("Moon Coffee", "MOON COFFEE OSAKA") == "Moon Coffee"
+    assert _short_title(long, None) == "Coffee purchase at Moon"
+    assert _short_title("  ", "Moon Coffee") == "Moon Coffee"
+    assert _short_title("", None) == ""
+    shop = "Moon Coffee Roasters Osaka Namba Parks Branch Store"
+    assert _short_title(long, shop) == "Moon Coffee Roasters Osaka Namba Parks…"

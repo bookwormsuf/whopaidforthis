@@ -65,6 +65,10 @@ unit. JPY has no smaller unit: ¥6,850 is 6850, never 685000. SGD and USD have c
 S$12.50 is 1250. For each candidate total, also copy the amount exactly as printed into
 `amount_as_printed`, e.g. "¥6,850".
 
+`description` is a short title for the expense list: at most 4 words, the shop name plus
+what kind of place or purchase it is, e.g. "Moon Coffee", "Lawson snacks", "Hotel
+Granvia". Not a sentence, and not the items.
+
 List every priced line as a line item, with a `kind`: `item` for a regular purchased
 item, `tax` for a tax line, `service_charge` for a service charge, `discount` for a
 discount or coupon (its amount should be positive; the sign is handled downstream).
@@ -214,6 +218,30 @@ def _normalised_line_item(item) -> ReceiptLineItem:
     )
 
 
+_MAX_TITLE_WORDS = 4
+_MAX_TITLE_CHARS = 40
+
+
+def _short_title(description: str, merchant: str | None) -> str:
+    """The reader's title if it is short; otherwise the shop name (sprint 8: titles
+    like "Coffee purchase at … - Colombia …" were whole sentences). Falls back to the
+    first few words when there is no shop name.
+    """
+    text = " ".join(description.split())
+    if text and len(text.split()) <= _MAX_TITLE_WORDS and len(text) <= _MAX_TITLE_CHARS:
+        return text
+    shop = " ".join((merchant or "").split())
+    return _clip(shop or " ".join(text.split()[:_MAX_TITLE_WORDS]))
+
+
+def _clip(text: str) -> str:
+    """At most `_MAX_TITLE_CHARS`, cut at a word with "…" when it is longer."""
+    if len(text) <= _MAX_TITLE_CHARS:
+        return text
+    cut = text[: _MAX_TITLE_CHARS - 1].rsplit(" ", 1)[0] or text[: _MAX_TITLE_CHARS - 1]
+    return cut + "…"
+
+
 def to_receipt(extraction: ReceiptExtraction, currency: str) -> Receipt:
     """Validates a raw LLM reading into the domain `Receipt` (spec §7). `currency`
     is the already-resolved trip or home currency (`resolve_receipt_currency`). An
@@ -244,7 +272,7 @@ def to_receipt(extraction: ReceiptExtraction, currency: str) -> Receipt:
             transaction_datetime=printed,
             line_items=drop_included_tax(line_items, candidate_totals),
             candidate_totals=candidate_totals,
-            description=extraction.description,
+            description=_short_title(extraction.description, extraction.merchant),
             category=extraction.category,
             confidence=min(max(extraction.confidence, 0.0), 1.0),
             notes=extraction.notes,

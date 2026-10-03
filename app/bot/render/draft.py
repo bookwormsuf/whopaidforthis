@@ -11,7 +11,6 @@ from html import escape
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.bot.formatting import (
-    fmt_amount_pair,
     fmt_date,
     fmt_date_short,
     fmt_money,
@@ -95,69 +94,35 @@ def render_draft(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup | 
 
 def _render_who_paid(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
     """ "Who paid?" before anything else, when nobody was tagged (decided
-    2026-10-03). Shows what was read so the payer can be checked against it.
+    2026-10-03).
     """
-    amount = format_expense_amount(
-        trip, draft.currency, draft.trip_amount_minor, draft.home_amount_minor
-    )
-    merchant = f"{escape(draft.merchant)}\n" if draft.merchant else ""
-    text = (
-        f"🧾 {merchant}<b>{escape(draft.description)}</b>\n{amount} · "
-        f"{fmt_date(draft.transaction_date)}\n\nWho paid?"
-    )
+    text = f"{_title(draft, trip)}\n{fmt_date(draft.transaction_date)}\n\nWho paid?"
     return text, who_paid_keyboard(draft)
 
 
 def _render_detected(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
-    assert draft.rate is not None
-    if draft.source_type == "receipt":
-        return _render_detected_receipt(draft, trip)
-    desc = escape(draft.description)
-    payer = escape(draft.payer_name)
-    date_str = fmt_date(draft.transaction_date)
-
-    if draft.currency == trip.home_currency:
-        # Entered in the home currency: home amount only, no rate line (spec §12,
-        # 2026-10-01 change) -- there is nothing to approximate against.
-        amounts_line = fmt_money(draft.home_amount_minor, trip.home_currency)
-        text = (
-            f"🧾 <b>{desc}</b>\n{amounts_line}\nPaid by {payer} · {date_str}\n\n"
-            "Who should share this?"
-        )
-        return text, detected_keyboard(draft)
-
-    trip_str = fmt_money(draft.trip_amount_minor, trip.trip_currency)
-    home_str = fmt_money(draft.home_amount_minor, trip.home_currency)
-    amounts_line = f"{trip_str} ≈ {home_str}"
-    rate_line = (
-        f"Rate 1 {trip.trip_currency} = {fmt_rate(draft.rate.rate)} {trip.home_currency} "
-        f"({fmt_date_short(draft.rate.rate_date)})"
-    )
-    text = (
-        f"🧾 <b>{desc}</b>\n{amounts_line}\nPaid by {payer} · {date_str}\n{rate_line}\n\n"
-        "Who should share this?"
-    )
-    return text, detected_keyboard(draft)
-
-
-def _render_detected_receipt(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
-    """Receipt detected card (sprint 4 pin): merchant, total in both currencies,
-    date source, "N items found" when items exist.
+    """What, how much and who paid first (sprint 8); the rate in small print for a
+    trip-currency expense (nothing to convert for a home-currency one, spec §12).
     """
     assert draft.rate is not None
-    desc = escape(draft.description)
-    payer = escape(draft.payer_name)
-    merchant_line = f"{escape(draft.merchant)}\n" if draft.merchant else ""
-    date_str = fmt_date(draft.transaction_date)
-    date_source_str = "from receipt" if draft.date_source == "receipt" else "from message time"
-    items_line = f"\n{len(draft.line_items)} items found" if draft.line_items else ""
-    amount = fmt_amount_pair(draft.trip_amount_minor, draft.home_amount_minor, trip)
-    text = (
-        f"🧾 {merchant_line}<b>{desc}</b>\n{amount}\nPaid by {payer} · "
-        f"{date_str} ({date_source_str}){items_line}\n\n"
-        "Who should share this?"
-    )
-    return text, detected_keyboard(draft)
+    lines = [_title(draft, trip)]
+    when = fmt_date(draft.transaction_date)
+    if draft.source_type == "receipt":
+        if draft.merchant and draft.merchant.casefold() not in draft.description.casefold():
+            lines.append(f"at {escape(draft.merchant)}")
+        source = "from receipt" if draft.date_source == "receipt" else "from message time"
+        when = f"{when} ({source})"
+    lines.append(f"{_payer_line(draft)} · {when}")
+    if draft.line_items:
+        count = len([i for i in draft.line_items if i.kind == "item"])
+        lines.append(f"{count} item{'s' if count != 1 else ''} on the receipt")
+    if draft.currency != trip.home_currency:
+        lines.append(
+            f"<i>Rate 1 {trip.trip_currency} = {fmt_rate(draft.rate.rate)} "
+            f"{trip.home_currency} ({fmt_date_short(draft.rate.rate_date)})</i>"
+        )
+    lines += ["", "Who should share this?"]
+    return "\n".join(lines), detected_keyboard(draft)
 
 
 def _render_choose_total(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
@@ -203,14 +168,24 @@ def _render_manual_amount(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboard
     return text, manual_amount_keyboard(draft.draft_id)
 
 
-def _header(draft: Draft, trip: Trip) -> str:
-    """`🧾 <b>Dinner</b> — ¥6,000 (S$48.60)` then `Paid by Ada`, shared by the
-    sharing-step cards.
-    """
-    amount = format_expense_amount(
+def _amount(draft: Draft, trip: Trip) -> str:
+    return format_expense_amount(
         trip, draft.currency, draft.trip_amount_minor, draft.home_amount_minor
     )
-    return f"🧾 <b>{escape(draft.description)}</b> — {amount}\nPaid by {escape(draft.payer_name)}"
+
+
+def _title(draft: Draft, trip: Trip) -> str:
+    """`🧾 <b>Ramen</b> · ¥1,200 (S$9.72)`: what and how much, first (sprint 8)."""
+    return f"🧾 <b>{escape(draft.description)}</b> · {_amount(draft, trip)}"
+
+
+def _payer_line(draft: Draft) -> str:
+    return f"{escape(draft.payer_name)} paid"
+
+
+def _header(draft: Draft, trip: Trip) -> str:
+    """The title line, then who paid; shared by the sharing-step cards."""
+    return f"{_title(draft, trip)}\n{_payer_line(draft)}"
 
 
 def _names(draft: Draft, user_ids: list[int]) -> str:
@@ -244,45 +219,47 @@ _ADJUSTMENT_LABELS = {"tax": "Tax", "service_charge": "Service", "discount": "Di
 
 
 def _render_items(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
-    """The item card (spec §9): running "Unclaimed" in the header, adjustment lines
-    listed in the text (they are never buttons).
+    """The item card (spec §9, sprint 8 wording): what is still to claim, the
+    adjustment lines in the text (never buttons), then how to use the three kinds of
+    button.
     """
     lines = [
         _header(draft, trip),
-        f"Unclaimed: {fmt_signed_money(unclaimed_total(draft), draft.currency)}",
+        f"Still to claim: <b>{fmt_signed_money(unclaimed_total(draft), draft.currency)}</b>",
     ]
     for item in draft.line_items:
         if item.kind == "item":
             continue
-        amount = abs(item.amount_minor)
         sign = "−" if item.kind == "discount" else ""
         lines.append(
-            f"{_ADJUSTMENT_LABELS[item.kind]}: {escape(item.description)} "
-            f"{sign}{fmt_money(amount, draft.currency)} (shared in proportion)"
+            f"{_ADJUSTMENT_LABELS[item.kind]} {sign}"
+            f"{fmt_money(abs(item.amount_minor), draft.currency)} ({escape(item.description)}) "
+            "is shared in proportion."
         )
-    lines += [
-        "",
-        "Everyone taps what they had; tap a shared dish each. Or reply "
-        "<code>mine 1,4</code>, <code>split 5 everyone</code>, <code>unclaim 2</code>.",
-    ]
+    lines += ["", "🍽 Tap what you had. Tap a shared dish each."]
     if len(draft.people) > 1:
-        sender = escape(draft.initiator_name.split()[0] if draft.initiator_name else "")
+        sender = escape(person_for(draft, draft.initiator_id).first_name)
         if draft.claiming_for is not None:
             name = escape(person_for(draft, draft.claiming_for).display_name)
-            lines.append(f"{sender}'s taps go to <b>{name}</b>. Tap Me to stop.")
+            lines.append(f"👤 {sender}'s taps go to <b>{name}</b>.")
         else:
-            lines.append(
-                f"{sender} can tap items for someone else: pick their name below, or reply "
-                "<code>alvin 1,3</code>."
-            )
+            lines.append(f"👤 {sender} can tap for someone else.")
+    sender = person_for(draft, draft.initiator_id).first_name or "the sender"
+    lines.append(
+        f"↪ gives what's left to everyone. ✅ shows the split to check (only {escape(sender)})."
+    )
+    lines.append(
+        "<i>Or reply: <code>mine 1,4</code> · <code>split 5 everyone</code> · "
+        "<code>unclaim 2</code> · <code>amir 1,3</code></i>"
+    )
     if draft.items_error:
         lines.append(f"⚠️ {escape(draft.items_error, quote=False)}")
     return "\n".join(lines), items_keyboard(draft)
 
 
 def _items_preview_lines(draft: Draft, trip: Trip) -> list[str]:
-    """Per person `items ¥a + tax ¥b − discount ¥c = ¥d` (sprint 6 pin), then the
-    home amount of their share. Service charge shows as its own `+ service` term.
+    """Per person `• Ada ¥1,430 (S$11.58)` then `items ¥1,300 + tax ¥130` (sprint 6
+    pin, sprint 8 layout). Service charge shows as its own `+ service` term.
     """
     split = draft_items_split(draft, trip)
     shares = draft_shares(draft, trip)
@@ -290,7 +267,6 @@ def _items_preview_lines(draft: Draft, trip: Trip) -> list[str]:
     lines = []
     for pid, (_share_trip, share_home) in shares.items():
         name = escape(person_for(draft, pid).display_name)
-        marker = " 💳" if pid == draft.payer_id else ""
         terms = f"items {fmt_signed_money(split.subtotals.get(pid, 0), ccy)}"
         for kind, label in (("tax", "tax"), ("service_charge", "service")):
             if kind in split.adjustments:
@@ -298,10 +274,10 @@ def _items_preview_lines(draft: Draft, trip: Trip) -> list[str]:
         if "discount" in split.adjustments:
             discount = -split.adjustments["discount"].get(pid, 0)
             terms += f" − discount {fmt_money(discount, ccy)}"
-        line = f"{name}{marker}: {terms} = {fmt_signed_money(split.shares[pid], ccy)}"
+        total = fmt_signed_money(split.shares[pid], ccy)
         if ccy != trip.home_currency:
-            line += f" · {fmt_money(share_home, trip.home_currency)}"
-        lines.append(line)
+            total += f" ({fmt_money(share_home, trip.home_currency)})"
+        lines.append(f"• {name} {total}\n   {terms}")
     return lines
 
 
@@ -315,7 +291,7 @@ def _render_custom(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]
     entered = sum(amounts.values())
     remaining = total - entered
     lines = [
-        f"{escape(person_for(draft, pid).display_name)} — "
+        f"• {escape(person_for(draft, pid).display_name)} "
         + (fmt_money(amounts[pid], draft.currency) if pid in amounts else "–")
         for pid in draft.participant_ids
     ]
@@ -339,33 +315,20 @@ def _render_custom(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]
 
 
 def _render_preview(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
-    """Every participant's share, payer marked (sprint 5 pin). Shares show both
-    currencies, trip first, except for an expense entered in the home currency,
-    which shows the home currency only (spec §12).
+    """ "Check before saving": what, how much, who paid, then each person's share
+    as a bullet (sprint 8). Both currencies, trip first, except for an expense
+    entered in the home currency, which shows the home currency only (spec §12).
     """
-    desc = escape(draft.description)
-    payer = escape(draft.payer_name)
-    amount = format_expense_amount(
-        trip, draft.currency, draft.trip_amount_minor, draft.home_amount_minor
-    )
+    head = f"<b>Check before saving</b>\n{_header(draft, trip)}\n\nEach person's share:"
     if isinstance(draft.split, Items):
         lines = _items_preview_lines(draft, trip)
-        text = f"<b>{desc}</b> — {amount}\nPaid by {payer}\n\n" + "\n".join(lines)
-        return text, preview_keyboard(draft.draft_id)
+        return head + "\n" + "\n".join(lines), preview_keyboard(draft.draft_id)
     lines = []
     for pid, (share_trip, share_home) in draft_shares(draft, trip).items():
         name = escape(person_for(draft, pid).display_name)
-        marker = " 💳" if pid == draft.payer_id else ""
-        if draft.currency == trip.home_currency:
-            share = fmt_money(share_home, trip.home_currency)
-        else:
-            share = (
-                f"{fmt_money(share_trip, trip.trip_currency)} · "
-                f"{fmt_money(share_home, trip.home_currency)}"
-            )
-        lines.append(f"{name}{marker} — {share}")
-    text = f"<b>{desc}</b> — {amount}\nPaid by {payer}\n\n" + "\n".join(lines)
-    return text, preview_keyboard(draft.draft_id)
+        share = format_expense_amount(trip, draft.currency, share_trip, share_home)
+        lines.append(f"• {name} {share}")
+    return head + "\n" + "\n".join(lines), preview_keyboard(draft.draft_id)
 
 
 def _render_rate_failed(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
@@ -381,12 +344,17 @@ def _render_rate_failed(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMa
 
 
 def _render_committed(draft: Draft, trip: Trip) -> str:
-    desc = escape(draft.description)
-    amount = format_expense_amount(
-        trip, draft.currency, draft.trip_amount_minor, draft.home_amount_minor
-    )
-    if draft.currency == trip.home_currency:
-        # "Saved ✅ Grab. S$12.00" -- a period separates description from a single
-        # amount with no parenthetical to visually break it up otherwise.
-        return f"Saved ✅ {desc}. {amount}"
-    return f"Saved ✅ {desc} {amount}"
+    """`Saved ✅ Ramen ¥1,200 (S$9.72) · Ada paid · split 2 ways`
+    (sprint 8).
+    """
+    if isinstance(draft.split, Items):
+        how = "split by items"
+    elif isinstance(draft.split, Custom):
+        how = "split by amounts"
+    elif len(draft.participant_ids) == 1:
+        only = person_for(draft, draft.participant_ids[0]).first_name
+        how = f"just {escape(only)}"
+    else:
+        how = f"split {len(draft.participant_ids)} ways"
+    payer = escape(person_for(draft, draft.payer_id).first_name)
+    return f"Saved ✅ {escape(draft.description)} {_amount(draft, trip)} · {payer} paid · {how}"

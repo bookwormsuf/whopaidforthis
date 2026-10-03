@@ -92,7 +92,7 @@ async def test_confident_total_goes_straight_to_detected() -> None:
 
     text, markup = render_draft(draft, trip)
     assert "Lawson" in text
-    assert "1 items found" in text
+    assert "1 item on the receipt" in text
     assert "from receipt" in text
 
 

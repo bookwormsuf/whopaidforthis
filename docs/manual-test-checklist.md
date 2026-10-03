@@ -61,10 +61,10 @@ Result is `pass`, or `fail` with the step numbers. Fixes go in `STATUS.md`.
     **Other amount** and **Cancel**. Pick one; the saved amount matches.
 15. On that card, **Other amount** → reply with a number the lines don't make → the difference
     prompt with **Fix items** / **Use total anyway** / **Cancel**.
-16. **Fix items** → item card with "Unclaimed: ¥x", tax listed in the text, an **Unlisted** item.
-    Tap an item: your initial appears. **Done (unclaimed: ¥x)** shows a pop-up of what's left.
-    Reply `mine 2,3` to the card: those get your initial. **Rest → everyone** → **Done** →
-    `items ¥a + tax ¥b = ¥total` → **Confirm**. Line Items show `claimed`/`everyone` and the tax
+16. **Fix items** → item card with "Still to claim: ¥x", tax listed in the text, an **Unlisted**
+    item. Tap a 🍽 item: your initial appears. **✅ Done (¥x left)** shows a pop-up of what's
+    left. Reply `mine 2,3` to the card: those get your initial. **↪ Rest → everyone** → **✅ Done**
+    → your total with `items ¥a + tax ¥b` under it → **Confirm**. Line Items show `claimed`/`everyone` and the tax
     `proportional`.
 17. A blurry photo or a non-receipt → "Couldn't read that receipt" with **Try again** / **Enter
     amount manually**. Enter `2400` as a reply → normal card → Confirm.
@@ -73,11 +73,11 @@ Result is `pass`, or `fail` with the step numbers. Fixes go in `STATUS.md`.
 19. The same photo sent twice quickly → only one card.
 
 ### Splitting and balances alone (Sprint 5)
-20. `6000 yen dinner split everyone` → check card, you at ¥6,000 💳 → **Confirm**.
+20. `6000 yen dinner split everyone` → check card, "Each person's share: • <you> ¥6,000" → **Confirm**.
 21. `6000 taxi` → **Choose people** → untick yourself → **Next** → "Pick at least one person".
     Tick yourself → **Next** → check card → **Edit** → back to the tick list → **Cancel**.
 22. `3000 yen lunch paid by Zed` → "Who did you mean by 'Zed'? (paid by)" → **Not sure, choose
-    people** → tick list, still "Paid by" you. Cancel.
+    people** → tick list, still "<you> paid". Cancel.
 23. `/balances`, `/mine`, `/settle` (with you alone: "All square 🎉").
 24. `/undo` → **Yes, cancel it** → Status `cancelled` in Expenses; `/balances` and `/summary`
     move accordingly.

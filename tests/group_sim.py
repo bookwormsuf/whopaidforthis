@@ -35,6 +35,16 @@ def _jpeg_bytes() -> bytes:
     return buf.getvalue()
 
 
+_MARKERS = ("🍽 ", "↪ ", "✅ ", "👤 ")
+
+
+def strip_marker(text: str) -> str:
+    for marker in _MARKERS:
+        if text.startswith(marker):
+            return text[len(marker) :]
+    return text
+
+
 class _Entity:
     """A text-mention entity: hashable, carrying the tagged user."""
 
@@ -73,9 +83,12 @@ class Card:
         return self.markup.inline_keyboard[0][0].callback_data.split(":", 1)[0]
 
     def callback_for(self, label: str) -> str:
+        """The button labelled `label`, ignoring a leading section emoji (🍽, ↪, ✅,
+        👤), so tests can name buttons by their words.
+        """
         for row in self.markup.inline_keyboard:
             for button in row:
-                if button.text == label:
+                if button.text == label or strip_marker(button.text) == label:
                     return button.callback_data
         raise AssertionError(f"no button {label!r} on card: {self.buttons}")
 

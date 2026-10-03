@@ -280,12 +280,15 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 return
             draft = await deps.draft_service.set_payer(draft_id, presser.id, user_id)
         elif action == "for":
-            try:
-                user_id = int(_arg)
-            except ValueError:
-                await answer()
-                return
-            draft = await deps.draft_service.set_claiming_for(draft_id, presser.id, user_id)
+            if _arg == "next":
+                draft = await deps.draft_service.cycle_claiming_for(draft_id, presser.id)
+            else:
+                try:
+                    user_id = int(_arg)
+                except ValueError:
+                    await answer()
+                    return
+                draft = await deps.draft_service.set_claiming_for(draft_id, presser.id, user_id)
         elif action == "rest":
             draft = await deps.draft_service.rest_to_everyone(draft_id, presser.id)
         elif action == "done":

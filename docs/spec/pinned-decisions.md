@@ -56,7 +56,7 @@ Pure functions in `app/services/splitting.py`, no I/O, property-tested.
 ## 6. Text expense parser
 
 - Deterministic, no LLM. Regex grammar over the message after stripping the bot mention. Recognised: amount with optional thousands separators and currency token before or after; optional leading "I paid"/"paid"; "for <desc>"; trailing `split (between|among|with) <names>` or `split everyone` or `split all`; trailing `paid by <name>`; "me" resolves to the sender.
-- Tags (added 2026-10-02 at go-live): a tagged person (`@alvin`, or a tag of someone without a username) in an expense message or receipt caption is the payer, unless the message also says `paid by`; tags are never part of the description. A tag of someone without a username joins them, like `/join` sent as a reply.
+- Tags (added 2026-10-02 at go-live): a tagged person (`@amir`, or a tag of someone without a username) in an expense message or receipt caption is the payer, unless the message also says `paid by`; tags are never part of the description. A tag of someone without a username joins them, like `/join` sent as a reply.
 - A message is an expense candidate only if an amount is found **and** the message is ≤ 12 words. Otherwise the bot stays silent.
 - Description = leftover words, trimmed, title-cased; empty description → "Expense". A bare `split` that is not one of the clauses above is dropped from the description and selects nobody, so `6000 split dinner` is "Dinner" with the usual Just me / Everyone / Choose people card (amended 2026-10-02 after the Sprint 5 checklist). Category from a keyword table (`taxi|uber|grab|train|jr|metro|bus` → transport, `ramen|dinner|lunch|breakfast|sushi|food|snack` → food, `coffee|beer|drinks|bar|sake` → drinks, `hotel|airbnb|ryokan` → accommodation, `ticket|museum|onsen|entry` → activities, `konbini|7-eleven|lawson|familymart|supermarket` → groceries, `shop|uniqlo|donki|mall` → shopping), default `other`.
 - Parse failure examples that must stay silent: "lol that ramen was so good", "who's paying for dinner". Must parse, for a JPY/SGD trip (the six examples from the original brief, kept here because the brief is not in the repo):
@@ -95,10 +95,10 @@ Pure functions in `app/services/splitting.py`, no I/O, property-tested.
 
 ## 9. Item claiming (Phase 3)
 
-- The draft message in `items` state renders one button per claimable line item: `"{n} {desc} {amount} · {initials}"`, one per row, then a row `Rest → everyone` | `Done`. Adjustment lines are listed in the message text, not as buttons.
+- The draft message in `items` state renders one button per claimable line item: `"🍽 {n} {desc} {amount} · {initials}"`, one per row, then a row `↪ Rest → everyone` | `✅ Done` (emoji per kind of button added 2026-10-03, sprint 8). Adjustment lines are listed in the message text, not as buttons.
 - Tapping an item toggles the presser's claim. `Rest → everyone` assigns all currently unclaimed items to all participants; it is reversible by tapping items again. `Done` (initiator only) is disabled while any item is unclaimed, unless `Rest → everyone` has been applied.
 - Text shortcuts, only as replies to the draft message or with the bot mentioned: `mine 1,4`, `split 5 everyone`, `unclaim 2`. Same effect as buttons.
-- The sender can give items to someone else (added 2026-10-02 at go-live): a "Tapping for" row of name buttons (sender only) makes the sender's item taps count for the picked person until they pick Me again; a reply `<name> 1,3` from the sender does the same. Others' taps are always their own.
+- The sender can give items to someone else (added 2026-10-02 at go-live): a "Tapping for" control (sender only) makes the sender's item taps count for the picked person until it is back on Me — since sprint 8 one `👤 Tapping for: <name> ▸` button that moves to the next joined person on each press, wrapping back to Me; a reply `<name> 1,3` from the sender does the same. Others' taps are always their own.
 - More than 40 claimable items → `By items` is not offered; the message says "Too many items to split individually".
 
 ## 10. Persistence (Google Sheets)

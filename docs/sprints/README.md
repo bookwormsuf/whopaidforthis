@@ -14,6 +14,7 @@ sprint and points at the master spec sections it implements.
 | 5 | [Splitting and balances](05-splitting-and-balances.md) | Everyone / Choose people, equal, custom, `/balances`, `/settle` | Yes, ~10 min |
 | 6 | [Item claiming](06-item-claiming.md) | Tap items on a receipt, tax spread proportionally | Yes, ~10 min |
 | 7 | [Hardening and go-live](07-hardening-and-go-live.md) | Real group, real Sheet, friends joined | Yes, everyone |
+| 8 | [Clearer messages](08-clearer-messages.md) | Spent, paid and owed read at a glance; item card in three kinds | Yes, ~5 min |
 
 ## How a sprint runs
 

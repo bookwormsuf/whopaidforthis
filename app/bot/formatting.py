@@ -27,9 +27,7 @@ def fmt_signed_money(amount_minor: int, currency: str) -> str:
 
 def fmt_amount_pair(trip_amount_minor: int, home_amount_minor: int, trip: Trip) -> str:
     """Trip currency then home, e.g. `¥1,200 (S$9.72)` (spec §12: per-expense amounts
-    show trip currency first). Internal to `format_expense_amount` below; kept
-    public since a couple of call sites that are always trip-currency use it
-    directly (no need to pass `currency` just to re-derive the same branch).
+    show trip currency first). Used by `format_expense_amount` below.
     """
     trip_str = fmt_money(trip_amount_minor, trip.trip_currency)
     home_str = fmt_money(home_amount_minor, trip.home_currency)
@@ -53,7 +51,7 @@ def format_expense_amount(trip: Trip, currency: str, trip_minor: int, home_minor
 
 
 class _ExpenseLine(Protocol):
-    """The fields `fmt_expense_line` needs; satisfied by `ExpenseRecord`."""
+    """The fields `fmt_expense_bullet` needs; satisfied by `ExpenseRecord`."""
 
     transaction_date: date
     description: str
@@ -63,21 +61,20 @@ class _ExpenseLine(Protocol):
     payer_display_name: str
 
 
-def fmt_expense_line(expense: _ExpenseLine, trip: Trip) -> str:
-    """One `/recent`/`/today` line: `d Mon · Desc · <amount> · Payer`, where
-    `<amount>` is `¥1,200 · S$10.42` for a trip-currency expense (spec §12: trip
-    currency first) or just `S$10.42` for a home-currency one (this change).
+def fmt_expense_bullet(expense: _ExpenseLine, trip: Trip, detail: str | None = None) -> str:
+    """Two lines for `/recent`, `/today` and `/mine` (sprint 8): `• 3 Oct · Ramen
+    ¥1,200 (S$9.72)`, then `Ada paid`, plus `detail` (e.g. "your share S$4.86") after a
+    dot when given.
     """
-    if expense.original_currency == trip.home_currency:
-        amount = fmt_money(expense.home_amount_minor, trip.home_currency)
-    else:
-        amount = (
-            f"{fmt_money(expense.trip_amount_minor, trip.trip_currency)} · "
-            f"{fmt_money(expense.home_amount_minor, trip.home_currency)}"
-        )
+    amount = format_expense_amount(
+        trip, expense.original_currency, expense.trip_amount_minor, expense.home_amount_minor
+    )
+    second = f"{escape(first_name(expense.payer_display_name))} paid"
+    if detail:
+        second += f" · {detail}"
     return (
-        f"{fmt_date_short(expense.transaction_date)} · {escape(expense.description)} · "
-        f"{amount} · {escape(first_name(expense.payer_display_name))}"
+        f"• {fmt_date_short(expense.transaction_date)} · {escape(expense.description)} "
+        f"{amount}\n   {second}"
     )
 
 
@@ -87,7 +84,7 @@ def fmt_date(value: date | datetime) -> str:
 
 
 def fmt_date_short(value: date | datetime) -> str:
-    """`d Mon`, e.g. "20 Sep", used in /recent and /today lines."""
+    """`d Mon`, e.g. "20 Sep", used in /recent, /today and /mine bullets."""
     return value.strftime("%-d %b")
 
 
