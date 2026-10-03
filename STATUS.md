@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-10-02 (sprint 7 built; go-live checklist pending)
+Updated: 2026-10-03 (sprint 7 signed off; live)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -17,7 +17,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 4 Receipt photos, total only | written (+ §7/§10 amendments) | done | green (302) | 2026-10-01, findings fixed | 2026-10-01, all eight pass | 2026-10-01 | Sprint 4 closed. Next: run sprint 5 / agent |
 | 5 Splitting and balances | written (+ §6 amendment) | done | green (363) | 2026-10-01, findings fixed | 2026-10-02, all six single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 5 closed. Next: merge Sprint 6 / Sufyan approves |
 | 6 Item claiming | written (+ §7 amendment) | done | green (404) | 2026-10-01, findings fixed | 2026-10-02, single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 6 closed. Next: run sprint 7 / agent |
-| 7 Hardening and go-live | written | done | green (408) | 2026-10-02, findings fixed (screenshots after the trip) | – | – | Regression run (incl. deferred two-person checks) and go-live / Sufyan |
+| 7 Hardening and go-live | written | done | green (429) | 2026-10-02, findings fixed (screenshots after the trip) | 2026-10-03, live in the real trip group | 2026-10-03 | Live. After the trip: `/settle`, then `fly scale count 0` / Sufyan |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -558,11 +558,11 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Next action / owner: run `docs/manual-test-checklist.md` (with the second person for Part B)
   and the go-live steps / Sufyan.
 
-### 2026-10-02 — Go-live: `$SGD559.57` read as ¥1
+### 2026-10-02 — Go-live: a glued currency code read as a ¥1 expense
 
 - Performed by: Sufyan (real group), Claude (fix).
-- `$SGD559.57 Hotel part 1` became a ¥1 draft: a currency written in letters and glued to the
-  number (`$SGD559.57`, `SGD559.57`) wasn't recognised, so the `1` in "part 1" was taken as the
+- An SGD expense written as `$SGD<amount> <description> part 1` became a ¥1 draft: a currency
+  written in letters and glued to the number wasn't recognised, so the `1` in "part 1" was taken as the
   amount. Cancelled before saving.
 - Fix: a glued prefix may be letters, a symbol or both; its letters are tried as a currency code
   (`$SGD` → SGD). Letters that aren't a currency (`taxi3200`) still don't make an amount.
@@ -597,10 +597,10 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Checks: `uv run pytest -q` 423 passed; ruff clean. No separate `/review` run (a small change
   during go-live); covered by 8 new tests.
 
-### 2026-10-02 — Go-live: a ¥6,850 receipt read as ¥685,000
+### 2026-10-02 — Go-live: a receipt read 100 times too high
 
 - Performed by: Sufyan (real group), Claude (fix).
-- A clear receipt totalling ¥6,850 became a ¥685,000 draft: the reader gave yen as if they had
+- A clear yen receipt became a draft 100 times its printed total: the reader gave yen as if they had
   cents. Cancelled before saving.
 - Fix: the prompt spells out minor units per currency, and each candidate total now carries its
   amount as printed. When the printed amount shows the reading is exactly 100 times off,
@@ -625,8 +625,8 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Performed by: Claude.
 - Sufyan still has API credit, so the "couldn't read" failures were most likely the reading
   itself being rejected: the reading schema required every amount to be zero or positive and
-  quantities to be at least 1, so one negative coupon line (that receipt prints "¥200 off for
-  your 2nd coffee") or a 0 quantity threw away the whole reading.
+  quantities to be at least 1, so one negative coupon line (that receipt printed a next-visit
+  coupon) or a 0 quantity threw away the whole reading.
 - Fix: no bounds in the reading schema. `to_receipt` turns a negative amount into a discount,
   a zero quantity into 1, drops zero or negative candidate totals and clamps confidence. Four
   tests that pinned the old strictness were replaced by one for the new behaviour.
@@ -641,3 +641,25 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   shows the usual card. `Fix items` asks it too before opening the item card. Names sharing a
   first name show in full here and on the "Tapping for" row. Spec §8 amended; README updated.
 - Checks: `uv run pytest -q` 429 passed; ruff clean.
+
+### 2026-10-03 — Sprint 7 sign-off: go-live
+
+- Performed by: Sufyan (real trip group and Sheet), recorded by Claude.
+- The bot is live in the real trip group with its own Sheet. Both members have joined, and real
+  expenses (text and receipts) have been recorded, split and tagged during the first days of
+  the trip.
+- Go-live surfaced and fixed, each merged and deployed on its own:
+  - the Users header row being overwritten;
+  - glued currency codes;
+  - amounts read 100 times off;
+  - reader failures shown as "couldn't read";
+  - over-strict reading validation.
+- Added at Sufyan's request: tags mean the payer; the sender can give items to others; an
+  explicit "Who paid?" step.
+- Not run as a separate pass: `docs/manual-test-checklist.md` Part A/B. The two-person flows
+  were exercised in the real group instead; the results table is left for the next run.
+- Open, for after the trip: README screenshots in `docs/images/` (Sufyan).
+- Disposition: Sufyan said "sign off sprint 7". Sprint 7 closed; the project is live.
+- Next action / owner: after the trip, `/settle`, agree transfers, then `fly scale count 0`
+  / Sufyan.
+
