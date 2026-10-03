@@ -195,6 +195,25 @@ class AnthropicReceiptReader:
                 raise ReceiptUnreadable() from second_error
 
 
+def _normalised_line_item(item) -> ReceiptLineItem:
+    """Forgiving about what the reader returns (decided 2026-10-03): a negative
+    amount is a discount of that size, a discount is stored positive, and a missing
+    or zero quantity is 1.
+    """
+    kind = item.kind
+    amount = item.amount_minor
+    if amount < 0:
+        kind, amount = "discount", -amount
+    unit = item.unit_amount_minor
+    return ReceiptLineItem(
+        description=item.description,
+        quantity=max(item.quantity, 1),
+        unit_amount_minor=abs(unit) if unit is not None else None,
+        amount_minor=amount,
+        kind=kind,
+    )
+
+
 def to_receipt(extraction: ReceiptExtraction, currency: str) -> Receipt:
     """Validates a raw LLM reading into the domain `Receipt` (spec §7). `currency`
     is the already-resolved trip or home currency (`resolve_receipt_currency`). An
@@ -216,17 +235,9 @@ def to_receipt(extraction: ReceiptExtraction, currency: str) -> Receipt:
                 is_grand_total_guess=c.is_grand_total_guess,
             )
             for c in extraction.candidate_totals
+            if c.amount_minor > 0  # a zero or negative "total" is never the total
         ]
-        line_items = [
-            ReceiptLineItem(
-                description=item.description,
-                quantity=item.quantity,
-                unit_amount_minor=item.unit_amount_minor,
-                amount_minor=item.amount_minor,
-                kind=item.kind,
-            )
-            for item in extraction.line_items
-        ]
+        line_items = [_normalised_line_item(item) for item in extraction.line_items]
         return Receipt(
             merchant=extraction.merchant,
             currency=currency,
@@ -235,7 +246,7 @@ def to_receipt(extraction: ReceiptExtraction, currency: str) -> Receipt:
             candidate_totals=candidate_totals,
             description=extraction.description,
             category=extraction.category,
-            confidence=extraction.confidence,
+            confidence=min(max(extraction.confidence, 0.0), 1.0),
             notes=extraction.notes,
         )
     except ValidationError as exc:

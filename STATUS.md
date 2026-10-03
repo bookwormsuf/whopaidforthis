@@ -620,3 +620,15 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Next action / owner: check the Anthropic Console for credit balance and errors; resend the
   receipt after deploying / Sufyan.
 
+### 2026-10-03 — Forgiving receipt readings
+
+- Performed by: Claude.
+- Sufyan still has API credit, so the "couldn't read" failures were most likely the reading
+  itself being rejected: the reading schema required every amount to be zero or positive and
+  quantities to be at least 1, so one negative coupon line (that receipt prints "¥200 off for
+  your 2nd coffee") or a 0 quantity threw away the whole reading.
+- Fix: no bounds in the reading schema. `to_receipt` turns a negative amount into a discount,
+  a zero quantity into 1, drops zero or negative candidate totals and clamps confidence. Four
+  tests that pinned the old strictness were replaced by one for the new behaviour.
+- Checks: `uv run pytest -q` 426 passed; ruff clean.
+
