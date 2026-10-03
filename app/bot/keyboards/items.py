@@ -75,12 +75,12 @@ def tapping_for_rows(draft: Draft) -> list[list[InlineKeyboardButton]]:
     if len(draft.people) < 2:
         return []
     current = draft.claiming_for or draft.initiator_id
-    person = next((p for p in draft.people if p.user_id == current), None)
-    name = (
-        "Me"
-        if person is None or current == draft.initiator_id
-        else short_name(person, draft.people)
-    )
+    if current == draft.initiator_id:
+        name = "Me"
+    else:
+        # Named even if they have since left `people`, so the button matches the card
+        # text and where the taps go.
+        name = short_name(person_for(draft, current), draft.people)
     return [
         [
             InlineKeyboardButton(

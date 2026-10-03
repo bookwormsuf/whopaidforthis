@@ -69,14 +69,6 @@ async def _load(context: ContextTypes.DEFAULT_TYPE, trip: Trip, chat_id: int) ->
     return _Ledger(expenses, splits, names)
 
 
-def _signed(amount_minor: int, currency: str) -> str:
-    if amount_minor > 0:
-        return f"+{fmt_money(amount_minor, currency)}"
-    if amount_minor < 0:
-        return f"−{fmt_money(-amount_minor, currency)}"
-    return fmt_money(0, currency)
-
-
 def _standing(name: str, balance: Balance, currency: str) -> str:
     """ "Ada is owed S$31.20" / "Amir owes S$31.20" / "Cy is all square"."""
     net = balance.net_minor

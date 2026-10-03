@@ -520,3 +520,12 @@ async def test_no_who_paid_step_when_alone() -> None:
     group = await FakeGroup.create(ADA)
     card = await group.send(ADA, "6000 yen dinner", who_paid=False)
     assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
+
+
+async def test_saved_line_with_a_blank_name() -> None:
+    blank = Member(9, " ", None)
+    group = await FakeGroup.create(blank)
+    card = await group.send(blank, "1200 yen ramen")
+    await group.press(blank, card, "Just me")
+    await group.press(blank, card, "Confirm")
+    assert card.text.startswith("Saved ✅ Ramen ¥1,200")

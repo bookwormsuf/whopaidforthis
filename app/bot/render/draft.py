@@ -238,15 +238,15 @@ def _render_items(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
         )
     lines += ["", "🍽 Tap what you had. Tap a shared dish each."]
     if len(draft.people) > 1:
-        sender = escape(draft.initiator_name.split()[0] if draft.initiator_name else "")
+        sender = escape(person_for(draft, draft.initiator_id).first_name)
         if draft.claiming_for is not None:
             name = escape(person_for(draft, draft.claiming_for).display_name)
             lines.append(f"👤 {sender}'s taps go to <b>{name}</b>.")
         else:
             lines.append(f"👤 {sender} can tap for someone else.")
+    sender = person_for(draft, draft.initiator_id).first_name or "the sender"
     lines.append(
-        "↪ gives what's left to everyone. ✅ saves (only "
-        f"{escape(draft.initiator_name.split()[0] if draft.initiator_name else 'the sender')})."
+        f"↪ gives what's left to everyone. ✅ shows the split to check (only {escape(sender)})."
     )
     lines.append(
         "<i>Or reply: <code>mine 1,4</code> · <code>split 5 everyone</code> · "
@@ -352,9 +352,9 @@ def _render_committed(draft: Draft, trip: Trip) -> str:
     elif isinstance(draft.split, Custom):
         how = "split by amounts"
     elif len(draft.participant_ids) == 1:
-        only = person_for(draft, draft.participant_ids[0]).display_name.split()[0]
+        only = person_for(draft, draft.participant_ids[0]).first_name
         how = f"just {escape(only)}"
     else:
         how = f"split {len(draft.participant_ids)} ways"
-    payer = escape(draft.payer_name.split()[0] if draft.payer_name else "")
+    payer = escape(person_for(draft, draft.payer_id).first_name)
     return f"Saved ✅ {escape(draft.description)} {_amount(draft, trip)} · {payer} paid · {how}"

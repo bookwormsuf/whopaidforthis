@@ -106,3 +106,19 @@ async def test_reply_gives_items_to_someone_else() -> None:
     card = group.cards[card.message_id]
     assert "Only Ada can give items to others" in card.text
     assert _item_buttons(card)[1] == "2 Udon ¥800"
+
+
+async def test_tapping_for_names_someone_who_has_left_the_people() -> None:
+    from dataclasses import replace
+
+    from app.bot.keyboards.items import tapping_for_rows
+
+    group = await FakeGroup.create(ADA, BO, CY)
+    card = await _items_card(group)
+    await group.press(ADA, card, "Tapping for: Me ▸")
+    await group.press(ADA, card, "Tapping for: Bo ▸")  # now Cy
+    draft = await group.deps.draft_service._drafts.get(card.draft_id)
+    gone = replace(draft, people=tuple(p for p in draft.people if p.user_id != CY.id))
+    (row,) = tapping_for_rows(gone)
+    # Not "Me": the sender's taps still go to them, as the card text says.
+    assert row[0].text != "👤 Tapping for: Me ▸"

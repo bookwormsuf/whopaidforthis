@@ -27,9 +27,7 @@ def fmt_signed_money(amount_minor: int, currency: str) -> str:
 
 def fmt_amount_pair(trip_amount_minor: int, home_amount_minor: int, trip: Trip) -> str:
     """Trip currency then home, e.g. `¥1,200 (S$9.72)` (spec §12: per-expense amounts
-    show trip currency first). Internal to `format_expense_amount` below; kept
-    public since a couple of call sites that are always trip-currency use it
-    directly (no need to pass `currency` just to re-derive the same branch).
+    show trip currency first). Used by `format_expense_amount` below.
     """
     trip_str = fmt_money(trip_amount_minor, trip.trip_currency)
     home_str = fmt_money(home_amount_minor, trip.home_currency)

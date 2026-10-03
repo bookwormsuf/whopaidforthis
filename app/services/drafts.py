@@ -1020,7 +1020,8 @@ class DraftService:
 
     async def cycle_claiming_for(self, draft_id: str, presser_id: int) -> Draft:
         """The `👤 Tapping for` button (sprint 8, initiator only): the next joined
-        person in card order, wrapping round to the initiator.
+        person in card order (by name), wrapping round, so the initiator ("Me") comes
+        back within one full cycle.
         """
         draft = await self._get_active(draft_id, presser_id)
         if draft.state != "items":

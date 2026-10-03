@@ -218,7 +218,7 @@ def _normalised_line_item(item) -> ReceiptLineItem:
     )
 
 
-_MAX_TITLE_WORDS = 5
+_MAX_TITLE_WORDS = 4
 _MAX_TITLE_CHARS = 40
 
 
@@ -228,11 +228,18 @@ def _short_title(description: str, merchant: str | None) -> str:
     first few words when there is no shop name.
     """
     text = " ".join(description.split())
-    if len(text.split()) <= _MAX_TITLE_WORDS and len(text) <= _MAX_TITLE_CHARS:
+    if text and len(text.split()) <= _MAX_TITLE_WORDS and len(text) <= _MAX_TITLE_CHARS:
         return text
-    if merchant and merchant.strip():
-        return " ".join(merchant.split())[:_MAX_TITLE_CHARS]
-    return " ".join(text.split()[:_MAX_TITLE_WORDS])[:_MAX_TITLE_CHARS]
+    shop = " ".join((merchant or "").split())
+    return _clip(shop or " ".join(text.split()[:_MAX_TITLE_WORDS]))
+
+
+def _clip(text: str) -> str:
+    """At most `_MAX_TITLE_CHARS`, cut at a word with "…" when it is longer."""
+    if len(text) <= _MAX_TITLE_CHARS:
+        return text
+    cut = text[: _MAX_TITLE_CHARS - 1].rsplit(" ", 1)[0] or text[: _MAX_TITLE_CHARS - 1]
+    return cut + "…"
 
 
 def to_receipt(extraction: ReceiptExtraction, currency: str) -> Receipt:

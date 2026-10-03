@@ -98,8 +98,8 @@ Custom. The item card's buttons come in three kinds, each with its own emoji:
   pressed, back round to Me. While it shows someone else, the sender's taps go to them. Or
   reply `amir 1,3`.
 - **↪ Rest → everyone** gives every unclaimed item to everyone in the expense. Tap one of those
-  items to make it just yours again. **✅ Done** (only the sender) saves once nothing is
-  unclaimed; until then it reads `✅ Done (¥x left)`.
+  items to make it just yours again. **✅ Done** (only the sender) shows the split to check once
+  nothing is unclaimed; until then it reads `✅ Done (¥x left)`.
 
 The card's text says how much is still to claim. Tax, service charge and discount lines are
 listed in the text, never as buttons. Reply to the item card with `mine 1,4`,

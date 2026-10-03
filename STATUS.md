@@ -676,7 +676,7 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   card lists "Each person's share"; the Saved line says who paid and how it was split; item
   card 🍽 items, `👤 Tapping for: <name> ▸`, `↪ Rest → everyone`, `✅ Done`; long reader titles
   fall back to the shop name. No change to amounts, splitting or what is stored.
-- Spec §8 item-card wording amended; README, manual checklist and sprint index updated.
+- Spec §9 item-card wording amended; README, manual checklist and sprint index updated.
 - Checks: `uv run pytest -q` 430 passed; ruff clean.
 - Next action / owner: `/review`, then merge and deploy on Sufyan's approval, then the sprint 8
   checklist / Sufyan.
