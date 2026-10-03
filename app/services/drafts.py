@@ -74,6 +74,7 @@ logger = logging.getLogger(__name__)
 _DRAFT_TTL = timedelta(minutes=30)
 
 DraftState = Literal[
+    "who_paid",
     "detected",
     "resolve_name",
     "participants",
@@ -202,6 +203,8 @@ class Draft:
     items_error: str | None = None  # the last text shortcut's problem, shown on the card
     # Who the initiator's item taps count for, when not themselves (added 2026-10-02).
     claiming_for: int | None = None
+    # `Fix items` asked "Who paid?" first; the item card opens once it's answered.
+    items_after_payer: bool = False
     # `Use total anyway` keeps the receipt total but turns off `By items` (spec §7).
     items_allowed: bool = True
     rate: ExchangeRate | None = None
@@ -643,8 +646,11 @@ class DraftService:
         payer_text = draft.pending_payer_text
         participants_text = draft.pending_participants_text
         if not payer_text and not participants_text:
-            # The first card's "Paid by" row needs everyone joined (added 2026-10-03).
-            draft = replace(draft, people=await self._joined_people(trip, draft))
+            # Nobody tagged and no "paid by": ask who paid first, when there is anyone
+            # else it could be (decided 2026-10-03).
+            people = await self._joined_people(trip, draft)
+            state = "who_paid" if len(people) > 1 else draft.state
+            draft = replace(draft, people=people, state=state)
             await self._drafts.put(draft)
             return draft
 
@@ -743,15 +749,24 @@ class DraftService:
         return updated
 
     async def set_payer(self, draft_id: str, presser_id: int, user_id: int) -> Draft:
-        """The "Paid by" row on the first card (added 2026-10-03): the initiator says
-        who paid when it wasn't them, or changes a tagged payer.
+        """The "Who paid?" step (decided 2026-10-03): shown when nobody was tagged and
+        the message didn't say `paid by`; the initiator picks the payer, then the
+        card asks who shares it.
         """
         draft = await self._get_active(draft_id, presser_id)
-        if draft.state != "detected":
-            raise DraftError(f"cannot change the payer in state {draft.state}")
+        if draft.state != "who_paid":
+            raise DraftError(f"cannot pick the payer in state {draft.state}")
         if user_id not in {p.user_id for p in draft.people} and user_id != draft.initiator_id:
             raise DraftError("not one of the people on this card")
-        updated = self._with_payer(draft, user_id)
+        updated = replace(self._with_payer(draft, user_id), state="detected")
+        if draft.items_after_payer:
+            return await self._to_items(
+                replace(
+                    updated,
+                    items_after_payer=False,
+                    participant_ids=[p.user_id for p in updated.people],
+                )
+            )
         await self._drafts.put(updated)
         return updated
 
@@ -1374,6 +1389,11 @@ class DraftService:
         finalized = await self._finalize_receipt_amount(base, trip, draft.amount_minor)
         if finalized.state in ("rate_failed", "resolve_name"):
             return finalized  # Retry or the name question first; By items comes after
+        if finalized.state == "who_paid":
+            # Ask who paid first; the item card opens with everyone once answered.
+            updated = replace(finalized, items_after_payer=True)
+            await self._drafts.put(updated)
+            return updated
         if finalized.state == "detected":
             # No caption clause chose participants: everyone joined takes part.
             people = await self._joined_people(trip, finalized)

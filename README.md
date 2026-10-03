@@ -55,8 +55,8 @@ Every expense has one **payer** (who handed over the money) and one or more **pa
 - **Everyone** — every trip user who has run `/join`, counted at the moment you tap it.
 - **Choose people** — one toggle per joined user (you start selected), then **Next**.
 
-Below those, a **Paid by** row of names shows who paid (✓), you by default. If someone else
-paid, tap their name.
+Before that, if nobody was tagged and the message doesn't say `paid by`, the bot asks **Who
+paid?** with a button per person (you as **Me**).
 
 With more than one participant the card asks how to split:
 

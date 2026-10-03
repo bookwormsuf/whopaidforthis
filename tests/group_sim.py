@@ -193,6 +193,7 @@ class FakeGroup:
         text: str,
         reply_to: Card | None = None,
         mentions: dict[str, Member] | None = None,
+        who_paid: bool = True,
     ) -> Card | None:
         """`member` sends `text`; returns the draft card the bot replied with, if any.
         `mentions` are tags of people with no username, by the name shown.
@@ -202,10 +203,15 @@ class FakeGroup:
         update.effective_message.parse_entities = self._text_mentions(mentions)
         await text_expense_handler(update, self._context())
         new = [mid for mid in self.cards if mid not in before]
-        return self.cards[new[-1]] if new else None
+        card = self.cards[new[-1]] if new else None
+        return await self._answer_who_paid(member, card) if who_paid else card
 
     async def send_receipt(
-        self, member: Member, extraction: ReceiptExtraction, caption: str | None = None
+        self,
+        member: Member,
+        extraction: ReceiptExtraction,
+        caption: str | None = None,
+        who_paid: bool = True,
     ) -> Card | None:
         """`member` sends a receipt photo that the (fake) reader reads as `extraction`."""
         assert self.reader is not None
@@ -218,7 +224,16 @@ class FakeGroup:
         update.effective_message.photo = [SimpleNamespace(file_id="photo", file_size=1000)]
         await photo_expense_handler(update, self._context())
         new = [mid for mid in self.cards if mid not in before]
-        return self.cards[new[-1]] if new else None
+        card = self.cards[new[-1]] if new else None
+        return await self._answer_who_paid(member, card) if who_paid else card
+
+    async def _answer_who_paid(self, member: Member, card: Card | None) -> Card | None:
+        """Answers "Who paid?" with "Me" so most tests start at the share card;
+        tests of that step pass `who_paid=False`.
+        """
+        if card is not None and card.text.endswith("Who paid?"):
+            await self.press(member, card, "Me")
+        return card
 
     async def press(self, member: Member, card: Card, label: str) -> str | None:
         """`member` taps the button labelled `label` on `card`. Returns the toast

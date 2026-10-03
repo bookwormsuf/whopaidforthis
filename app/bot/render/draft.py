@@ -32,6 +32,7 @@ from app.bot.keyboards.split import (
     preview_keyboard,
     resolve_name_keyboard,
     split_method_keyboard,
+    who_paid_keyboard,
 )
 from app.models.trip import Trip
 from app.services.drafts import (
@@ -61,6 +62,8 @@ def _buttons(draft_id: str, *pairs: tuple[str, str]) -> InlineKeyboardMarkup:
 
 def render_draft(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup | None]:
     """Builds every card, `Saved ✅ ...`/`Cancelled.` included."""
+    if draft.state == "who_paid":
+        return _render_who_paid(draft, trip)
     if draft.state == "detected":
         return _render_detected(draft, trip)
     if draft.state == "choose_total":
@@ -90,11 +93,19 @@ def render_draft(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup | 
     raise ValueError(f"no card for draft state {draft.state}")
 
 
-def _who_paid_hint(draft: Draft) -> str:
-    """Points at the "Paid by" row when there is one."""
-    if len(draft.people) > 1:
-        return "Not who paid? Tap the payer's name below.\n"
-    return ""
+def _render_who_paid(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    """ "Who paid?" before anything else, when nobody was tagged (decided
+    2026-10-03). Shows what was read so the payer can be checked against it.
+    """
+    amount = format_expense_amount(
+        trip, draft.currency, draft.trip_amount_minor, draft.home_amount_minor
+    )
+    merchant = f"{escape(draft.merchant)}\n" if draft.merchant else ""
+    text = (
+        f"🧾 {merchant}<b>{escape(draft.description)}</b>\n{amount} · "
+        f"{fmt_date(draft.transaction_date)}\n\nWho paid?"
+    )
+    return text, who_paid_keyboard(draft)
 
 
 def _render_detected(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
@@ -111,7 +122,7 @@ def _render_detected(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarku
         amounts_line = fmt_money(draft.home_amount_minor, trip.home_currency)
         text = (
             f"🧾 <b>{desc}</b>\n{amounts_line}\nPaid by {payer} · {date_str}\n\n"
-            f"{_who_paid_hint(draft)}Who should share this?"
+            "Who should share this?"
         )
         return text, detected_keyboard(draft)
 
@@ -124,7 +135,7 @@ def _render_detected(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarku
     )
     text = (
         f"🧾 <b>{desc}</b>\n{amounts_line}\nPaid by {payer} · {date_str}\n{rate_line}\n\n"
-        f"{_who_paid_hint(draft)}Who should share this?"
+        "Who should share this?"
     )
     return text, detected_keyboard(draft)
 
@@ -144,7 +155,7 @@ def _render_detected_receipt(draft: Draft, trip: Trip) -> tuple[str, InlineKeybo
     text = (
         f"🧾 {merchant_line}<b>{desc}</b>\n{amount}\nPaid by {payer} · "
         f"{date_str} ({date_source_str}){items_line}\n\n"
-        f"{_who_paid_hint(draft)}Who should share this?"
+        "Who should share this?"
     )
     return text, detected_keyboard(draft)
 

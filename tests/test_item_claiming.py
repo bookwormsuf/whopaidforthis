@@ -221,6 +221,7 @@ async def test_step6_fix_items_adds_unlisted_and_reconciles() -> None:
     await group.press(ADA, card, "¥3,000")
     assert "difference ¥360" in card.text
     await group.press(ADA, card, "Fix items")
+    await group.press(ADA, card, "Me")
     assert _item_buttons(card)[-1] == "4 Unlisted ¥360"
     assert "Unclaimed: ¥2,760" in card.text
 
@@ -249,6 +250,7 @@ async def test_use_total_anyway_hides_by_items() -> None:
     card = await group.send_receipt(ADA, receipt)
     await group.press(ADA, card, "¥2,000")
     await group.press(ADA, card, "Use total anyway")
+    await group.press(ADA, card, "Me")
     await group.press(ADA, card, "Everyone")
     assert card.buttons == ["Equally", "Custom", "Cancel"]
 
@@ -327,7 +329,7 @@ async def test_caption_paid_by_sets_the_payer() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await group.send_receipt(ADA, RESTAURANT, caption="paid by Bo")
     assert "Paid by Bo" in card.text
-    assert card.buttons == ["Just me", "Everyone", "Choose people", "Me", "✓ Bo", "Cancel"]
+    assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
 
 
 async def test_negative_unlisted_from_fix_items_still_splits() -> None:
@@ -337,6 +339,8 @@ async def test_negative_unlisted_from_fix_items_still_splits() -> None:
     card = await group.send_receipt(ADA, receipt)
     await group.press(ADA, card, "¥3,000")
     await group.press(ADA, card, "Fix items")
+    assert card.text.endswith("Who paid?")
+    await group.press(ADA, card, "Me")
     assert _item_buttons(card) == ["1 Wagyu ¥3,300", "2 Unlisted −¥300"]
     await group.press(ADA, card, "1 Wagyu ¥3,300")
     await group.press(ADA, card, "Rest → everyone")
@@ -391,6 +395,7 @@ async def test_other_amount_typed_total_keeps_items_and_reconciles() -> None:
     # The lines (¥1,800) don't make ¥1,900: the usual prompt, with Fix items.
     assert "difference ¥100" in card.text
     await group.press(ADA, card, "Fix items")
+    await group.press(ADA, card, "Me")
     assert _item_buttons(card)[-1] == "3 Unlisted ¥100"
 
 
@@ -401,7 +406,9 @@ async def test_other_amount_matching_the_lines_goes_to_the_card() -> None:
     await group.press(ADA, card, "Other amount")
     await group.send(ADA, "1800", reply_to=card)
     card = group.cards[card.message_id]
-    assert card.buttons == ["Just me", "Everyone", "Choose people", "✓ Me", "Bo", "Cancel"]
+    assert card.text.endswith("Who paid?")
+    await group.press(ADA, card, "Me")
+    assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
     await group.press(ADA, card, "Everyone")
     assert "By items" in card.buttons
 

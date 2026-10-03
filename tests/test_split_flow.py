@@ -82,7 +82,7 @@ async def test_step1_split_everyone_two_people() -> None:
 async def test_step2_everyone_button_remainder_skips_payer() -> None:
     group = await FakeGroup.create(ADA, BO, CY)
     card = await group.send(ADA, "4850 yen dinner")
-    assert card.buttons == ["Just me", "Everyone", "Choose people", "✓ Me", "Bo", "Cy", "Cancel"]
+    assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
 
     await group.press(ADA, card, "Everyone")
     await group.press(ADA, card, "Equally")
@@ -350,7 +350,7 @@ async def test_ambiguous_payer_pick() -> None:
     card = await group.send(ADA, "6000 yen dinner paid by jo")
     await group.press(ADA, card, "Jo Lim")
     assert "Paid by Jo Lim" in card.text
-    assert card.buttons[3:6] == ["Me", "✓ Jo Lim", "Jo Tan"]
+    assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
 
 
 # -- Checklist steps 7 and 8: balances, settle, undo --------------------------
@@ -478,16 +478,16 @@ async def test_custom_amount_in_the_other_currency_is_rejected() -> None:
     assert "Use ¥ amounts for this expense" in card.text
 
 
-async def test_paid_by_row_changes_the_payer() -> None:
+async def test_who_paid_step_when_nobody_is_tagged() -> None:
     group = await FakeGroup.create(ADA, BO)
-    card = await group.send(ADA, "6000 yen dinner")
-    assert "Not who paid? Tap the payer's name below." in card.text
-    assert card.buttons == ["Just me", "Everyone", "Choose people", "✓ Me", "Bo", "Cancel"]
+    card = await group.send(ADA, "6000 yen dinner", who_paid=False)
+    assert card.text.endswith("Who paid?")
+    assert card.buttons == ["Me", "Bo", "Cancel"]
+    # Only the sender answers it.
+    assert await group.press(BO, card, "Bo") == "Only Ada can edit this"
     await group.press(ADA, card, "Bo")
     assert "Paid by Bo" in card.text
-    assert card.buttons[3:5] == ["Me", "✓ Bo"]
-    # Only the sender can change it.
-    assert await group.press(BO, card, "Me") == "Only Ada can edit this"
+    assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
     await group.press(ADA, card, "Everyone")
     await group.press(ADA, card, "Equally")
     draft_id = card.draft_id
@@ -495,8 +495,14 @@ async def test_paid_by_row_changes_the_payer() -> None:
     assert group.ledger.expense_for(draft_id).payer_user_id == BO.id
 
 
-async def test_no_paid_by_row_when_alone() -> None:
+async def test_no_who_paid_step_when_tagged_or_paid_by() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    for text in ("6000 yen dinner @bo", "6000 yen dinner paid by bo"):
+        card = await group.send(ADA, text, who_paid=False)
+        assert "Paid by Bo" in card.text and not card.text.endswith("Who paid?"), text
+
+
+async def test_no_who_paid_step_when_alone() -> None:
     group = await FakeGroup.create(ADA)
-    card = await group.send(ADA, "6000 yen dinner")
+    card = await group.send(ADA, "6000 yen dinner", who_paid=False)
     assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
-    assert "Not who paid?" not in card.text
