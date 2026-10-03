@@ -26,9 +26,11 @@ class LineItemExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     description: str
-    quantity: int = Field(ge=1)
-    unit_amount_minor: int | None = Field(default=None, ge=0)
-    amount_minor: int = Field(ge=0)
+    # No bounds on these (decided 2026-10-03): a reading with a negative coupon line
+    # or a quantity of 0 was rejected whole. `to_receipt` normalises them instead.
+    quantity: int
+    unit_amount_minor: int | None = None
+    amount_minor: int
     kind: LineItemKind
 
 
@@ -36,7 +38,7 @@ class CandidateTotalExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     label_as_printed: str
-    amount_minor: int = Field(ge=0)
+    amount_minor: int
     is_grand_total_guess: bool
     # The amount exactly as printed, e.g. "¥6,850" (added 2026-10-02): lets
     # `to_receipt` catch a reading off by a factor of 100 (yen read as cents).
@@ -55,5 +57,5 @@ class ReceiptExtraction(BaseModel):
     candidate_totals: list[CandidateTotalExtraction] = Field(default_factory=list)
     description: str
     category: Category
-    confidence: float = Field(ge=0, le=1)
+    confidence: float  # clamped to 0..1 by `to_receipt`
     notes: str | None = None

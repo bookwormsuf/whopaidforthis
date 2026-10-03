@@ -71,64 +71,6 @@ def test_schema_rejects_missing_description() -> None:
         )
 
 
-def test_schema_rejects_negative_line_item_amount() -> None:
-    with pytest.raises(ValidationError):
-        ReceiptExtraction.model_validate(
-            {
-                "description": "Expense",
-                "category": "food",
-                "confidence": 0.5,
-                "line_items": [
-                    {"description": "Item", "quantity": 1, "amount_minor": -100, "kind": "item"}
-                ],
-                "candidate_totals": [],
-            }
-        )
-
-
-def test_schema_rejects_negative_candidate_total() -> None:
-    with pytest.raises(ValidationError):
-        ReceiptExtraction.model_validate(
-            {
-                "description": "Expense",
-                "category": "food",
-                "confidence": 0.5,
-                "line_items": [],
-                "candidate_totals": [
-                    {"label_as_printed": "Total", "amount_minor": -5, "is_grand_total_guess": True}
-                ],
-            }
-        )
-
-
-def test_schema_rejects_quantity_below_one() -> None:
-    with pytest.raises(ValidationError):
-        ReceiptExtraction.model_validate(
-            {
-                "description": "Expense",
-                "category": "food",
-                "confidence": 0.5,
-                "line_items": [
-                    {"description": "Item", "quantity": 0, "amount_minor": 100, "kind": "item"}
-                ],
-                "candidate_totals": [],
-            }
-        )
-
-
-def test_schema_rejects_confidence_out_of_range() -> None:
-    with pytest.raises(ValidationError):
-        ReceiptExtraction.model_validate(
-            {
-                "description": "Expense",
-                "category": "food",
-                "confidence": 1.5,
-                "line_items": [],
-                "candidate_totals": [],
-            }
-        )
-
-
 # -- select_total -------------------------------------------------------------
 
 
@@ -496,3 +438,34 @@ def test_service_problem_names_api_failures() -> None:
     assert _service_problem(status_error(529, "overloaded")) == "temporarily down"
     assert _service_problem(anthropic.APIConnectionError(request=request)) == "unreachable"
     assert _service_problem(ValueError("bad JSON")) is None
+
+
+# -- Forgiving readings (decided 2026-10-03) -----------------------------------
+
+
+def test_negative_amounts_and_zero_quantities_do_not_reject_the_reading() -> None:
+    extraction = ReceiptExtraction(
+        merchant="GLITCH",
+        currency="JPY",
+        transaction_datetime=None,
+        line_items=[
+            {"description": "Ice drip", "quantity": 1, "amount_minor": 1300, "kind": "item"},
+            {"description": "Hot drip", "quantity": 0, "amount_minor": 3000, "kind": "item"},
+            {"description": "¥200 off coupon", "quantity": 1, "amount_minor": -200, "kind": "item"},
+        ],
+        candidate_totals=[
+            {"label_as_printed": "合計", "amount_minor": 4300, "is_grand_total_guess": True},
+            {"label_as_printed": "お釣り", "amount_minor": 0, "is_grand_total_guess": False},
+        ],
+        description="Coffee",
+        category="drinks",
+        confidence=1.2,
+    )
+    receipt = to_receipt(extraction, "JPY")
+    assert [(i.kind, i.amount_minor, i.quantity) for i in receipt.line_items] == [
+        ("item", 1300, 1),
+        ("item", 3000, 1),
+        ("discount", 200, 1),
+    ]
+    assert [c.amount_minor for c in receipt.candidate_totals] == [4300]
+    assert receipt.confidence == 1.0
