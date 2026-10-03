@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import anthropic
 import pytest
 from PIL import Image
 from pydantic import ValidationError
@@ -471,3 +472,27 @@ def test_prompt_explains_minor_units() -> None:
 
     assert "never 685000" in SYSTEM_PROMPT_TEMPLATE
     assert "amount_as_printed" in SYSTEM_PROMPT_TEMPLATE
+
+
+# -- The reader service failing, not the photo (added 2026-10-03) --------------
+
+
+def test_service_problem_names_api_failures() -> None:
+    import httpx2
+
+    from app.services.receipt_parser import _service_problem
+
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+
+    def status_error(status: int, message: str) -> anthropic.APIStatusError:
+        response = httpx2.Response(status, request=request)
+        return anthropic.APIStatusError(message, response=response, body=None)
+
+    assert _service_problem(status_error(401, "invalid x-api-key")) == "refusing the API key"
+    assert (
+        _service_problem(status_error(400, "Your credit balance is too low")) == "out of API credit"
+    )
+    assert _service_problem(status_error(429, "rate limited")) == "busy"
+    assert _service_problem(status_error(529, "overloaded")) == "temporarily down"
+    assert _service_problem(anthropic.APIConnectionError(request=request)) == "unreachable"
+    assert _service_problem(ValueError("bad JSON")) is None

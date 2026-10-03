@@ -172,6 +172,14 @@ def _render_manual_amount(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboard
     if draft.awaiting_manual_amount:
         text = f"🧾 <b>{desc}</b>\n\nReply to this message with the amount."
         return text, None
+    if draft.read_problem:
+        # The reader service failed, not the photo: say so, so nobody retakes it.
+        text = (
+            f"🧾 <b>{desc}</b>\n\nCouldn't read that receipt: the receipt reader is "
+            f"{escape(draft.read_problem)}, not a problem with your photo. Try again in a "
+            "minute, or enter the amount."
+        )
+        return text, manual_amount_keyboard(draft.draft_id)
     text = f"🧾 <b>{desc}</b>\n\nCouldn't read that receipt"
     return text, manual_amount_keyboard(draft.draft_id)
 

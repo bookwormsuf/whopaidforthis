@@ -225,6 +225,8 @@ class Draft:
     # A `Try again` read is in flight; a second press is refused rather than
     # starting a second paid LLM call.
     reading_receipt: bool = False
+    # The receipt reader service failed (not the photo): "out of API credit" etc.
+    read_problem: str | None = None
 
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -1216,9 +1218,11 @@ class DraftService:
         caption_override: tuple[str, Category] | None = None,
         participants_text: str | None = None,
         payer_text: str | None = None,
+        read_problem: str | None = None,
     ) -> Draft:
         """The receipt could not be read (spec §7): "Couldn't read that receipt" with
-        `Try again` / `Enter amount manually`.
+        `Try again` / `Enter amount manually`. `read_problem` says why when the reader
+        service failed rather than the photo.
         """
         await self._ensure_not_duplicate(trip, chat_id, message_id)
         description, category = caption_override or ("Expense", Category.OTHER)
@@ -1245,6 +1249,7 @@ class DraftService:
             caption_override=caption_override,
             pending_participants_text=participants_text,
             pending_payer_text=payer_text,
+            read_problem=read_problem,
         )
         await self._drafts.put(draft)
         return draft
@@ -1421,14 +1426,18 @@ class DraftService:
         )
         return await self._start_total_selection(base, trip, receipt)
 
-    async def retry_unreadable(self, draft_id: str, presser_id: int) -> Draft:
+    async def retry_unreadable(
+        self, draft_id: str, presser_id: int, read_problem: str | None = None
+    ) -> Draft:
         """`Try again` read failed again: stays in `manual_amount`, still offering
         both buttons.
         """
         draft = await self._get_active(draft_id, presser_id)
         if draft.state != "manual_amount":
             raise DraftError(f"cannot retry_unreadable from state {draft.state}")
-        updated = replace(draft, awaiting_manual_amount=False, reading_receipt=False)
+        updated = replace(
+            draft, awaiting_manual_amount=False, reading_receipt=False, read_problem=read_problem
+        )
         await self._drafts.put(updated)
         return updated
 

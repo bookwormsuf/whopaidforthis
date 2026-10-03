@@ -75,12 +75,43 @@ read any number with any confidence, and a `notes` field explaining what's wrong
 """
 
 
+def _service_problem(error: BaseException) -> str | None:
+    """A plain-English reason when the failure was the API itself (not the photo),
+    else `None`. Never includes a message body, key or image.
+    """
+    if isinstance(error, anthropic.APIConnectionError):
+        return "unreachable"
+    if isinstance(error, anthropic.APIStatusError):
+        status = error.status_code
+        message = str(getattr(error, "message", "")).lower()
+        if status in (401, 403):
+            return "refusing the API key"
+        if "credit" in message or "billing" in message or "spend" in message:
+            return "out of API credit"
+        if status == 429:
+            return "busy"
+        if status >= 500:
+            return "temporarily down"
+        return f"returning an error ({status})"
+    return None
+
+
 class ReceiptUnreadable(Exception):
     """The LLM call failed twice (schema-invalid, no parsed output, or exception), or
     the reading failed validation into the domain `Receipt` (e.g. no candidate
     totals). The caller shows "Couldn't read that receipt" with `Try again` /
     `Enter amount manually`.
     """
+
+
+class ReceiptServiceUnavailable(ReceiptUnreadable):
+    """The receipt reader's API failed (down, busy, out of credit, key refused),
+    not the photo (added 2026-10-03). `reason` finishes "the receipt reader is …".
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 class ReceiptReader(Protocol):
@@ -153,7 +184,14 @@ class AnthropicReceiptReader:
             try:
                 return await asyncio.to_thread(self._call, system, retry_content)
             except Exception as second_error:  # noqa: BLE001
-                logger.warning("receipt read: retry also failed, giving up")
+                problem = _service_problem(second_error)
+                logger.warning(
+                    "receipt read: retry also failed, giving up (%s, status=%s)",
+                    type(second_error).__name__,
+                    getattr(second_error, "status_code", None),
+                )
+                if problem is not None:
+                    raise ReceiptServiceUnavailable(problem) from second_error
                 raise ReceiptUnreadable() from second_error
 
 
