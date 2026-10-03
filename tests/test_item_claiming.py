@@ -404,3 +404,13 @@ async def test_other_amount_matching_the_lines_goes_to_the_card() -> None:
     assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
     await group.press(ADA, card, "Everyone")
     assert "By items" in card.buttons
+
+
+async def test_reader_service_failure_says_it_is_not_the_photo() -> None:
+    from app.services.receipt_parser import ReceiptServiceUnavailable
+
+    group = await FakeGroup.create(ADA, BO)
+    group.reader._error = ReceiptServiceUnavailable("out of API credit")
+    card = await group.send_receipt(ADA, RESTAURANT)
+    assert "the receipt reader is out of API credit, not a problem with your photo" in card.text
+    assert card.buttons == ["Try again", "Enter amount manually"]

@@ -45,6 +45,7 @@ from app.services.ledger_store import (
     TripSheetInaccessible,
 )
 from app.services.receipt_parser import (
+    ReceiptServiceUnavailable,
     ReceiptUnreadable,
     resolve_receipt_currency,
     resolve_transaction_date,
@@ -70,6 +71,9 @@ class ReceiptOutcome:
     receipt: Receipt | None = None
     transaction_date: date | None = None
     date_source: Literal["receipt", "message"] | None = None
+    # Why an `unreadable` outcome happened when it was the reader service, not the
+    # photo ("out of API credit", "temporarily down"); `None` for a bad photo.
+    problem: str | None = None
 
 
 async def read_receipt_photo(
@@ -92,6 +96,8 @@ async def read_receipt_photo(
 
     try:
         extraction = await deps.receipt_reader.read(image, trip=trip)
+    except ReceiptServiceUnavailable as exc:
+        return ReceiptOutcome("unreadable", problem=exc.reason)
     except ReceiptUnreadable:
         return ReceiptOutcome("unreadable")
     except Exception:  # noqa: BLE001 - the reader should only raise ReceiptUnreadable
@@ -191,6 +197,7 @@ async def photo_expense_handler(update: Update, context: ContextTypes.DEFAULT_TY
         if outcome.status == "unreadable":
             draft = await deps.draft_service.start_unreadable(
                 transaction_date=message_time.astimezone(ZoneInfo(trip.timezone)).date(),
+                read_problem=outcome.problem,
                 **common,
             )
         else:

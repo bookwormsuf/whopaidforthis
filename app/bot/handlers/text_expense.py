@@ -232,7 +232,9 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     date_source=outcome.date_source,
                 )
             else:
-                draft = await deps.draft_service.retry_unreadable(draft_id, presser.id)
+                draft = await deps.draft_service.retry_unreadable(
+                    draft_id, presser.id, read_problem=outcome.problem
+                )
         elif action == "manual":
             draft = await deps.draft_service.request_manual_amount(draft_id, presser.id)
         elif action == "everyone":

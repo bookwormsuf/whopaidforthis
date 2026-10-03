@@ -607,3 +607,16 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   every amount is rescaled. Spec §7 amended (one new optional schema field).
 - Checks: `uv run pytest -q` 427 passed; ruff clean.
 
+### 2026-10-03 — Go-live: a clear receipt "couldn't be read"
+
+- Performed by: Sufyan (real group), Claude (fix).
+- Two clear receipts got "Couldn't read that receipt". Every reader failure, including the
+  Anthropic API itself being down, busy, out of credit or refusing the key, showed that same
+  line, and the logs didn't say which. The actual cause is not known.
+- Fix: an API failure now gets its own card line, "the receipt reader is <out of API credit /
+  busy / temporarily down / refusing the API key / unreachable>, not a problem with your photo",
+  and the log records the error type and HTTP status (never bodies or images).
+- Checks: `uv run pytest -q` 429 passed; ruff clean.
+- Next action / owner: check the Anthropic Console for credit balance and errors; resend the
+  receipt after deploying / Sufyan.
+
