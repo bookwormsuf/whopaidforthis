@@ -21,8 +21,15 @@ def _cancel(draft_id: str) -> InlineKeyboardButton:
     return _button(draft_id, "Cancel", "cancel")
 
 
-def detected_keyboard(draft_id: str) -> InlineKeyboardMarkup:
+def short_name(person: Person, people) -> str:
+    """The first name, or the full name when another person shares the first name."""
+    same = [p for p in people if p.first_name.casefold() == person.first_name.casefold()]
+    return person.display_name if len(same) > 1 else person.first_name
+
+
+def detected_keyboard(draft: Draft) -> InlineKeyboardMarkup:
     """`[Just me] [Everyone] [Choose people]`, then `[Cancel]` (sprint 5 pin)."""
+    draft_id = draft.draft_id
     return InlineKeyboardMarkup(
         [
             [
@@ -33,6 +40,21 @@ def detected_keyboard(draft_id: str) -> InlineKeyboardMarkup:
             [_cancel(draft_id)],
         ]
     )
+
+
+def who_paid_keyboard(draft: Draft) -> InlineKeyboardMarkup:
+    """One button per joined person, the sender as "Me", three per row, then
+    `[Cancel]` (decided 2026-10-03).
+    """
+    buttons = []
+    for person in draft.people:
+        label = short_name(person, draft.people)
+        if person.user_id == draft.initiator_id:
+            label = "Me"
+        buttons.append(_button(draft.draft_id, label, "payer", str(person.user_id)))
+    rows = [buttons[i : i + 3] for i in range(0, len(buttons), 3)]
+    rows.append([_cancel(draft.draft_id)])
+    return InlineKeyboardMarkup(rows)
 
 
 def participants_keyboard(draft: Draft) -> InlineKeyboardMarkup:

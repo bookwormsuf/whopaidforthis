@@ -632,3 +632,12 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   tests that pinned the old strictness were replaced by one for the new behaviour.
 - Checks: `uv run pytest -q` 426 passed; ruff clean.
 
+### 2026-10-03 — "Who paid?" step
+
+- Performed by: Claude, at Sufyan's request (he chose option B, a payer row on the first card,
+  then asked for an explicit step instead; option A built, B dropped before merging).
+- When nobody is tagged, there is no `paid by`, and more than one person has joined, the draft
+  asks "Who paid?" first (one button per joined person, the sender as "Me", sender only), then
+  shows the usual card. `Fix items` asks it too before opening the item card. Names sharing a
+  first name show in full here and on the "Tapping for" row. Spec §8 amended; README updated.
+- Checks: `uv run pytest -q` 429 passed; ruff clean.

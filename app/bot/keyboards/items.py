@@ -7,6 +7,7 @@ from __future__ import annotations
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.bot.formatting import fmt_signed_money
+from app.bot.keyboards.split import short_name
 from app.services.drafts import (
     Draft,
     claimable_indices,
@@ -76,7 +77,7 @@ def tapping_for_rows(draft: Draft) -> list[list[InlineKeyboardButton]]:
     current = draft.claiming_for or draft.initiator_id
     buttons = []
     for person in draft.people:
-        label = "Me" if person.user_id == draft.initiator_id else person.first_name
+        label = "Me" if person.user_id == draft.initiator_id else short_name(person, draft.people)
         if person.user_id == current:
             label = f"✓ {label}"
         buttons.append(

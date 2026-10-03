@@ -476,3 +476,33 @@ async def test_custom_amount_in_the_other_currency_is_rejected() -> None:
     await group.send(ADA, "me S$10", reply_to=card)
     card = group.cards[card.message_id]
     assert "Use ¥ amounts for this expense" in card.text
+
+
+async def test_who_paid_step_when_nobody_is_tagged() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    card = await group.send(ADA, "6000 yen dinner", who_paid=False)
+    assert card.text.endswith("Who paid?")
+    assert card.buttons == ["Me", "Bo", "Cancel"]
+    # Only the sender answers it.
+    assert await group.press(BO, card, "Bo") == "Only Ada can edit this"
+    await group.press(ADA, card, "Bo")
+    assert "Paid by Bo" in card.text
+    assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
+    await group.press(ADA, card, "Everyone")
+    await group.press(ADA, card, "Equally")
+    draft_id = card.draft_id
+    await group.press(ADA, card, "Confirm")
+    assert group.ledger.expense_for(draft_id).payer_user_id == BO.id
+
+
+async def test_no_who_paid_step_when_tagged_or_paid_by() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    for text in ("6000 yen dinner @bo", "6000 yen dinner paid by bo"):
+        card = await group.send(ADA, text, who_paid=False)
+        assert "Paid by Bo" in card.text and not card.text.endswith("Who paid?"), text
+
+
+async def test_no_who_paid_step_when_alone() -> None:
+    group = await FakeGroup.create(ADA)
+    card = await group.send(ADA, "6000 yen dinner", who_paid=False)
+    assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
