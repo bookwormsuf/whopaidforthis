@@ -88,10 +88,9 @@ async def test_detected_to_justme_to_preview_to_confirm_exact_card_texts() -> No
     assert draft.state == "detected"
     text, markup = render_draft(draft, trip)
     assert text == (
-        "🧾 <b>Ramen</b>\n"
-        "¥1,200 ≈ S$9.72\n"
-        "Paid by Ada · 20 Sep 2026\n"
-        "Rate 1 JPY = 0.00810 SGD (19 Sep)\n\n"
+        "🧾 <b>Ramen</b> · ¥1,200 (S$9.72)\n"
+        "Ada paid · 20 Sep 2026\n"
+        "<i>Rate 1 JPY = 0.00810 SGD (19 Sep)</i>\n\n"
         "Who should share this?"
     )
     assert [b.text for row in markup.inline_keyboard for b in row] == [
@@ -105,7 +104,10 @@ async def test_detected_to_justme_to_preview_to_confirm_exact_card_texts() -> No
     preview = await service.choose_just_me(draft.draft_id, presser_id=42)
     assert preview.state == "preview"
     preview_text, preview_markup = render_draft(preview, trip)
-    assert preview_text == "<b>Ramen</b> — ¥1,200 (S$9.72)\nPaid by Ada\n\nAda 💳 — ¥1,200 · S$9.72"
+    assert preview_text == (
+        "<b>Check before saving</b>\n🧾 <b>Ramen</b> · ¥1,200 (S$9.72)\nAda paid\n\n"
+        "Each person's share:\n• Ada ¥1,200 (S$9.72)"
+    )
     assert [b.text for row in preview_markup.inline_keyboard for b in row] == [
         "Confirm",
         "Edit",
@@ -115,7 +117,7 @@ async def test_detected_to_justme_to_preview_to_confirm_exact_card_texts() -> No
     committed = await service.confirm(draft.draft_id, presser_id=42)
     assert committed.state == "committed"
     saved_text, saved_markup = render_draft(committed, trip)
-    assert saved_text == "Saved ✅ Ramen ¥1,200 (S$9.72)"
+    assert saved_text == "Saved ✅ Ramen ¥1,200 (S$9.72) · Ada paid · just Ada"
     assert saved_markup is None
     assert dedup.seen(-100, 1) is True
 
@@ -281,16 +283,19 @@ async def test_home_currency_card_texts_show_home_only() -> None:
 
     detected_text, _ = render_draft(draft, trip)
     assert detected_text == (
-        "🧾 <b>Ramen</b>\nS$12.00\nPaid by Ada · 20 Sep 2026\n\nWho should share this?"
+        "🧾 <b>Ramen</b> · S$12.00\nAda paid · 20 Sep 2026\n\nWho should share this?"
     )
 
     preview = await service.choose_just_me(draft.draft_id, presser_id=42)
     preview_text, _ = render_draft(preview, trip)
-    assert preview_text == "<b>Ramen</b> — S$12.00\nPaid by Ada\n\nAda 💳 — S$12.00"
+    assert preview_text == (
+        "<b>Check before saving</b>\n🧾 <b>Ramen</b> · S$12.00\nAda paid\n\n"
+        "Each person's share:\n• Ada S$12.00"
+    )
 
     committed = await service.confirm(draft.draft_id, presser_id=42)
     saved_text, saved_markup = render_draft(committed, trip)
-    assert saved_text == "Saved ✅ Ramen. S$12.00"
+    assert saved_text == "Saved ✅ Ramen S$12.00 · Ada paid · just Ada"
     assert saved_markup is None
 
 
@@ -301,8 +306,11 @@ async def test_trip_currency_card_texts_unchanged_pair_form() -> None:
 
     preview = await service.choose_just_me(draft.draft_id, presser_id=42)
     preview_text, _ = render_draft(preview, trip)
-    assert preview_text == "<b>Ramen</b> — ¥1,200 (S$9.72)\nPaid by Ada\n\nAda 💳 — ¥1,200 · S$9.72"
+    assert preview_text == (
+        "<b>Check before saving</b>\n🧾 <b>Ramen</b> · ¥1,200 (S$9.72)\nAda paid\n\n"
+        "Each person's share:\n• Ada ¥1,200 (S$9.72)"
+    )
 
     committed = await service.confirm(draft.draft_id, presser_id=42)
     saved_text, _ = render_draft(committed, trip)
-    assert saved_text == "Saved ✅ Ramen ¥1,200 (S$9.72)"
+    assert saved_text == "Saved ✅ Ramen ¥1,200 (S$9.72) · Ada paid · just Ada"

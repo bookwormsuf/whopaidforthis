@@ -88,25 +88,27 @@ up exactly to the expense amount in both currencies.
 ### Itemised receipts
 
 On a receipt with 1 to 40 items, the split-method card offers **By items** next to Equally and
-Custom. The item card has one button per item, `3 Gyoza ¥600 · AB`, with the initials of whoever
-claimed it, and shows what is still unclaimed. Tax, service charge and discount lines are listed
-in the text, never as buttons.
+Custom. The item card's buttons come in three kinds, each with its own emoji:
 
-- **Anyone who has joined** taps the items they had; tapping again un-claims. A shared dish is
+- **🍽 items**, one per item, `🍽 3 Gyoza ¥600 · AB`, with the initials of whoever claimed it.
+  Anyone who has joined taps the items they had; tapping again un-claims. A shared dish is
   tapped by each person who shared it and split equally between them. Tapping adds you to the
   expense if you weren't in it.
-- **Rest → everyone** gives every unclaimed item to everyone in the expense. Tap one of those
-  items to make it just yours again.
-- **Done** (only the sender) works once nothing is unclaimed or after Rest → everyone. Until
-  then it reads `Done (unclaimed: ¥x)` and tells you what is left.
-- Reply to the item card with `mine 1,4`, `split 5 everyone` or `unclaim 2` instead of tapping.
-- **The sender can tap for someone else**: pick their name in the "Tapping for" row under the
-  items, and the sender's taps go to them until **Me** is picked again. Or reply `amir 1,3`.
+- **👤 Tapping for: Me ▸** (only the sender) moves on to the next person each time it is
+  pressed, back round to Me. While it shows someone else, the sender's taps go to them. Or
+  reply `amir 1,3`.
+- **↪ Rest → everyone** gives every unclaimed item to everyone in the expense. Tap one of those
+  items to make it just yours again. **✅ Done** (only the sender) saves once nothing is
+  unclaimed; until then it reads `✅ Done (¥x left)`.
+
+The card's text says how much is still to claim. Tax, service charge and discount lines are
+listed in the text, never as buttons. Reply to the item card with `mine 1,4`,
+`split 5 everyone` or `unclaim 2` instead of tapping.
 
 Tax, service charge and discounts are spread in proportion to what each person's items cost
 (largest-remainder method, so the yen add up exactly); someone with no items pays none of them.
-The preview shows `items ¥a + tax ¥b − discount ¥c = ¥d` per person, and **Edit** returns to the
-item card with the claims kept. The `Line Items` tab records who had each item and whether it
+The preview shows each person's total with `items ¥a + tax ¥b − discount ¥c` under it, and
+**Edit** returns to the item card with the claims kept. The `Line Items` tab records who had each item and whether it
 was `claimed`, went to `everyone`, or was spread `proportional`ly.
 
 If the lines don't add up to the receipt total you picked, **Fix items** on that prompt opens the
@@ -320,29 +322,45 @@ In the trip group (names here are examples):
 
 ```
 Ada:     1200 yen ramen
-bot:     🧾 Ramen
-         ¥1,200 ≈ S$9.72
-         Paid by Ada · 2 Oct 2026
+bot:     🧾 Ramen · ¥1,200 (S$9.72)
+         2 Oct 2026
+         Who paid?
+         [Me] [Amir] [Cancel]
+Ada:     (taps Me)
+bot:     🧾 Ramen · ¥1,200 (S$9.72)
+         Ada paid · 2 Oct 2026
          Rate 1 JPY = 0.00810 SGD (1 Oct)
          Who should share this?
          [Just me] [Everyone] [Choose people] [Cancel]
 Ada:     (taps Everyone, then Equally)
-bot:     Ramen — ¥1,200 (S$9.72)
-         Paid by Ada
-         Ada 💳 — ¥600 · S$4.86
-         Amir — ¥600 · S$4.86
+bot:     Check before saving
+         🧾 Ramen · ¥1,200 (S$9.72)
+         Ada paid
+         Each person's share:
+         • Ada ¥600 (S$4.86)
+         • Amir ¥600 (S$4.86)
          [Confirm] [Edit] [Cancel]
 Ada:     (taps Confirm)
-bot:     Saved ✅ Ramen ¥1,200 (S$9.72)
+bot:     Saved ✅ Ramen ¥1,200 (S$9.72) · Ada paid · split 2 ways
 
-Amir:    3000 yen taxi paid by Ada split between me and Ada
 Amir:    /balances
-bot:     Balances (SGD)
-         Ada: paid S$34.02 · share S$17.01 · +S$17.01
-         Amir: paid S$0.00 · share S$17.01 · −S$17.01
-         Settle with /settle
+bot:     Who owes what (SGD)
+         • Ada is owed S$4.86
+            (paid S$9.72, share S$4.86)
+         • Amir owes S$4.86
+            (paid S$0.00, share S$4.86)
+         Settle up with /settle
 Amir:    /settle
-bot:     Amir → Ada S$17.01
+bot:     To settle up:
+         • Amir pays Ada S$4.86
+Amir:    /mine
+bot:     Amir
+         You paid S$0.00 for the group.
+         Your share of everything is S$4.86.
+         ➡️ You owe S$4.86 overall.
+         Recent:
+         • 2 Oct · Ramen ¥1,200 (S$9.72)
+            Ada paid · your share S$4.86
 ```
 
 Screenshots of these steps from a test group (no real names) belong in `docs/images/`.
@@ -354,9 +372,11 @@ day's rate (see `docs/adr/0001`). For each person: **paid** is the total of expe
 **share** the total of their shares, and **net** = paid − share (positive means they're owed).
 Cancelled expenses don't count.
 
-- `/balances` — paid, share and net for everyone with any activity, most owed first.
-- `/mine` — your own three numbers and your last 3 expenses with your share of each.
-- `/settle` — who pays whom, one line per transfer, e.g. `Amir → Ada S$31.20`, or
+- `/balances` — one bullet per person with any activity, most owed first: "Ada is owed
+  S$31.20" / "Amir owes S$31.20" / "Cy is all square", with their paid and share under it.
+- `/mine` — in plain sentences, what you paid for the group, your share of everything, and
+  whether you owe or are owed overall; then your last 3 expenses with your share of each.
+- `/settle` — who pays whom, one bullet per transfer, e.g. `• Amir pays Ada S$31.20`, or
   "All square 🎉".
 
 `/settle` is greedy: it repeatedly has the person who owes most pay the person owed most, as

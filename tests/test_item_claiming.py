@@ -65,7 +65,8 @@ async def _items_card(group: FakeGroup, receipt=RESTAURANT, sender: Member = ADA
 
 
 def _item_buttons(card) -> list[str]:
-    return [b for b in card.buttons if b[:1].isdigit()]
+    """The item buttons, without their 🍽 marker."""
+    return [b.removeprefix("🍽 ") for b in card.buttons if b.startswith("🍽 ")]
 
 
 # -- Checklist step 1: restaurant receipt, own dishes plus a shared one ---------
@@ -74,23 +75,23 @@ def _item_buttons(card) -> list[str]:
 async def test_step1_claim_own_and_shared_dishes() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await _items_card(group)
-    assert "Unclaimed: ¥2,400" in card.text
-    assert "Tax: Tax 10% ¥240 (shared in proportion)" in card.text
+    assert "Still to claim: <b>¥2,400" in card.text
+    assert "Tax ¥240 (Tax 10%) is shared in proportion." in card.text
     assert _item_buttons(card) == ["1 Ramen ¥1,000", "2 Udon ¥800", "3 Gyoza ¥600"]
-    assert card.buttons[-2:] == ["Rest → everyone", "Done (unclaimed: ¥2,400)"]
+    assert card.buttons[-2:] == ["↪ Rest → everyone", "✅ Done (¥2,400 left)"]
 
     await group.press(ADA, card, "1 Ramen ¥1,000")
     await group.press(BO, card, "2 Udon ¥800")
     await group.press(ADA, card, "3 Gyoza ¥600")
     await group.press(BO, card, "3 Gyoza ¥600 · A")
     assert _item_buttons(card) == ["1 Ramen ¥1,000 · A", "2 Udon ¥800 · B", "3 Gyoza ¥600 · AB"]
-    assert "Unclaimed: ¥0" in card.text
-    assert card.buttons[-1] == "Done"
+    assert "Still to claim: <b>¥0" in card.text
+    assert card.buttons[-1] == "✅ Done"
 
     await group.press(ADA, card, "Done")
     # Subtotals 1,300 / 1,100; tax 240 in proportion -> 130 / 110.
-    assert "Ada 💳: items ¥1,300 + tax ¥130 = ¥1,430 · S$11.58" in card.text
-    assert "Bo: items ¥1,100 + tax ¥110 = ¥1,210 · S$9.80" in card.text
+    assert "• Ada ¥1,430 (S$11.58)\n   items ¥1,300 + tax ¥130" in card.text
+    assert "• Bo ¥1,210 (S$9.80)\n   items ¥1,100 + tax ¥110" in card.text
     assert card.buttons == ["Confirm", "Edit", "Cancel"]
 
     draft_id = card.draft_id
@@ -118,7 +119,7 @@ async def test_step2_rest_to_everyone() -> None:
     await group.press(BO, card, "2 Bread ¥300")
     await group.press(ADA, card, "Rest → everyone")
     assert _item_buttons(card)[2] == "3 Eggs ¥250 · all"
-    assert card.buttons[-1] == "Done"
+    assert card.buttons[-1] == "✅ Done"
 
     await group.press(ADA, card, "Done")
     draft_id = card.draft_id
@@ -182,7 +183,7 @@ async def test_step4_done_before_everything_claimed_is_a_toast() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await _items_card(group)
     await group.press(ADA, card, "1 Ramen ¥1,000")
-    toast = await group.press(ADA, card, "Done (unclaimed: ¥1,400)")
+    toast = await group.press(ADA, card, "Done (¥1,400 left)")
     assert toast == "Still unclaimed: ¥1,400 (items 2, 3)"
     draft = await group.deps.draft_service._drafts.get(card.draft_id)
     assert draft.state == "items"
@@ -223,7 +224,7 @@ async def test_step6_fix_items_adds_unlisted_and_reconciles() -> None:
     await group.press(ADA, card, "Fix items")
     await group.press(ADA, card, "Me")
     assert _item_buttons(card)[-1] == "4 Unlisted ¥360"
-    assert "Unclaimed: ¥2,760" in card.text
+    assert "Still to claim: <b>¥2,760" in card.text
 
     await group.press(ADA, card, "1 Ramen ¥1,000")
     await group.press(BO, card, "2 Udon ¥800")
@@ -268,7 +269,7 @@ async def test_step7_balances_reflect_itemised_expense() -> None:
     await group.press(ADA, card, "Confirm")
     # Ada paid ¥2,640 = S$21.38; Bo's share 800 + 300 = 1,100 + tax 110 = ¥1,210 = S$9.80.
     balances = await group.command(BO, balances_command)
-    assert "Bo: paid S$0.00 · share S$9.80 · <b>−S$9.80</b>" in balances
+    assert "• Bo owes <b>S$9.80</b>\n   (paid S$0.00, share S$9.80)" in balances
 
 
 # -- Who may claim --------------------------------------------------------------
@@ -328,7 +329,7 @@ async def test_caption_split_everyone_selects_everyone() -> None:
 async def test_caption_paid_by_sets_the_payer() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await group.send_receipt(ADA, RESTAURANT, caption="paid by Bo")
-    assert "Paid by Bo" in card.text
+    assert "Bo paid" in card.text
     assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
 
 

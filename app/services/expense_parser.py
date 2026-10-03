@@ -86,7 +86,7 @@ _TAG_RE = re.compile(r"(?<!\S)@\w+")
 
 
 def _extract_tag(text: str) -> tuple[str, str | None]:
-    """A tagged person (`@alvin`) paid (decided 2026-10-02). Returns the text with
+    """A tagged person (`@amir`) paid (decided 2026-10-02). Returns the text with
     every tag removed and the first tag, `@` kept, or `None`. The bot's own mention
     is stripped before this.
     """
@@ -99,7 +99,7 @@ def _extract_tag(text: str) -> tuple[str, str | None]:
 def _extract_trailing(text: str) -> tuple[str, str | None, str | None]:
     """Splits off the trailing `paid by <name>` and `split ...` clauses, which may
     come in either order (`... paid by Ada split between me and Ada`). A tag
-    elsewhere in the message (`@alvin`) is the payer when there is no `paid by`, and
+    elsewhere in the message (`@amir`) is the payer when there is no `paid by`, and
     is never part of the description.
     """
     payer_match = _PAID_BY_RE.search(text)
@@ -334,7 +334,7 @@ _ITEM_ASSIGN_RE = re.compile(
 
 
 def parse_item_assignment(line: str) -> tuple[str, list[int]] | None:
-    """`alvin 1,3` on the item card: the sender gives items 1 and 3 to Alvin (added
+    """`amir 1,3` on the item card: the sender gives items 1 and 3 to Amir (added
     2026-10-02). Returns `(name as written, item numbers)`, or `None`. The verbs of
     `parse_item_command` are not names.
     """

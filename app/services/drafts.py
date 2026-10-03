@@ -1018,6 +1018,25 @@ class DraftService:
         await self._drafts.put(updated)
         return updated
 
+    async def cycle_claiming_for(self, draft_id: str, presser_id: int) -> Draft:
+        """The `👤 Tapping for` button (sprint 8, initiator only): the next joined
+        person in card order, wrapping round to the initiator.
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "items":
+            raise DraftError(f"cannot pick who to tap for in state {draft.state}")
+        order = [p.user_id for p in draft.people]
+        current = draft.claiming_for or draft.initiator_id
+        position = order.index(current) if current in order else -1
+        nxt = order[(position + 1) % len(order)] if order else draft.initiator_id
+        updated = replace(
+            draft,
+            claiming_for=None if nxt == draft.initiator_id else nxt,
+            items_error=None,
+        )
+        await self._drafts.put(updated)
+        return updated
+
     async def rest_to_everyone(self, draft_id: str, presser_id: int) -> Draft:
         """`Rest → everyone`: every currently unclaimed item goes to all current
         participants, and anything left unclaimed later goes to everyone at `Done`.
@@ -1036,7 +1055,7 @@ class DraftService:
 
     async def apply_item_command(self, draft_id: str, presser_id: int, text: str) -> Draft:
         """A text shortcut replied to the item card (spec §9): `mine 1,4`,
-        `split 5 everyone`, `unclaim 2`, and, from the initiator, `alvin 1,3` to give
+        `split 5 everyone`, `unclaim 2`, and, from the initiator, `amir 1,3` to give
         items to someone else. Numbers are the item numbers on the card.
         Unknown numbers or an unrecognised line are shown on the card.
         """

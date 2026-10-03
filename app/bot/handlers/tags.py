@@ -1,5 +1,5 @@
 """Tags in an expense message or receipt caption: a tagged person paid (decided
-2026-10-02 at go-live). The parser reads `@alvin` itself; this module turns a tag
+2026-10-02 at go-live). The parser reads `@amir` itself; this module turns a tag
 of someone without a username into a form the parser can read, and joins them.
 """
 
@@ -16,7 +16,7 @@ def tags_as_text(message: Message, caption: bool = False) -> tuple[str, list]:
     """The message text (or caption) with each tag of a user who has no username
     (a "text mention", shown as their name) rewritten as `@id<user ID>`, so the
     parser sees one tag it can resolve (`app.services.names`). Also returns those
-    users, so the caller can join them. A tag with a username (`@alvin`) is left
+    users, so the caller can join them. A tag with a username (`@amir`) is left
     as written.
     """
     text = (message.caption if caption else message.text) or ""
