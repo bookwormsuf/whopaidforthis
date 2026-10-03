@@ -90,6 +90,13 @@ def render_draft(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup | 
     raise ValueError(f"no card for draft state {draft.state}")
 
 
+def _who_paid_hint(draft: Draft) -> str:
+    """Points at the "Paid by" row when there is one."""
+    if len(draft.people) > 1:
+        return "Not who paid? Tap the payer's name below.\n"
+    return ""
+
+
 def _render_detected(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
     assert draft.rate is not None
     if draft.source_type == "receipt":
@@ -104,9 +111,9 @@ def _render_detected(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarku
         amounts_line = fmt_money(draft.home_amount_minor, trip.home_currency)
         text = (
             f"🧾 <b>{desc}</b>\n{amounts_line}\nPaid by {payer} · {date_str}\n\n"
-            "Who should share this?"
+            f"{_who_paid_hint(draft)}Who should share this?"
         )
-        return text, detected_keyboard(draft.draft_id)
+        return text, detected_keyboard(draft)
 
     trip_str = fmt_money(draft.trip_amount_minor, trip.trip_currency)
     home_str = fmt_money(draft.home_amount_minor, trip.home_currency)
@@ -117,9 +124,9 @@ def _render_detected(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarku
     )
     text = (
         f"🧾 <b>{desc}</b>\n{amounts_line}\nPaid by {payer} · {date_str}\n{rate_line}\n\n"
-        "Who should share this?"
+        f"{_who_paid_hint(draft)}Who should share this?"
     )
-    return text, detected_keyboard(draft.draft_id)
+    return text, detected_keyboard(draft)
 
 
 def _render_detected_receipt(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
@@ -136,9 +143,10 @@ def _render_detected_receipt(draft: Draft, trip: Trip) -> tuple[str, InlineKeybo
     amount = fmt_amount_pair(draft.trip_amount_minor, draft.home_amount_minor, trip)
     text = (
         f"🧾 {merchant_line}<b>{desc}</b>\n{amount}\nPaid by {payer} · "
-        f"{date_str} ({date_source_str}){items_line}\n\nWho should share this?"
+        f"{date_str} ({date_source_str}){items_line}\n\n"
+        f"{_who_paid_hint(draft)}Who should share this?"
     )
-    return text, detected_keyboard(draft.draft_id)
+    return text, detected_keyboard(draft)
 
 
 def _render_choose_total(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:

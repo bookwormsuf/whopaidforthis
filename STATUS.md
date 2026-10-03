@@ -632,3 +632,12 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   tests that pinned the old strictness were replaced by one for the new behaviour.
 - Checks: `uv run pytest -q` 426 passed; ruff clean.
 
+### 2026-10-03 — "Paid by" row on the first card
+
+- Performed by: Claude, at Sufyan's request (option B of three).
+- The first card shows a row of names with ✓ on the payer whenever more than one person has
+  joined, with the hint "Not who paid? Tap the payer's name below." The sender taps a name to
+  change the payer. Tags and `paid by` still pre-select it. Names that share a first name show
+  in full here and on the item card's "Tapping for" row. Spec §8 amended; README updated.
+- Checks: `uv run pytest -q` 428 passed; ruff clean.
+

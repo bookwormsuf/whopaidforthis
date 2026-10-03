@@ -55,6 +55,9 @@ Every expense has one **payer** (who handed over the money) and one or more **pa
 - **Everyone** — every trip user who has run `/join`, counted at the moment you tap it.
 - **Choose people** — one toggle per joined user (you start selected), then **Next**.
 
+Below those, a **Paid by** row of names shows who paid (✓), you by default. If someone else
+paid, tap their name.
+
 With more than one participant the card asks how to split:
 
 - **Equally** — everyone gets `total // n`; the leftover minor units (yen, cents) go one each

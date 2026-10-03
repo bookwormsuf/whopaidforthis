@@ -327,7 +327,7 @@ async def test_caption_paid_by_sets_the_payer() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await group.send_receipt(ADA, RESTAURANT, caption="paid by Bo")
     assert "Paid by Bo" in card.text
-    assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
+    assert card.buttons == ["Just me", "Everyone", "Choose people", "Me", "✓ Bo", "Cancel"]
 
 
 async def test_negative_unlisted_from_fix_items_still_splits() -> None:
@@ -401,7 +401,7 @@ async def test_other_amount_matching_the_lines_goes_to_the_card() -> None:
     await group.press(ADA, card, "Other amount")
     await group.send(ADA, "1800", reply_to=card)
     card = group.cards[card.message_id]
-    assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
+    assert card.buttons == ["Just me", "Everyone", "Choose people", "✓ Me", "Bo", "Cancel"]
     await group.press(ADA, card, "Everyone")
     assert "By items" in card.buttons
 

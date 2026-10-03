@@ -643,6 +643,8 @@ class DraftService:
         payer_text = draft.pending_payer_text
         participants_text = draft.pending_participants_text
         if not payer_text and not participants_text:
+            # The first card's "Paid by" row needs everyone joined (added 2026-10-03).
+            draft = replace(draft, people=await self._joined_people(trip, draft))
             await self._drafts.put(draft)
             return draft
 
@@ -737,6 +739,19 @@ class DraftService:
             resolved_participant_ids=(),
             participants_clause=None,
         )
+        await self._drafts.put(updated)
+        return updated
+
+    async def set_payer(self, draft_id: str, presser_id: int, user_id: int) -> Draft:
+        """The "Paid by" row on the first card (added 2026-10-03): the initiator says
+        who paid when it wasn't them, or changes a tagged payer.
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "detected":
+            raise DraftError(f"cannot change the payer in state {draft.state}")
+        if user_id not in {p.user_id for p in draft.people} and user_id != draft.initiator_id:
+            raise DraftError("not one of the people on this card")
+        updated = self._with_payer(draft, user_id)
         await self._drafts.put(updated)
         return updated
 

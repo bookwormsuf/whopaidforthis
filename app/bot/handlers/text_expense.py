@@ -272,6 +272,13 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await answer()
                 return
             draft = await deps.draft_service.toggle_item(draft_id, presser.id, index)
+        elif action == "payer":
+            try:
+                user_id = int(_arg)
+            except ValueError:
+                await answer()
+                return
+            draft = await deps.draft_service.set_payer(draft_id, presser.id, user_id)
         elif action == "for":
             try:
                 user_id = int(_arg)
