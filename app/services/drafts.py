@@ -131,6 +131,7 @@ class DraftToast(DraftError):
 NOBODY_SELECTED_TEXT = "Pick at least one person"
 NOT_JOINED_TEXT = "Send /join first to claim items"
 MAX_CLAIMABLE_ITEMS = 40
+MAX_UNITS_PER_LINE = 10
 UNLISTED_DESCRIPTION = "Unlisted"
 CUSTOM_NOT_BALANCED_TEXT = "The amounts don't add up yet"
 
@@ -265,6 +266,42 @@ def by_items_available(draft: Draft) -> bool:
     after `Use total anyway` (spec §7).
     """
     return draft.items_allowed and 1 <= len(claimable_indices(draft)) <= MAX_CLAIMABLE_ITEMS
+
+
+def _one_button_per_unit(line_items: list[ReceiptLineItem]) -> list[ReceiptLineItem]:
+    """An item line with a quantity of 2 to 10 becomes one claimable item per unit,
+    `"<description> (1/3)"`, so three teas can go 2 and 1 rather than only equally
+    (decided 2026-10-04). The units share the line's amount equally, any remainder
+    going to the first. Left as printed if the units would make more than 40 items,
+    or if the line's amount is its unit price (a misread quantity or amount).
+    Idempotent: units have a quantity of 1, so reopening the item card keeps claims.
+    """
+    result: list[ReceiptLineItem] = []
+    for item in line_items:
+        count = item.quantity
+        one_unit_priced = count > 1 and item.unit_amount_minor == item.amount_minor
+        if (
+            item.kind != "item"
+            or item.amount_minor <= 0
+            or not 2 <= count <= MAX_UNITS_PER_LINE
+            or one_unit_priced  # a misread: the amount is one unit's, not the line's
+        ):
+            result.append(item)
+            continue
+        base, extra = divmod(item.amount_minor, count)
+        result += [
+            ReceiptLineItem(
+                description=f"{item.description} ({n}/{count})",
+                quantity=1,
+                unit_amount_minor=base + (1 if n <= extra else 0),
+                amount_minor=base + (1 if n <= extra else 0),
+                kind="item",
+            )
+            for n in range(1, count + 1)
+        ]
+    if len([i for i in result if i.kind == "item"]) > MAX_CLAIMABLE_ITEMS:
+        return list(line_items)
+    return result
 
 
 def unclaimed_indices(draft: Draft) -> list[int]:
@@ -936,7 +973,7 @@ class DraftService:
             draft,
             state="items",
             split=None,
-            line_items=self._with_unlisted(draft.line_items, total),
+            line_items=_one_button_per_unit(self._with_unlisted(draft.line_items, total)),
             items_error=None,
         )
         await self._drafts.put(updated)

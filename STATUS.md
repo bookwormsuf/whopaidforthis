@@ -712,3 +712,14 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Checks: `uv run pytest -q` 438 passed; ruff clean.
 - Next action / owner: merge and deploy on Sufyan's approval / Sufyan.
 
+### 2026-10-04 — Item card: one button per unit of a line
+
+- Performed by: Claude, from trip feedback relayed by Sufyan: three of one item on one
+  receipt line could only be split equally between whoever tapped it, not 2 and 1.
+- Change: an item line with a quantity of 2 to 10 becomes one button per unit,
+  "Tea (1/3)", the line's amount shared equally between the units (remainder to the first).
+  The line stays whole if that would pass 40 claimable items or its amount equals its unit
+  price. Units have a quantity of 1, so Edit back to the item card keeps claims. The Line
+  Items tab gets one row per unit. Spec §9 amended.
+- Checks: `uv run pytest -q` 446 passed; ruff clean.
+- Next action / owner: merge and deploy on Sufyan's approval / Sufyan.

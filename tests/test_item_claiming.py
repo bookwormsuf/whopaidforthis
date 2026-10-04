@@ -422,3 +422,78 @@ async def test_reader_service_failure_says_it_is_not_the_photo() -> None:
     card = await group.send_receipt(ADA, RESTAURANT)
     assert "the receipt reader is out of API credit, not a problem with your photo" in card.text
     assert card.buttons == ["Try again", "Enter amount manually"]
+
+
+# -- Lines with a quantity: one button per unit (decided 2026-10-04) ----------
+
+
+def _receipt_with_quantities(items: list[tuple[str, int, int]], total: int) -> ReceiptExtraction:
+    """Line items as (description, quantity, amount)."""
+    return ReceiptExtraction(
+        merchant="Moon Coffee",
+        currency="JPY",
+        transaction_datetime=None,
+        line_items=[
+            {"description": d, "quantity": q, "amount_minor": a, "kind": "item"}
+            for d, q, a in items
+        ],
+        candidate_totals=[
+            {"label_as_printed": "合計", "amount_minor": total, "is_grand_total_guess": True}
+        ],
+        description="Tea",
+        category="food",
+        confidence=0.9,
+    )
+
+
+async def test_three_of_one_item_can_be_split_two_and_one() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    receipt = _receipt_with_quantities([("Tea", 3, 2835), ("Cake", 1, 500)], 3335)
+    card = await _items_card(group, receipt)
+    assert _item_buttons(card) == [
+        "1 Tea (1/3) ¥945",
+        "2 Tea (2/3) ¥945",
+        "3 Tea (3/3) ¥945",
+        "4 Cake ¥500",
+    ]
+
+    await group.press(ADA, card, "1 Tea (1/3) ¥945")
+    await group.press(ADA, card, "2 Tea (2/3) ¥945")
+    await group.press(BO, card, "3 Tea (3/3) ¥945")
+    await group.press(BO, card, "4 Cake ¥500")
+    await group.press(ADA, card, "Done")
+    draft_id = card.draft_id
+    await group.press(ADA, card, "Confirm")
+    expense = group.ledger.expense_for(draft_id)
+    assert {s.user_id: s.share_trip_minor for s in expense.splits} == {ADA.id: 1890, BO.id: 1445}
+    assert group.ledger.assignments_for(draft_id)[2] == ([BO.id], "claimed")
+
+
+async def test_units_share_an_uneven_line_amount_and_survive_edit() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    card = await _items_card(group, _receipt_with_quantities([("Tea", 3, 1000)], 1000))
+    assert _item_buttons(card) == [
+        "1 Tea (1/3) ¥334",
+        "2 Tea (2/3) ¥333",
+        "3 Tea (3/3) ¥333",
+    ]
+    await group.press(ADA, card, "1 Tea (1/3) ¥334")
+    await group.press(ADA, card, "Rest → everyone")
+    await group.press(ADA, card, "Done")
+    await group.press(ADA, card, "Edit")
+    # Back on the item card: still three units, claims kept, not split again.
+    assert _item_buttons(card) == [
+        "1 Tea (1/3) ¥334 · A",
+        "2 Tea (2/3) ¥333 · all",
+        "3 Tea (3/3) ¥333 · all",
+    ]
+
+
+async def test_a_long_unit_keeps_its_number_when_shortened() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    receipt = _receipt_with_quantities([("Hojicha roasted green tea leaves", 2, 1890)], 1890)
+    card = await _items_card(group, receipt)
+    assert _item_buttons(card) == [
+        "1 Hojicha roasted g… (1/2) ¥945",
+        "2 Hojicha roasted g… (2/2) ¥945",
+    ]
