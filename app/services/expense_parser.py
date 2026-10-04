@@ -193,6 +193,10 @@ def _locate_amount(
             currency_token = _prefix_currency(prefix, trip_currency, home_currency)
             if currency_token is None and any(c.isalpha() for c in prefix):
                 continue  # `taxi3200`, `part1`: letters that aren't a currency
+            if currency_token == _UNSUPPORTED and prefix.isalpha():
+                continue  # `rm12` (room 12): glued letters only count for this trip
+            # ...while a symbol (`$`, `€5`) or a spaced code (`500 baht`) still says
+            # "I can only record …".
         if currency_token is None and suffix:
             currency_token = _match_currency_token(suffix, trip_currency, home_currency)
         if currency_token is None and index + 1 < len(words):

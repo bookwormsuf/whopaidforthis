@@ -28,12 +28,18 @@ def tags_as_text(message: Message, caption: bool = False) -> tuple[str, list]:
     if not isinstance(entities, dict):
         return text, []
     users = []
-    for entity, shown in entities.items():
+    # Rewrite at each tag's own position (Telegram offsets count UTF-16 units),
+    # last first so earlier offsets stay valid; never at another place the same
+    # name happens to appear ("Al" inside "Salad").
+    encoded = text.encode("utf-16-le")
+    for entity in sorted(entities, key=lambda e: e.offset, reverse=True):
         if entity.user is None:
             continue
-        text = text.replace(shown, f"@id{entity.user.id}", 1)
+        start, end = entity.offset * 2, (entity.offset + entity.length) * 2
+        encoded = encoded[:start] + f"@id{entity.user.id}".encode("utf-16-le") + encoded[end:]
         users.append(entity.user)
-    return text, users
+    users.reverse()
+    return encoded.decode("utf-16-le"), users
 
 
 async def join_tagged(deps, trip, users: list, now: datetime) -> None:

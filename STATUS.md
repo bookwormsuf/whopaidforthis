@@ -691,3 +691,19 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Disposition: Sufyan said "sign off sprint 8". Sprint 8 closed.
 - Next action / owner: after the trip, `/settle`, agree transfers, then `fly scale count 0`
   / Sufyan.
+
+### 2026-10-04 — Review hotfix: go-live fixes
+
+- Performed by: Claude, at Sufyan's request, after a `/code-review` of everything since the
+  Sprint 7 review (the go-live fixes #12–#18 never had one of their own).
+- Fixed, each with a test that fails on the old code:
+  - a correct receipt reading was divided by 100 when one other total was misread;
+  - a tag of someone without a username was rewritten at the first place the name appeared,
+    not at the tag ("Al" inside "Salad");
+  - glued letters naming another currency (`rm12`, room 12) stopped a message saving;
+  - "Who paid?" was skipped when the message or caption had a `split ...` clause (spec §9
+    amended: the clause is applied once the payer is picked);
+  - the reader refusing the image itself (400/413/422) was reported as a service problem.
+- Checks: `uv run pytest -q` 438 passed; ruff clean.
+- Next action / owner: merge and deploy on Sufyan's approval / Sufyan.
+

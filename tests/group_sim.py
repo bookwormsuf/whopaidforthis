@@ -46,10 +46,18 @@ def strip_marker(text: str) -> str:
 
 
 class _Entity:
-    """A text-mention entity: hashable, carrying the tagged user."""
+    """A text-mention entity: hashable, carrying the tagged user and where the tag
+    is in the text (UTF-16 units, as Telegram counts).
+    """
 
-    def __init__(self, user: SimpleNamespace) -> None:
+    def __init__(self, user: SimpleNamespace, offset: int, length: int) -> None:
         self.user = user
+        self.offset = offset
+        self.length = length
+
+
+def _utf16_len(text: str) -> int:
+    return len(text.encode("utf-16-le")) // 2
 
 
 @dataclass(frozen=True)
@@ -191,13 +199,16 @@ class FakeGroup:
 
     # -- what a test does -------------------------------------------------
 
-    def _text_mentions(self, mentions: dict[str, Member] | None):
+    def _text_mentions(self, text: str, mentions: dict[str, Member] | None):
         """A stand-in for `Message.parse_entities`: tags of people with no username,
-        as Telegram shows them (their name), mapped to who they are.
+        as Telegram shows them (their name), mapped to who they are. A tag is the
+        last place its name appears in `text`.
         """
-        entities = {
-            _Entity(self._tg_user(member)): shown for shown, member in (mentions or {}).items()
-        }
+        entities = {}
+        for shown, member in (mentions or {}).items():
+            at = text.rindex(shown)
+            entity = _Entity(self._tg_user(member), _utf16_len(text[:at]), _utf16_len(shown))
+            entities[entity] = shown
         return lambda types=None: entities
 
     async def send(
@@ -213,7 +224,7 @@ class FakeGroup:
         """
         before = set(self.cards)
         update = self._update(member, text, reply_to.message_id if reply_to else None)
-        update.effective_message.parse_entities = self._text_mentions(mentions)
+        update.effective_message.parse_entities = self._text_mentions(text, mentions)
         await text_expense_handler(update, self._context())
         new = [mid for mid in self.cards if mid not in before]
         card = self.cards[new[-1]] if new else None
@@ -233,7 +244,7 @@ class FakeGroup:
         update = self._update(member, "", None)
         update.effective_message.text = None
         update.effective_message.caption = caption
-        update.effective_message.parse_caption_entities = self._text_mentions(None)
+        update.effective_message.parse_caption_entities = self._text_mentions(caption or "", None)
         update.effective_message.photo = [SimpleNamespace(file_id="photo", file_size=1000)]
         await photo_expense_handler(update, self._context())
         new = [mid for mid in self.cards if mid not in before]

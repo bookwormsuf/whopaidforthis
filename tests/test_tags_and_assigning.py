@@ -122,3 +122,16 @@ async def test_tapping_for_names_someone_who_has_left_the_people() -> None:
     (row,) = tapping_for_rows(gone)
     # Not "Me": the sender's taps still go to them, as the card text says.
     assert row[0].text != "👤 Tapping for: Me ▸"
+
+
+async def test_a_tag_is_rewritten_where_it_is_not_where_the_name_first_appears() -> None:
+    al = Member(8, "Al", None)
+    group = await FakeGroup.create(ADA)
+    card = await group.send(ADA, "Salad 1200 Al", mentions={"Al": al})
+    assert "🧾 <b>Salad</b>" in card.text
+    assert "Al paid" in card.text
+
+    amir = Member(7, "Amir", None)
+    card = await group.send(ADA, "Amir birthday 3000 Amir", mentions={"Amir": amir})
+    assert "🧾 <b>Amir Birthday</b>" in card.text
+    assert "Amir paid" in card.text

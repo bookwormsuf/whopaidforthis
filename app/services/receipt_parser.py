@@ -96,8 +96,14 @@ def _service_problem(error: BaseException) -> str | None:
             return "busy"
         if status >= 500:
             return "temporarily down"
-        return f"returning an error ({status})"
+        if status not in _PHOTO_REFUSED:
+            return f"returning an error ({status})"
+    # The request was refused for the image itself (too big, bad format): that is
+    # about the photo, so the usual "Couldn't read that receipt".
     return None
+
+
+_PHOTO_REFUSED = (400, 413, 422)
 
 
 class ReceiptUnreadable(Exception):
@@ -299,18 +305,20 @@ def _fix_unit_scale(extraction: ReceiptExtraction, currency: str) -> ReceiptExtr
     """The reader sometimes gives yen as if they had cents (¥6,850 as 685000), or
     the reverse. When a candidate's printed amount shows its `amount_minor` is off by
     exactly 100 times, every amount on the reading is rescaled (decided 2026-10-02
-    at go-live). Otherwise the reading is unchanged.
+    at go-live). Otherwise, or when any candidate already matches its printed
+    amount (one misread line must not rescale a correct reading), it is unchanged.
     """
     factor = None
     for candidate in extraction.candidate_totals:
         printed = _printed_minor(candidate.amount_as_printed, currency)
-        if not printed or not candidate.amount_minor or printed == candidate.amount_minor:
+        if not printed or not candidate.amount_minor:
             continue
-        if candidate.amount_minor == printed * 100:
+        if printed == candidate.amount_minor:
+            return extraction
+        if factor is None and candidate.amount_minor == printed * 100:
             factor = Fraction(1, 100)
-        elif candidate.amount_minor * 100 == printed:
+        elif factor is None and candidate.amount_minor * 100 == printed:
             factor = Fraction(100)
-        break
     if factor is None:
         return extraction
 
