@@ -529,3 +529,31 @@ async def test_saved_line_with_a_blank_name() -> None:
     await group.press(blank, card, "Just me")
     await group.press(blank, card, "Confirm")
     assert card.text.startswith("Saved ✅ Ramen ¥1,200")
+
+
+async def test_who_paid_is_asked_even_with_a_split_clause() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    card = await group.send(ADA, "3000 yen taxi split everyone", who_paid=False)
+    assert card.text.endswith("Who paid?")
+    await group.press(ADA, card, "Bo")
+    assert "Bo paid" in card.text
+    assert card.buttons == ["Equally", "Custom", "Cancel"]  # the clause chose everyone
+
+    group = await FakeGroup.create(ADA, BO, CY)
+    card = await group.send(ADA, "3000 yen taxi split between me and cy", who_paid=False)
+    assert card.text.endswith("Who paid?")
+    await group.press(ADA, card, "Me")
+    await group.press(ADA, card, "Equally")
+    draft = await group.deps.draft_service._drafts.get(card.draft_id)
+    assert (draft.payer_id, set(draft.participant_ids)) == (ADA.id, {ADA.id, CY.id})
+
+
+async def test_who_paid_is_asked_for_a_receipt_captioned_with_a_split() -> None:
+    from tests.test_item_claiming import RESTAURANT
+
+    group = await FakeGroup.create(ADA, BO)
+    card = await group.send_receipt(ADA, RESTAURANT, caption="split everyone", who_paid=False)
+    assert card.text.endswith("Who paid?")
+    await group.press(ADA, card, "Bo")
+    assert "Bo paid" in card.text
+    assert "Equally" in card.buttons

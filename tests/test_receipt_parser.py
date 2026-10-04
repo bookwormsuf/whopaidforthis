@@ -482,3 +482,50 @@ def test_long_reader_titles_fall_back_to_the_shop_name() -> None:
     assert _short_title("", None) == ""
     shop = "Moon Coffee Roasters Osaka Namba Parks Branch Store"
     assert _short_title(long, shop) == "Moon Coffee Roasters Osaka Namba Parks…"
+
+
+def test_one_misread_total_does_not_rescale_a_correct_reading() -> None:
+    extraction = _scaled_extraction(6850, 6850, "¥6,850")
+    tax = extraction.candidate_totals[0].model_copy(
+        update={
+            "label_as_printed": "内税",
+            "amount_minor": 62000,
+            "amount_as_printed": "¥620",
+            "is_grand_total_guess": False,
+        }
+    )
+    extraction = extraction.model_copy(
+        update={"candidate_totals": [tax, *extraction.candidate_totals]}
+    )
+    receipt = to_receipt(extraction, "JPY")
+    assert 6850 in [c.amount_minor for c in receipt.candidate_totals]
+    assert receipt.line_items[0].amount_minor == 6850
+
+    # The mirror case: the total is 100x off, a tax line is right. Still fixed.
+    extraction = _scaled_extraction(685000, 685000, "¥6,850")
+    tax = tax.model_copy(update={"amount_minor": 620})
+    extraction = extraction.model_copy(
+        update={"candidate_totals": [tax, *extraction.candidate_totals]}
+    )
+    receipt = to_receipt(extraction, "JPY")
+    assert 6850 in [c.amount_minor for c in receipt.candidate_totals]
+    assert receipt.line_items[0].amount_minor == 6850
+
+
+def test_a_refused_image_is_a_photo_problem_not_the_service() -> None:
+    import httpx2
+
+    from app.services.receipt_parser import _service_problem
+
+    request = httpx2.Request("POST", "https://api.anthropic.com/v1/messages")
+
+    def status_error(status: int, message: str) -> anthropic.APIStatusError:
+        response = httpx2.Response(status, request=request)
+        return anthropic.APIStatusError(message, response=response, body=None)
+
+    assert _service_problem(status_error(400, "image could not be processed")) is None
+    assert _service_problem(status_error(413, "request too large")) is None
+    assert _service_problem(status_error(400, "max_tokens too large")) == (
+        "returning an error (400)"
+    )
+    assert _service_problem(status_error(404, "model not found")) == "returning an error (404)"

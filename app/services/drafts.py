@@ -636,25 +636,29 @@ class DraftService:
             people.setdefault(pid, person_for(draft, pid))
         return tuple(sorted(people.values(), key=lambda p: (p.display_name.casefold(), p.user_id)))
 
-    async def _apply_clauses(self, draft: Draft, trip: Trip) -> Draft:
+    async def _apply_clauses(self, draft: Draft, trip: Trip, payer_known: bool = False) -> Draft:
         """Resolves the message's "paid by" and "split ..." clauses (spec §3, §6).
         An exact payer replaces the sender; "split everyone"/"split all" selects
         Everyone; named participants are pre-selected and the participants card is
         skipped. Any name that is not one exact match is queued for the "Who did you
         mean" card. A draft with neither clause stays `detected`.
+
+        Nobody tagged and no "paid by": ask who paid first, when there is anyone else
+        it could be (decided 2026-10-03), even with a "split ..." clause, which is
+        kept and applied once the payer is picked (`payer_known`).
         """
         payer_text = draft.pending_payer_text
         participants_text = draft.pending_participants_text
+        people = await self._joined_people(trip, draft)
+        if not payer_text and not payer_known and len(people) > 1:
+            draft = replace(draft, people=people, state="who_paid")
+            await self._drafts.put(draft)
+            return draft
         if not payer_text and not participants_text:
-            # Nobody tagged and no "paid by": ask who paid first, when there is anyone
-            # else it could be (decided 2026-10-03).
-            people = await self._joined_people(trip, draft)
-            state = "who_paid" if len(people) > 1 else draft.state
-            draft = replace(draft, people=people, state=state)
+            draft = replace(draft, people=people)
             await self._drafts.put(draft)
             return draft
 
-        people = await self._joined_people(trip, draft)
         everyone_ids = tuple(p.user_id for p in people)
         draft = replace(
             draft, people=people, pending_payer_text=None, pending_participants_text=None
@@ -759,14 +763,18 @@ class DraftService:
         if user_id not in {p.user_id for p in draft.people} and user_id != draft.initiator_id:
             raise DraftError("not one of the people on this card")
         updated = replace(self._with_payer(draft, user_id), state="detected")
-        if draft.items_after_payer:
-            return await self._to_items(
-                replace(
-                    updated,
-                    items_after_payer=False,
-                    participant_ids=[p.user_id for p in updated.people],
-                )
+        if updated.pending_participants_text:
+            # A "split ..." clause waited for the payer; apply it now.
+            trip = await self._trip_for(updated)
+            updated = await self._apply_clauses(
+                replace(updated, items_after_payer=False), trip, payer_known=True
             )
+            if not draft.items_after_payer or updated.state == "resolve_name":
+                return updated  # as in `fix_items`: the name question first
+        if draft.items_after_payer:
+            if updated.state == "detected":
+                updated = replace(updated, participant_ids=[p.user_id for p in updated.people])
+            return await self._to_items(replace(updated, items_after_payer=False))
         await self._drafts.put(updated)
         return updated
 
