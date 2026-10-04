@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import re
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.bot.formatting import fmt_signed_money
@@ -19,6 +21,7 @@ from app.services.names import Person
 
 _MAX_DESCRIPTION_CHARS = 24
 EVERYONE_MARK = "all"
+_UNIT_SUFFIX = re.compile(r" \(\d+/\d+\)$")
 
 
 def initials_for(people: list[Person]) -> dict[int, str]:
@@ -57,7 +60,11 @@ def item_button_text(draft: Draft, number: int, index: int, initials: dict[int, 
     item = draft.line_items[index]
     description = item.description
     if len(description) > _MAX_DESCRIPTION_CHARS:
-        description = description[: _MAX_DESCRIPTION_CHARS - 1] + "…"
+        # Keep a unit's "(1/3)": it is what tells the units of a line apart.
+        match = _UNIT_SUFFIX.search(description)
+        suffix = match.group(0) if match else ""
+        keep = max(_MAX_DESCRIPTION_CHARS - len(suffix) - 1, 1)
+        description = description[: len(description) - len(suffix)][:keep] + "…" + suffix
     text = f"🍽 {number} {description} {fmt_signed_money(item.amount_minor, draft.currency)}"
     if index in draft.everyone_items:
         return f"{text} · {EVERYONE_MARK}"
