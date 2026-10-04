@@ -700,10 +700,15 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   - a correct receipt reading was divided by 100 when one other total was misread;
   - a tag of someone without a username was rewritten at the first place the name appeared,
     not at the tag ("Al" inside "Salad");
-  - glued letters naming another currency (`rm12`, room 12) stopped a message saving;
+  - glued letters naming another currency (`rm12`, room 12) stopped a message saving; now
+    skipped only when another clear amount follows (a currency or 3+ digits), so
+    `Dinner RM120 for 3` is still refused rather than read as ¥3;
   - "Who paid?" was skipped when the message or caption had a `split ...` clause (spec §9
     amended: the clause is applied once the payer is picked);
   - the reader refusing the image itself (400/413/422) was reported as a service problem.
+- Review of the fix: two regressions caught and fixed (the `rm` rule reading ringgit as a
+  small yen amount; the 100x rule leaving a wrong total when a tax line was right; the grand
+  total guess now decides). A 400 counts as the photo only when it mentions the image.
 - Checks: `uv run pytest -q` 438 passed; ruff clean.
 - Next action / owner: merge and deploy on Sufyan's approval / Sufyan.
 

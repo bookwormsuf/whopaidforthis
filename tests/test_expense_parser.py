@@ -260,6 +260,11 @@ def test_glued_letters_naming_another_currency_are_not_an_amount() -> None:
     assert result is not None
     assert result.error is None
     assert (result.amount_minor, result.currency) == (6000, "JPY")
+    # Without a clear amount elsewhere, a glued code is still another currency:
+    # never a wrong small yen amount.
+    for text in ("Dinner RM120 for 3 people", "Grab RM15 2 pax", "RM45 nasi lemak"):
+        assert parse_expense(text, "JPY", "SGD", BOT).error == "unsupported_currency", text
+    assert parse_expense("Hotel rm12 ¥60", "JPY", "SGD", BOT).amount_minor == 60
     # A symbol or a spaced code still says it isn't this trip's currency.
     assert parse_expense("€12 lunch", "JPY", "SGD", BOT).error == "unsupported_currency"
     assert parse_expense("500 baht massage", "JPY", "SGD", BOT).error == "unsupported_currency"

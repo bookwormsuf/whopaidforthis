@@ -179,6 +179,11 @@ def _locate_amount(
     `parse_amount_only`, `parse_caption_description` and `parse_custom_line`. A bare
     number is in `bare_currency`, which defaults to the trip currency.
     """
+    # A glued code for another currency (`rm12`) might be a room number: skip it,
+    # but only trust a later amount that is clearly one (a currency, or 3+ digits:
+    # `Hotel rm12 6000`); otherwise it's still "I can only record …" (`Dinner RM120
+    # for 3`), never a wrong small amount.
+    skipped: set[int] | None = None
     for index, word in enumerate(words):
         match = _WORD_AMOUNT_RE.match(word)
         if not match:
@@ -193,10 +198,9 @@ def _locate_amount(
             currency_token = _prefix_currency(prefix, trip_currency, home_currency)
             if currency_token is None and any(c.isalpha() for c in prefix):
                 continue  # `taxi3200`, `part1`: letters that aren't a currency
-            if currency_token == _UNSUPPORTED and prefix.isalpha():
-                continue  # `rm12` (room 12): glued letters only count for this trip
-            # ...while a symbol (`$`, `€5`) or a spaced code (`500 baht`) still says
-            # "I can only record …".
+            if currency_token == _UNSUPPORTED and prefix.isalpha() and skipped is None:
+                skipped = {index}
+                continue
         if currency_token is None and suffix:
             currency_token = _match_currency_token(suffix, trip_currency, home_currency)
         if currency_token is None and index + 1 < len(words):
@@ -212,11 +216,16 @@ def _locate_amount(
 
         if currency_token == _UNSUPPORTED:
             return _LocatedAmount(0, _UNSUPPORTED, frozenset(consumed))
+        digits = sum(c.isdigit() for c in number_str.split(".")[0])
+        if skipped is not None and currency_token is None and digits < 3:
+            return _LocatedAmount(0, _UNSUPPORTED, frozenset(skipped))
         currency = currency_token if currency_token is not None else bare_currency or trip_currency
         decimals = decimals_for(currency)
         value = Decimal(number_str.replace(",", ""))
         amount_minor = int((value * (Decimal(10) ** decimals)).to_integral_value(ROUND_HALF_EVEN))
         return _LocatedAmount(amount_minor, currency, frozenset(consumed))
+    if skipped is not None:
+        return _LocatedAmount(0, _UNSUPPORTED, frozenset(skipped))
     return None
 
 

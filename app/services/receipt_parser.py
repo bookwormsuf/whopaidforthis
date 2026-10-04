@@ -96,14 +96,12 @@ def _service_problem(error: BaseException) -> str | None:
             return "busy"
         if status >= 500:
             return "temporarily down"
-        if status not in _PHOTO_REFUSED:
-            return f"returning an error ({status})"
-    # The request was refused for the image itself (too big, bad format): that is
-    # about the photo, so the usual "Couldn't read that receipt".
+        # Refused for the image itself (too big, bad format): that is about the
+        # photo, so the usual "Couldn't read that receipt".
+        if status == 413 or (status in (400, 422) and "image" in message):
+            return None
+        return f"returning an error ({status})"
     return None
-
-
-_PHOTO_REFUSED = (400, 413, 422)
 
 
 class ReceiptUnreadable(Exception):
@@ -305,20 +303,21 @@ def _fix_unit_scale(extraction: ReceiptExtraction, currency: str) -> ReceiptExtr
     """The reader sometimes gives yen as if they had cents (¥6,850 as 685000), or
     the reverse. When a candidate's printed amount shows its `amount_minor` is off by
     exactly 100 times, every amount on the reading is rescaled (decided 2026-10-02
-    at go-live). Otherwise, or when any candidate already matches its printed
-    amount (one misread line must not rescale a correct reading), it is unchanged.
+    at go-live). The grand-total guess decides (else the first candidate with a
+    printed amount), so one misread tax line neither rescales a correct reading nor
+    stops a wrong one being fixed. Otherwise the reading is unchanged.
     """
+    ordered = sorted(extraction.candidate_totals, key=lambda c: not c.is_grand_total_guess)
     factor = None
-    for candidate in extraction.candidate_totals:
+    for candidate in ordered:
         printed = _printed_minor(candidate.amount_as_printed, currency)
         if not printed or not candidate.amount_minor:
             continue
-        if printed == candidate.amount_minor:
-            return extraction
-        if factor is None and candidate.amount_minor == printed * 100:
+        if candidate.amount_minor == printed * 100:
             factor = Fraction(1, 100)
-        elif factor is None and candidate.amount_minor * 100 == printed:
+        elif candidate.amount_minor * 100 == printed:
             factor = Fraction(100)
+        break
     if factor is None:
         return extraction
 

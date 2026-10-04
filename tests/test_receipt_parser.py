@@ -501,6 +501,16 @@ def test_one_misread_total_does_not_rescale_a_correct_reading() -> None:
     assert 6850 in [c.amount_minor for c in receipt.candidate_totals]
     assert receipt.line_items[0].amount_minor == 6850
 
+    # The mirror case: the total is 100x off, a tax line is right. Still fixed.
+    extraction = _scaled_extraction(685000, 685000, "¥6,850")
+    tax = tax.model_copy(update={"amount_minor": 620})
+    extraction = extraction.model_copy(
+        update={"candidate_totals": [tax, *extraction.candidate_totals]}
+    )
+    receipt = to_receipt(extraction, "JPY")
+    assert 6850 in [c.amount_minor for c in receipt.candidate_totals]
+    assert receipt.line_items[0].amount_minor == 6850
+
 
 def test_a_refused_image_is_a_photo_problem_not_the_service() -> None:
     import httpx2
@@ -515,4 +525,7 @@ def test_a_refused_image_is_a_photo_problem_not_the_service() -> None:
 
     assert _service_problem(status_error(400, "image could not be processed")) is None
     assert _service_problem(status_error(413, "request too large")) is None
+    assert _service_problem(status_error(400, "max_tokens too large")) == (
+        "returning an error (400)"
+    )
     assert _service_problem(status_error(404, "model not found")) == "returning an error (404)"
