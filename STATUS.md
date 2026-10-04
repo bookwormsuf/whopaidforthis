@@ -18,7 +18,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 5 Splitting and balances | written (+ §6 amendment) | done | green (363) | 2026-10-01, findings fixed | 2026-10-02, all six single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 5 closed. Next: merge Sprint 6 / Sufyan approves |
 | 6 Item claiming | written (+ §7 amendment) | done | green (404) | 2026-10-01, findings fixed | 2026-10-02, single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 6 closed. Next: run sprint 7 / agent |
 | 7 Hardening and go-live | written | done | green (429) | 2026-10-02, findings fixed (screenshots after the trip) | 2026-10-03, live in the real trip group | 2026-10-03 | Live. After the trip: `/settle`, then `fly scale count 0` / Sufyan |
-| 8 Clearer messages | written | done | green (430) | pending | pending | — | Review, then merge / Sufyan approves |
+| 8 Clearer messages | written (+ §9 amendment) | done | green (432) | 2026-10-03, findings fixed | 2026-10-04, in the real trip group | 2026-10-04 | Sprint 8 closed. After the trip: `/settle`, then `fly scale count 0` / Sufyan |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -678,5 +678,16 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   fall back to the shop name. No change to amounts, splitting or what is stored.
 - Spec §9 item-card wording amended; README, manual checklist and sprint index updated.
 - Checks: `uv run pytest -q` 430 passed; ruff clean.
-- Next action / owner: `/review`, then merge and deploy on Sufyan's approval, then the sprint 8
-  checklist / Sufyan.
+- Review: one pass; fixed the item card saying Done "saves" (it shows the split to check), a
+  blank name crashing the Saved line, the Tapping-for label disagreeing with the card text, and
+  receipt-title edge cases. `uv run pytest -q` 432 passed.
+- Merged and deployed (#19).
+
+### 2026-10-04 — Sprint 8 sign-off: clearer messages
+
+- Performed by: Sufyan (real trip group), recorded by Claude.
+- Checklist: the read commands, a text expense's cards and Saved line, and a receipt's short
+  title and item card were checked in the real group.
+- Disposition: Sufyan said "sign off sprint 8". Sprint 8 closed.
+- Next action / owner: after the trip, `/settle`, agree transfers, then `fly scale count 0`
+  / Sufyan.
