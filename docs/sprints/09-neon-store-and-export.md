@@ -144,8 +144,10 @@ invariants from §17 still pass.
    asked for.
 2. A text expense and a receipt save; rows visible in the Neon table browser.
 3. `/balances`, `/settle`, `Close this trip`; an expense after closing gets the one-line reply.
-4. `/settrip` again starts a new trip; `/export` of the closed trip opens on your phone with five
-   sheets and balances matching what `/balances` showed.
+4. With no trip open, `/export` falls back to the trip just closed: the file opens on your phone
+   with five sheets and balances matching what `/balances` showed. Then `/settrip` again starts a
+   new trip (corrected 2026-10-15: `/export` always prefers the open trip, so export before
+   starting the next one).
 5. `/deletetrip` from a second account is refused; from yours deletes everything.
 6. Stop the bot for 20 minutes, send an expense: it saves (Neon woke up).
 7. After deploy, `fly secrets unset GOOGLE_SERVICE_ACCOUNT_JSON WHOPAID_CONTROL_SHEET_ID`.
