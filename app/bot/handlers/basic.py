@@ -1,10 +1,10 @@
 """Handlers for /start and /help.
 
-Sprint 10 (docs/sprints/10-start-menu.md, pinned-decisions §19): in a group,
-both commands now post the welcome menu instead of /help's old text or (for
-/start) joining the sender; /start in a group no longer behaves as /join. In
-private chat they still show the help text, now with an `Add me to a group`
-URL button.
+Sprint 10 (docs/sprints/10-start-menu.md, pinned-decisions §19, amended
+2026-10-15 after review): in a group, `/start` posts the welcome menu (both
+on being added and when typed); `/help` in a group posts the help text with
+the menu underneath it, not pinned. In private chat both still show the help
+text, now with an `Add me to a group` URL button.
 """
 
 from __future__ import annotations
@@ -15,7 +15,9 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from app.bot.deps import get_deps
-from app.bot.handlers.menu import post_welcome, private_start_keyboard
+from app.bot.handlers.join import resolve_trip_status
+from app.bot.handlers.menu import _state_for, menu_keyboard, post_welcome, private_start_keyboard
+from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -50,19 +52,8 @@ def _help_text(context: ContextTypes.DEFAULT_TYPE) -> str:
     return f"{HELP_TEXT}\n\nwhopaid {version}"
 
 
-async def _group_welcome_or_private_help(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> None:
-    """In a group, posts the welcome menu. In private, shows the help text with
-    the `Add me to a group` button (sprint 10 pin).
-    """
-    chat = update.effective_chat
-    if chat is not None and chat.type in ("group", "supergroup"):
-        try:
-            await post_welcome(get_deps(context), context.bot, chat)
-        except Exception:  # noqa: BLE001 - a failed welcome must not crash the handler
-            logger.exception("could not post the welcome message")
-        return
+async def _private_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Shows the help text with the `Add me to a group` button (sprint 10 pin)."""
     await update.message.reply_text(
         _help_text(context),
         parse_mode="HTML",
@@ -71,14 +62,39 @@ async def _group_welcome_or_private_help(
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """In a group, posts the welcome menu (sprint 10 pin). In private, replies
+    """In a group, posts the help text with the menu underneath it, not pinned
+    (pinned-decisions §19, amended 2026-10-15 after review). In private, replies
     with the one-screen summary of what the bot does.
     """
-    await _group_welcome_or_private_help(update, context)
+    chat = update.effective_chat
+    if chat is not None and chat.type in ("group", "supergroup"):
+        deps = get_deps(context)
+        try:
+            trip, latest_is_closed = await resolve_trip_status(deps, chat.id)
+        except LedgerUnavailable:
+            logger.exception("help_command: could not read the current binding")
+            await context.bot.send_message(chat.id, LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
+            return
+        state = _state_for(trip, latest_is_closed)
+        await context.bot.send_message(
+            chat.id,
+            _help_text(context),
+            parse_mode="HTML",
+            reply_markup=menu_keyboard(state, 1),
+        )
+        return
+    await _private_help(update, context)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """In a group, posts the welcome menu; /start no longer behaves as /join
     (sprint 10 pin, superseding spec §12). In private, it shows help.
     """
-    await _group_welcome_or_private_help(update, context)
+    chat = update.effective_chat
+    if chat is not None and chat.type in ("group", "supergroup"):
+        try:
+            await post_welcome(get_deps(context), context.bot, chat)
+        except Exception:  # noqa: BLE001 - a failed welcome must not crash the handler
+            logger.exception("could not post the welcome message")
+        return
+    await _private_help(update, context)
