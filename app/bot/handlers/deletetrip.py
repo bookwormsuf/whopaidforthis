@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Chat, InlineKeyboardButton, InlineKeyboardMarkup, Update, User
 from telegram.ext import ContextTypes
 
-from app.bot.deps import get_deps
+from app.bot.deps import Deps, get_deps
 from app.bot.handlers.join import UNBOUND_TEXT
+from app.bot.send import SendFn, build_send
 from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
 
 logger = logging.getLogger(__name__)
@@ -47,30 +48,30 @@ async def _target_trip(deps, chat_id: int):
     return await deps.ledger.latest_trip(chat_id)
 
 
+async def run_deletetrip(deps: Deps, chat: Chat, user: User, send: SendFn) -> None:
+    try:
+        trip = await _target_trip(deps, chat.id)
+    except LedgerUnavailable:
+        logger.exception("deletetrip: could not read trips")
+        await send(LEDGER_UNAVAILABLE_TEXT)
+        return
+    if trip is None:
+        await send(UNBOUND_TEXT)
+        return
+    if user.id != trip.created_by:
+        await send(NOT_ALLOWED_TEXT)
+        return
+
+    assert trip.id is not None
+    await send(CONFIRM_TEXT, reply_markup=_confirm_keyboard(trip.id))
+
+
 async def deletetrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     chat = update.effective_chat
     user = update.effective_user
     assert message is not None and chat is not None and user is not None
-
-    deps = get_deps(context)
-    try:
-        trip = await _target_trip(deps, chat.id)
-    except LedgerUnavailable:
-        logger.exception("deletetrip: could not read trips")
-        await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
-        return
-    if trip is None:
-        await message.reply_text(UNBOUND_TEXT, parse_mode="HTML")
-        return
-    if user.id != trip.created_by:
-        await message.reply_text(NOT_ALLOWED_TEXT, parse_mode="HTML")
-        return
-
-    assert trip.id is not None
-    await message.reply_text(
-        CONFIRM_TEXT, parse_mode="HTML", reply_markup=_confirm_keyboard(trip.id)
-    )
+    await run_deletetrip(get_deps(context), chat, user, build_send(message))
 
 
 async def deletetrip_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
