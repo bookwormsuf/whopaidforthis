@@ -19,11 +19,11 @@ from datetime import UTC, datetime
 from html import escape
 from zoneinfo import available_timezones
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram import Chat, InlineKeyboardButton, InlineKeyboardMarkup, Message, Update, User
 from telegram.ext import ContextTypes
 from telegram.ext.filters import MessageFilter
 
-from app.bot.deps import get_deps
+from app.bot.deps import Deps, get_deps
 from app.bot.keyboards.settrip import (
     confirm_keyboard,
     home_currency_keyboard,
@@ -32,6 +32,7 @@ from app.bot.keyboards.settrip import (
     timezone_keyboard,
     trip_currency_keyboard,
 )
+from app.bot.send import SendFn, build_send
 from app.bot.session_state import SettripSession, SettripSessionStore
 from app.models.trip import Trip
 from app.models.user import display_name_for
@@ -52,20 +53,19 @@ async def settrip_private_command(update: Update, context: ContextTypes.DEFAULT_
         await message.reply_text(PRIVATE_TEXT, parse_mode="HTML")
 
 
-async def settrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message = update.effective_message
-    chat = update.effective_chat
-    user = update.effective_user
-    assert message is not None and chat is not None and user is not None
-
-    deps = get_deps(context)
+async def run_settrip(deps: Deps, chat: Chat, user: User, send: SendFn) -> None:
+    """Starts (or restarts) the group `/settrip` flow: the currency/timezone
+    buttons that follow are driven by `settrip_callback` (`st:`), not by this
+    coroutine again, so this only covers the first message -- same as the
+    typed command today.
+    """
     trip_name = chat.title or "Trip"
 
     try:
         existing = await deps.ledger.get_binding(chat.id)
     except LedgerUnavailable:
         logger.exception("settrip: could not check for an existing open trip")
-        await message.reply_text(UNAVAILABLE_TEXT, parse_mode="HTML")
+        await send(UNAVAILABLE_TEXT)
         return
 
     first_step = "rebind" if existing is not None else "trip_ccy"
@@ -77,16 +77,18 @@ async def settrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         step=first_step,
     )
     if existing is not None:
-        sent = await message.reply_text(
-            REBIND_PROMPT, reply_markup=rebind_keyboard(session.session_id), parse_mode="HTML"
-        )
+        sent = await send(REBIND_PROMPT, reply_markup=rebind_keyboard(session.session_id))
     else:
-        sent = await message.reply_text(
-            "Trip currency?",
-            reply_markup=trip_currency_keyboard(session.session_id),
-            parse_mode="HTML",
-        )
+        sent = await send("Trip currency?", reply_markup=trip_currency_keyboard(session.session_id))
     deps.settrip_sessions.update(session.session_id, message_id=sent.message_id)
+
+
+async def settrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+    chat = update.effective_chat
+    user = update.effective_user
+    assert message is not None and chat is not None and user is not None
+    await run_settrip(get_deps(context), chat, user, build_send(message))
 
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
