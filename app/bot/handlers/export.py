@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
 from telegram import InputFile, Update
+from telegram.error import TimedOut
 from telegram.ext import ContextTypes
 
 from app.bot.deps import get_deps
@@ -21,6 +22,9 @@ from app.bot.handlers.join import UNBOUND_TEXT
 from app.models.trip import Trip
 from app.services.export import build_workbook, slugify
 from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
+
+UPLOAD_TIMEOUT_S = 60
+UPLOAD_FAILED_TEXT = "Couldn't send the file, please try /export again."
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +71,20 @@ async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     count = len(expenses)
     caption = f"{trip.name} · {count} expense{'s' if count != 1 else ''}"
 
-    await message.reply_document(
-        document=InputFile(workbook, filename=filename),
-        caption=caption,
-    )
+    # Uploading a file takes longer than a text reply; PTB's default write timeout is
+    # tight enough that a slow link times out on the first try. Allow more, then retry once.
+    for attempt in (1, 2):
+        try:
+            await message.reply_document(
+                document=InputFile(workbook, filename=filename),
+                caption=caption,
+                read_timeout=UPLOAD_TIMEOUT_S,
+                write_timeout=UPLOAD_TIMEOUT_S,
+            )
+            return
+        except TimedOut:
+            if attempt == 2:
+                logger.warning("export: upload timed out twice")
+                await message.reply_text(UPLOAD_FAILED_TEXT, parse_mode="HTML")
+                return
+            logger.info("export: upload timed out, retrying once")
