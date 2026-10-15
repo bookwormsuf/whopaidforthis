@@ -35,6 +35,12 @@ logger = logging.getLogger(__name__)
 
 _RETRY_DELAYS = (1.0, 2.0, 4.0)
 _CONNECTION_ERRORS = (asyncpg.PostgresConnectionError, OSError, asyncio.TimeoutError)
+# Every asyncpg error that can come out of a call, not just the SQL-level
+# PostgresError hierarchy: InterfaceError (misuse of the driver, e.g. after the
+# pool is closed) and InternalClientError (asyncpg-internal failures) must map to
+# LedgerUnavailable too (sprint 9 review item 4). Never retried -- only
+# _CONNECTION_ERRORS are.
+_ASYNCPG_ERRORS = (asyncpg.PostgresError, asyncpg.InterfaceError, asyncpg.InternalClientError)
 
 T = TypeVar("T")
 
@@ -95,7 +101,7 @@ class PostgresLedgerStore:
             return await self._call(func)
         except LedgerUnavailable:
             raise
-        except asyncpg.PostgresError as exc:
+        except _ASYNCPG_ERRORS as exc:
             raise LedgerUnavailable("Could not reach the database") from exc
 
     # -- Trips --------------------------------------------------------------
@@ -319,7 +325,7 @@ class PostgresLedgerStore:
                 logger.info("expense %s: already saved", expense.expense_id)
                 return
             raise LedgerUnavailable("Could not reach the database") from exc
-        except asyncpg.PostgresError as exc:
+        except _ASYNCPG_ERRORS as exc:
             raise LedgerUnavailable("Could not reach the database") from exc
 
     async def list_expenses(self, trip: Trip) -> list[ExpenseRecord]:
