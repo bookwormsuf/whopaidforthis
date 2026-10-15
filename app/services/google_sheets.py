@@ -16,7 +16,7 @@ from decimal import Decimal
 from typing import Any
 
 import gspread
-import requests
+import requests as requests_lib
 from gspread.exceptions import APIError, SpreadsheetNotFound
 from gspread.utils import ValueInputOption, ValueRenderOption, rowcol_to_a1
 from gspread.worksheet import Worksheet
@@ -82,7 +82,7 @@ async def _with_retries(func: Any, *args: Any, **kwargs: Any) -> Any:
                 await asyncio.sleep(_RETRY_DELAYS[attempt])
                 continue
             raise LedgerUnavailable("Could not reach Google Sheets", status=status) from exc
-        except requests.exceptions.RequestException as exc:
+        except requests_lib.exceptions.RequestException as exc:
             if attempt < len(_RETRY_DELAYS):
                 await asyncio.sleep(_RETRY_DELAYS[attempt])
                 continue
@@ -576,7 +576,47 @@ class SheetsLedgerStore:
                 }
             }
         )
-        await _with_retries(spreadsheet.batch_update, {"requests": requests})
+        await self._batch_update_append(spreadsheet, trip, expense.expense_id, requests)
+
+    async def _batch_update_append(
+        self,
+        spreadsheet: Any,
+        trip: Trip,
+        expense_id: str,
+        requests: list[dict[str, Any]],
+    ) -> None:
+        """Retries its own `batch_update` (not via `_with_retries`) because
+        `appendCells` is not idempotent: if Google applied attempt 1 server-side
+        but the response came back as a retryable 429/5xx (or the ack was lost to
+        a transport failure), blindly retrying would append the same expense
+        twice. Before each retry, check `expense_exists` for this expense's ULID;
+        if the row is already there, the write already succeeded and we return
+        without appending again.
+        """
+        last_status: int | None = None
+        for attempt in range(len(_RETRY_DELAYS) + 1):
+            try:
+                await asyncio.to_thread(spreadsheet.batch_update, {"requests": requests})
+                return
+            except _NOT_OPENABLE_EXC as exc:
+                raise LedgerUnavailable("Could not reach Google Sheets") from exc
+            except (APIError, requests_lib.exceptions.RequestException) as exc:
+                if isinstance(exc, APIError):
+                    status = exc.response.status_code
+                    last_status = status
+                    retryable = _is_retryable_status(status)
+                else:
+                    status = None
+                    retryable = True
+
+                if await self.expense_exists(trip, expense_id):
+                    return
+
+                if retryable and attempt < len(_RETRY_DELAYS):
+                    await asyncio.sleep(_RETRY_DELAYS[attempt])
+                    continue
+                raise LedgerUnavailable("Could not reach Google Sheets", status=status) from exc
+        raise LedgerUnavailable("Could not reach Google Sheets", status=last_status)
 
     async def list_expenses(self, trip: Trip) -> list[ExpenseRecord]:
         spreadsheet = await self._open(trip.sheet_id)
