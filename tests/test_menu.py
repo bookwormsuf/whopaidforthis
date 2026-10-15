@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from telegram.error import BadRequest, Forbidden
 
@@ -187,6 +187,37 @@ async def test_paging_edits_markup_not_text() -> None:
     assert not bot.sent_messages
 
 
+async def test_paging_double_tap_swallows_not_modified() -> None:
+    """A second tap on the same page edits to an identical keyboard; Telegram's
+    BadRequest("...not modified") must be swallowed, not raised (review fix)."""
+    bot = _Bot()
+    deps = make_deps((await _bound_ledger())[0])
+    context = _context(deps, bot)
+    update = _callback_update("menu:page:1", STARTER_ID)
+    update.callback_query.edit_message_reply_markup = AsyncMock(
+        side_effect=BadRequest("Message is not modified")
+    )
+
+    await menu_callback(update, context)  # must not raise
+
+
+async def test_paging_other_bad_request_is_not_swallowed() -> None:
+    bot = _Bot()
+    deps = make_deps((await _bound_ledger())[0])
+    context = _context(deps, bot)
+    update = _callback_update("menu:page:1", STARTER_ID)
+    update.callback_query.edit_message_reply_markup = AsyncMock(
+        side_effect=BadRequest("something else entirely")
+    )
+
+    try:
+        await menu_callback(update, context)
+    except BadRequest:
+        pass
+    else:
+        raise AssertionError("expected BadRequest to propagate")
+
+
 async def test_back_returns_to_page_1() -> None:
     bot = _Bot()
     deps = make_deps((await _bound_ledger())[0])
@@ -331,6 +362,25 @@ async def test_press_export_sends_a_document() -> None:
     await menu_callback(update, context)
 
     assert len(bot.sent_documents) == 1
+
+
+async def test_action_dispatch_exception_logs_and_sends_generic_error() -> None:
+    """An unexpected exception from a run_<name> coroutine is logged and gets
+    the app-wide generic error line, not a crash (review fix)."""
+    from app.bot.app import SOMETHING_WENT_WRONG_TEXT
+
+    ledger, _ = await _bound_ledger()
+    bot = _Bot()
+    context = _context(make_deps(ledger), bot)
+    update = _callback_update("menu:balances", STARTER_ID)
+
+    with patch.dict(
+        "app.bot.handlers.menu._ACTIONS",
+        {"balances": AsyncMock(side_effect=RuntimeError("boom"))},
+    ):
+        await menu_callback(update, context)
+
+    assert bot.sent_messages[-1]["text"] == SOMETHING_WENT_WRONG_TEXT
 
 
 # --- gates: non-starter deletetrip, closed trip, no trip -------------------

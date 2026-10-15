@@ -202,9 +202,14 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     page_match = _MENU_PAGE_PATTERN.match(data)
     if page_match is not None:
-        await query.edit_message_reply_markup(
-            reply_markup=menu_keyboard("open", page=int(page_match.group(1)))
-        )
+        try:
+            await query.edit_message_reply_markup(
+                reply_markup=menu_keyboard("open", page=int(page_match.group(1)))
+            )
+        except BadRequest as error:
+            if "not modified" not in str(error).lower():
+                raise
+            logger.info("menu_callback: paging no-op, keyboard already shown (double tap)")
         return
 
     chat = update.effective_chat
@@ -219,14 +224,21 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if action == "howto":
         await send(HOWTO_TEXT)
         return
-    if action == "export":
-        await run_export(deps, chat, presser, send, _build_send_document(context.bot, chat.id))
-        return
 
-    run = _ACTIONS.get(action)
-    if run is None:
-        return
-    await run(deps, chat, presser, send)
+    try:
+        if action == "export":
+            await run_export(deps, chat, presser, send, _build_send_document(context.bot, chat.id))
+            return
+
+        run = _ACTIONS.get(action)
+        if run is None:
+            return
+        await run(deps, chat, presser, send)
+    except Exception:  # noqa: BLE001 - an action must not crash the handler
+        from app.bot.app import SOMETHING_WENT_WRONG_TEXT
+
+        logger.exception("menu_callback: run_%s failed", action)
+        await send(SOMETHING_WENT_WRONG_TEXT)
 
 
 async def bot_added_to_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
