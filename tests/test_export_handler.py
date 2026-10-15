@@ -136,3 +136,43 @@ async def test_export_with_no_trip_at_all_uses_unbound_gate_reply() -> None:
 
     update.effective_message.reply_document.assert_not_called()
     update.effective_message.reply_text.assert_awaited_once_with(UNBOUND_TEXT, parse_mode="HTML")
+
+
+async def test_export_retries_once_on_upload_timeout() -> None:
+    from telegram.error import TimedOut
+
+    from app.bot.handlers import export as export_mod
+
+    ledger = InMemoryLedgerStore()
+    await ledger.save_binding(Trip(**_trip_kwargs()))
+    update, context = _update(), _context(make_deps(ledger))
+    calls: list[dict] = []
+
+    async def flaky(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise TimedOut()
+
+    update.effective_message.reply_document = flaky
+    await export_mod.export_command(update, context)
+    assert len(calls) == 2
+    assert calls[0]["write_timeout"] == export_mod.UPLOAD_TIMEOUT_S
+
+
+async def test_export_gives_up_after_second_timeout() -> None:
+    from telegram.error import TimedOut
+
+    from app.bot.handlers import export as export_mod
+
+    ledger = InMemoryLedgerStore()
+    await ledger.save_binding(Trip(**_trip_kwargs()))
+    update, context = _update(), _context(make_deps(ledger))
+
+    async def always(**kwargs):
+        raise TimedOut()
+
+    update.effective_message.reply_document = always
+    await export_mod.export_command(update, context)
+    update.effective_message.reply_text.assert_awaited_with(
+        export_mod.UPLOAD_FAILED_TEXT, parse_mode="HTML"
+    )
