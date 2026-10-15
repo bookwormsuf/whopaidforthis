@@ -51,15 +51,13 @@ async def test_join_twice_is_idempotent_one_row_joined_true() -> None:
     ledger = InMemoryLedgerStore()
     trip = Trip(
         chat_id=-100,
-        sheet_id="sheet-id-1234567890",
         name="Trip",
         trip_currency="JPY",
         home_currency="SGD",
         timezone="Asia/Tokyo",
         created_at=datetime.now(UTC),
     )
-    await ledger.save_binding(trip)
-    await ledger.initialise_trip_sheet(trip)
+    trip = await ledger.save_binding(trip)
     deps = _deps(ledger)
     context = _context(deps)
 
@@ -75,15 +73,13 @@ async def test_start_in_group_behaves_as_join() -> None:
     ledger = InMemoryLedgerStore()
     trip = Trip(
         chat_id=-100,
-        sheet_id="sheet-id-1234567890",
         name="Trip",
         trip_currency="JPY",
         home_currency="SGD",
         timezone="Asia/Tokyo",
         created_at=datetime.now(UTC),
     )
-    await ledger.save_binding(trip)
-    await ledger.initialise_trip_sheet(trip)
+    trip = await ledger.save_binding(trip)
     deps = _deps(ledger)
     context = _context(deps)
     update = _update()
@@ -101,7 +97,6 @@ async def test_join_reports_ledger_unavailable() -> None:
     ledger = InMemoryLedgerStore()
     trip = Trip(
         chat_id=-100,
-        sheet_id="sheet-id-1234567890",
         name="Trip",
         trip_currency="JPY",
         home_currency="SGD",
@@ -140,15 +135,13 @@ async def test_join_button_joins_presser_not_initiator() -> None:
     ledger = InMemoryLedgerStore()
     trip = Trip(
         chat_id=-100,
-        sheet_id="sheet-id-1234567890",
         name="Trip",
         trip_currency="JPY",
         home_currency="SGD",
         timezone="Asia/Tokyo",
         created_at=datetime.now(UTC),
     )
-    await ledger.save_binding(trip)
-    await ledger.initialise_trip_sheet(trip)
+    trip = await ledger.save_binding(trip)
     deps = _deps(ledger)
     context = _context(deps)
 
@@ -177,15 +170,13 @@ async def test_join_reply_to_message_joins_the_replied_to_user() -> None:
     ledger = InMemoryLedgerStore()
     trip = Trip(
         chat_id=-100,
-        sheet_id="sheet-id-1234567890",
         name="Trip",
         trip_currency="JPY",
         home_currency="SGD",
         timezone="Asia/Tokyo",
         created_at=datetime.now(UTC),
     )
-    await ledger.save_binding(trip)
-    await ledger.initialise_trip_sheet(trip)
+    trip = await ledger.save_binding(trip)
     deps = _deps(ledger)
     context = _context(deps)
 
@@ -236,15 +227,13 @@ async def test_join_button_tells_someone_already_named_they_are_in() -> None:
     ledger = InMemoryLedgerStore()
     trip = Trip(
         chat_id=-100,
-        sheet_id="sheet-id-1234567890",
         name="Trip",
         trip_currency="JPY",
         home_currency="SGD",
         timezone="Asia/Tokyo",
         created_at=datetime.now(UTC),
     )
-    await ledger.save_binding(trip)
-    await ledger.initialise_trip_sheet(trip)
+    trip = await ledger.save_binding(trip)
     context = MagicMock()
     context.application.bot_data = {"deps": make_deps(ledger)}
     update = MagicMock()
@@ -272,15 +261,13 @@ async def test_join_button_uses_text_html_and_escapes_ampersand_in_new_name() ->
     ledger = InMemoryLedgerStore()
     trip = Trip(
         chat_id=-100,
-        sheet_id="sheet-id-1234567890",
         name="Trip",
         trip_currency="JPY",
         home_currency="SGD",
         timezone="Asia/Tokyo",
         created_at=datetime.now(UTC),
     )
-    await ledger.save_binding(trip)
-    await ledger.initialise_trip_sheet(trip)
+    trip = await ledger.save_binding(trip)
     deps = _deps(ledger)
     context = _context(deps)
 
@@ -306,31 +293,6 @@ async def test_join_button_uses_text_html_and_escapes_ampersand_in_new_name() ->
     assert "Bed & Breakfast Bob" not in new_text  # never unescaped
 
 
-async def test_join_replies_lost_access_message_when_trip_sheet_inaccessible() -> None:
-    from app.bot.handlers.join import lost_access_text
-
-    ledger = InMemoryLedgerStore(inaccessible_sheet_ids=frozenset({"sheet-id-1234567890"}))
-    trip = Trip(
-        chat_id=-100,
-        sheet_id="sheet-id-1234567890",
-        name="Trip",
-        trip_currency="JPY",
-        home_currency="SGD",
-        timezone="Asia/Tokyo",
-        created_at=datetime.now(UTC),
-    )
-    await ledger.save_binding(trip)
-    deps = _deps(ledger)
-    context = _context(deps)
-    update = _update()
-
-    await join_command(update, context)
-
-    update.effective_message.reply_text.assert_awaited_once_with(
-        lost_access_text(deps.service_account_email), parse_mode="HTML"
-    )
-
-
 def _joined_row_update(data: str, *, user_id: int, first_name: str, message_text: str) -> MagicMock:
     update = MagicMock()
     update.callback_query.data = data
@@ -348,15 +310,13 @@ def _joined_row_update(data: str, *, user_id: int, first_name: str, message_text
 async def _bound_trip(ledger: InMemoryLedgerStore) -> Trip:
     trip = Trip(
         chat_id=-100,
-        sheet_id="sheet-id-1234567890",
         name="Trip",
         trip_currency="JPY",
         home_currency="SGD",
         timezone="Asia/Tokyo",
         created_at=datetime.now(UTC),
     )
-    await ledger.save_binding(trip)
-    await ledger.initialise_trip_sheet(trip)
+    trip = await ledger.save_binding(trip)
     return trip
 
 

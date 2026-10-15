@@ -55,7 +55,6 @@ def test_merge_user_existing_user_explicit_joined_overrides() -> None:
 def _trip() -> Trip:
     return Trip(
         chat_id=-1,
-        sheet_id="sheet-id-1234567890",
         name="Trip",
         trip_currency="JPY",
         home_currency="SGD",
@@ -66,8 +65,7 @@ def _trip() -> Trip:
 
 async def test_in_memory_ledger_store_join_upsert_is_idempotent() -> None:
     store = InMemoryLedgerStore()
-    trip = _trip()
-    await store.initialise_trip_sheet(trip)
+    trip = await store.save_binding(_trip())
     user = TripUser.from_telegram_user(
         SimpleNamespace(id=1, first_name="Ada", last_name=None, username="ada"),
         datetime.now(UTC),
@@ -82,8 +80,7 @@ async def test_in_memory_ledger_store_join_upsert_is_idempotent() -> None:
 
 async def test_in_memory_ledger_store_list_users_joined_only_excludes_seen_only() -> None:
     store = InMemoryLedgerStore()
-    trip = _trip()
-    await store.initialise_trip_sheet(trip)
+    trip = await store.save_binding(_trip())
 
     joined_user = _user(user_id=1, joined=False)
     seen_only_user = _user(user_id=2, joined=False)
@@ -99,16 +96,32 @@ async def test_in_memory_ledger_store_list_users_joined_only_excludes_seen_only(
     assert joined_users[0].user_id == 1
 
 
-async def test_in_memory_ledger_store_can_open_respects_unopenable_set() -> None:
-    store = InMemoryLedgerStore(unopenable_sheet_ids=frozenset({"blocked-sheet"}))
-    assert await store.can_open("blocked-sheet") is False
-    assert await store.can_open("open-sheet") is True
+async def test_in_memory_ledger_store_save_binding_closes_previous_open_trip() -> None:
+    store = InMemoryLedgerStore()
+    first = await store.save_binding(_trip())
+    second = await store.save_binding(_trip())
+
+    trips = await store.list_trips(first.chat_id)
+    by_id = {t.id: t for t in trips}
+    assert by_id[first.id].closed_at is not None
+    assert by_id[second.id].closed_at is None
 
 
 async def test_in_memory_ledger_store_save_and_get_binding_roundtrip() -> None:
     store = InMemoryLedgerStore()
-    trip = _trip()
-    await store.save_binding(trip)
+    trip = await store.save_binding(_trip())
     fetched = await store.get_binding(trip.chat_id)
     assert fetched == trip
     assert await store.get_binding(999) is None
+
+
+async def test_in_memory_ledger_store_delete_trips_removes_everything() -> None:
+    store = InMemoryLedgerStore()
+    trip = await store.save_binding(_trip())
+    user = _user(user_id=1, joined=True)
+    await store.upsert_user(trip, user, joined=True)
+
+    await store.delete_trips(trip.chat_id)
+
+    assert await store.get_binding(trip.chat_id) is None
+    assert await store.list_trips(trip.chat_id) == []

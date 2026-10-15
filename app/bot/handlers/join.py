@@ -16,23 +16,12 @@ from app.bot.deps import get_deps
 from app.bot.keyboards.settrip import joined_keyboard
 from app.models.trip import Trip
 from app.models.user import TripUser
-from app.services.ledger_store import (
-    LEDGER_UNAVAILABLE_TEXT,
-    LedgerUnavailable,
-    TripSheetInaccessible,
-)
+from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
 
 logger = logging.getLogger(__name__)
 
 UNBOUND_TEXT = "Run /settrip first"
-UNAVAILABLE_TEXT = "Couldn't reach Google Sheets, try /join again."
-
-
-def lost_access_text(email: str) -> str:
-    return (
-        f"I've lost access to this group's Sheet. Share it with <code>{escape(email)}</code> "
-        "as Editor again, or run /settrip with a new Sheet."
-    )
+UNAVAILABLE_TEXT = LEDGER_UNAVAILABLE_TEXT
 
 
 async def require_trip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Trip | None:
@@ -43,12 +32,6 @@ async def require_trip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Tr
     message = update.effective_message
     try:
         trip = await deps.ledger.get_binding(chat.id)
-    except TripSheetInaccessible:
-        if message is not None:
-            await message.reply_text(
-                lost_access_text(deps.service_account_email), parse_mode="HTML"
-            )
-        return None
     except LedgerUnavailable:
         logger.exception("require_trip: could not read the current binding")
         if message is not None:

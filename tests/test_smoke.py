@@ -37,9 +37,8 @@ from tests.helpers import make_deps
 
 REQUIRED_ENV_VARS = (
     "TELEGRAM_BOT_TOKEN",
-    "GOOGLE_SERVICE_ACCOUNT_JSON",
+    "DATABASE_URL",
     "ANTHROPIC_API_KEY",
-    "WHOPAID_CONTROL_SHEET_ID",
 )
 
 
@@ -77,9 +76,8 @@ def test_load_settings_all_blank_secrets_exit_1_and_name_all_three(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "")
-    monkeypatch.setenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+    monkeypatch.setenv("DATABASE_URL", "")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "")
-    monkeypatch.setenv("WHOPAID_CONTROL_SHEET_ID", "")
     with pytest.raises(SystemExit) as exc_info:
         load_settings()
     assert exc_info.value.code == 1
@@ -93,9 +91,8 @@ def test_log_level_lower_case_is_upper_cased(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
-    monkeypatch.setenv("GOOGLE_SERVICE_ACCOUNT_JSON", "{}")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-    monkeypatch.setenv("WHOPAID_CONTROL_SHEET_ID", "fake-control-sheet-id")
     monkeypatch.setenv("LOG_LEVEL", "debug")
     settings = load_settings()
     assert settings.log_level == "DEBUG"
@@ -106,9 +103,8 @@ def test_log_level_invalid_exits_1_with_invalid_value_line(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
-    monkeypatch.setenv("GOOGLE_SERVICE_ACCOUNT_JSON", "{}")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://fake")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-    monkeypatch.setenv("WHOPAID_CONTROL_SHEET_ID", "fake-control-sheet-id")
     monkeypatch.setenv("LOG_LEVEL", "info2")
     with pytest.raises(SystemExit) as exc_info:
         load_settings()
@@ -117,49 +113,29 @@ def test_log_level_invalid_exits_1_with_invalid_value_line(
     assert "Invalid value for environment variable: LOG_LEVEL" in stderr
 
 
-def test_load_settings_missing_control_sheet_id_exits_1(
+def test_load_settings_missing_database_url_exits_1(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
-    monkeypatch.setenv("GOOGLE_SERVICE_ACCOUNT_JSON", "{}")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-    monkeypatch.delenv("WHOPAID_CONTROL_SHEET_ID", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     with pytest.raises(SystemExit) as exc_info:
         load_settings()
     assert exc_info.value.code == 1
     stderr = capsys.readouterr().err
-    assert "Missing required environment variable: WHOPAID_CONTROL_SHEET_ID" in stderr
-
-
-def test_load_settings_invalid_service_account_json_exits_1_with_exact_line(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "fake-token")
-    monkeypatch.setenv("GOOGLE_SERVICE_ACCOUNT_JSON", "{not valid json")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-key")
-    monkeypatch.setenv("WHOPAID_CONTROL_SHEET_ID", "fake-control-sheet-id")
-    with pytest.raises(SystemExit) as exc_info:
-        load_settings()
-    assert exc_info.value.code == 1
-    stderr = capsys.readouterr().err
-    assert (
-        "Invalid value for environment variable: GOOGLE_SERVICE_ACCOUNT_JSON "
-        "(not valid JSON)" in stderr
-    )
-    assert "{not valid json" not in stderr
+    assert "Missing required environment variable: DATABASE_URL" in stderr
 
 
 def test_settings_repr_does_not_leak_secret_values() -> None:
     settings = Settings(
         _env_file=None,
         telegram_bot_token="123456:fake-token",
-        google_service_account_json="{}",
+        database_url="postgresql://user:hunter2@host/db",
         anthropic_api_key="fake-key",
-        whopaid_control_sheet_id="fake-control-sheet-id",
     )
     assert "123456:fake-token" not in repr(settings)
+    assert "hunter2" not in repr(settings)
 
 
 def test_build_application_registers_start_and_help_commands() -> None:

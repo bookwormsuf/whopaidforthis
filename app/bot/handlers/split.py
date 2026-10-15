@@ -21,7 +21,6 @@ from app.services.drafts import DraftError, DraftToast
 from app.services.ledger_store import (
     LEDGER_UNAVAILABLE_TEXT,
     LedgerUnavailable,
-    TripSheetInaccessible,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,7 +51,7 @@ async def handle_custom_split_reply(update: Update, context: ContextTypes.DEFAUL
 
     try:
         trip = await deps.ledger.get_binding(chat.id)
-    except (TripSheetInaccessible, LedgerUnavailable):
+    except LedgerUnavailable:
         logger.exception("custom_split_reply: could not read the current binding")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
         return True
@@ -93,7 +92,7 @@ async def handle_item_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
     try:
         trip = await deps.ledger.get_binding(chat.id)
-    except (TripSheetInaccessible, LedgerUnavailable):
+    except LedgerUnavailable:
         logger.exception("item_reply: could not read the current binding")
         return True
     if trip is None:

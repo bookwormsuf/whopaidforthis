@@ -1,9 +1,9 @@
 # whopaid
 
-A Telegram bot that keeps a trip's group expenses in a shared Google Sheet. Type `1200 yen ramen`
+A Telegram bot that keeps a trip's group expenses in Postgres (Neon). Type `1200 yen ramen`
 or send a receipt photo; it converts to your home currency at that day's rate, splits it between
 whoever was there (equally, by custom amounts, or item by item off the receipt), and tells you
-who owes whom. One trip = one Telegram group = one Google Sheet. It runs on one small Fly.io
+who owes whom. One Telegram group has one open trip at a time. It runs on one small Fly.io
 machine.
 
 Project status and sign-offs: `STATUS.md`. Settled design decisions: `docs/spec/pinned-decisions.md`.
@@ -16,15 +16,14 @@ flowchart LR
     BOT -- replies, draft cards --> TG
     BOT -- receipt photo, in memory --> LLM[Anthropic API<br/>receipt reading]
     BOT -- day's rate --> FX[Frankfurter<br/>ECB reference rates]
-    BOT -- read / append rows --> TRIP[(Trip Google Sheet<br/>one per trip)]
-    BOT -- group to Sheet map --> CTRL[(Control Sheet<br/>Bindings)]
+    BOT -- one transaction per save --> DB[(Postgres on Neon)]
 ```
 
 - **Bot** (`app/bot`): Telegram handlers, the draft cards and their buttons.
 - **Services** (`app/services`): pure logic — the text parser, name resolution, splitting,
-  settlement, receipt reading and total selection, exchange rates — plus the Google Sheets store.
+  settlement, receipt reading and total selection, exchange rates — plus `PostgresLedgerStore`.
 - **Drafts** live in memory for 30 minutes while people press buttons; only a confirmed expense
-  is written to the Sheet, in one atomic batch.
+  is written to the database, in one transaction.
 
 ## Data model
 
@@ -127,7 +126,7 @@ turns By items off for that receipt.
    ```
    help - What this bot does
    join - Join this trip
-   settrip - Bind this group to a Google Sheet
+   settrip - Start a trip for this group
    recent - Last 5 expenses
    today - Today's expenses
    summary - Group totals
@@ -140,7 +139,7 @@ turns By items off for that receipt.
 ## Adding to a group
 
 Use a dedicated group for the trip's expenses. Add the bot to it like any member, after turning
-privacy mode off. Then bind the group to a Sheet (see "Binding a trip" below) and have everyone
+privacy mode off. Then start a trip (see "Starting a trip" below) and have everyone
 send `/join`. When someone sends `/join`, the reply has an **I'm in too** button the others can
 tap instead; **Everyone's in** removes the buttons.
 
@@ -156,52 +155,41 @@ Receipt photos are downloaded, resized, and sent to the Anthropic API entirely i
 they are never written to disk and never logged (not the image bytes, not the base64, not the
 LLM request). Once the read finishes, the bot keeps only the Telegram file ID (so "Try again"
 can re-download the same photo) and the structured facts it extracted: merchant, total, date,
-and line items. Those facts, not the photo, are what end up in the Sheet.
+and line items. Those facts, not the photo, are what end up in the database.
 
-## Google Cloud and Sheets
+## Neon (Postgres)
 
-The bot writes to Google Sheets using a **service account**, not your personal Google login.
+Postgres on Neon is the only store (ADR 0003) — there is no Google Sheet, no service account,
+no per-trip setup beyond `/settrip` itself.
 
-1. In the [Google Cloud Console](https://console.cloud.google.com/), create a project (or reuse
-   one) and enable the **Google Sheets API**.
-2. Create a service account under IAM & Admin → Service Accounts, then add a JSON key for it.
-   Download the key file.
-3. Put the whole contents of that JSON file, on one line, into `GOOGLE_SERVICE_ACCOUNT_JSON` in
-   your `.env`. Not a file path — the JSON text itself. Keep the key file outside the repo, and
-   print it as one line with
-   `python3 -c "import json,sys;print(json.dumps(json.load(open(sys.argv[1]))))" path/to/key.json`;
-   paste the output as the value, wrapped in single quotes.
-4. Create one blank Google Sheet named `whopaid control` for the bot's own bookkeeping (it holds
-   the map of Telegram group → trip Sheet). Share it with the service account's email (the
-   `client_email` field in the JSON key, looks like `something@project.iam.gserviceaccount.com`)
-   as **Editor**. Copy the Sheet's ID from its URL — the long string between `/d/` and `/edit` —
-   into `WHOPAID_CONTROL_SHEET_ID` in your `.env`.
+1. Create a [Neon](https://neon.tech) project in region **AWS Singapore**.
+2. Copy the pooled connection string (it includes `sslmode=require`).
+3. Put it in your local `.env` as `DATABASE_URL=...`.
+4. `fly secrets set DATABASE_URL=...` for `whopaid-bot` in production.
+5. Install Docker Desktop or Colima so the store tests can run locally (`docker compose up -d`).
 
-## Sharing with the service account
+At startup the bot creates a small connection pool and applies any pending migrations
+(`app/db/migrations/`); a missing or unreachable `DATABASE_URL` fails fast with a one-line error.
 
-Each trip gets its own Google Sheet, created and owned by you.
+### Starting a trip
 
-1. Create a blank Google Sheet for the trip.
-2. Share it with the service account's email (same one as above) as **Editor**. Without this,
-   `/settrip` will tell you it can't open the Sheet.
-3. Copy the Sheet's URL or ID — you'll paste it into `/settrip` in the next step.
+In the Telegram group for the trip, run `/settrip`. It asks three quick questions with buttons:
+the trip currency (what you're paying in — SGD, MYR, JPY, CNY shown first, then **Other…** for
+any other 3-letter code), the home currency (what you'll settle up in), and the timezone
+(defaults to the one that matches the trip currency, e.g. Japan → Asia/Tokyo). Confirm, and the
+trip is saved. A group that already has an open trip gets a new one — the old trip is closed,
+never deleted, and stays exportable (export lands in a later sprint).
 
-### Binding a trip
-
-In the Telegram group for the trip, run:
-
-```
-/settrip <Sheet URL or ID>
-```
-
-The bot checks it can open the Sheet, then asks three quick questions with buttons: the trip
-currency (what you're paying in), the home currency (what you'll settle up in), and the
-timezone (defaults to the one that matches the trip currency, e.g. Japan → Asia/Tokyo). Confirm,
-and it lays out all the tabs and formulas in the Sheet. Running `/settrip` again in an already-
-bound group asks before rebinding — it never wipes the old Sheet.
-
-Once bound, everyone in the group should send `/join` (or `/start`) so the bot knows who's
+Once started, everyone in the group should send `/join` (or `/start`) so the bot knows who's
 splitting expenses.
+
+## What is stored and how to delete it
+
+The database holds: Telegram user IDs, usernames and display names; expense descriptions,
+amounts, categories and timestamps; and the trip's own settings (currencies, timezone). Receipt
+images are never stored — only the facts an LLM read off them (merchant, total, line items).
+`/deletetrip`, run by whoever started the trip, hard-deletes that chat's trips and every row
+under them in one transaction; this is irreversible.
 
 ## LLM setup
 
@@ -229,7 +217,7 @@ manually** (reply to that message with just the amount, e.g. `2400`).
 A caption on the photo overrides the description the LLM guessed — a receipt sent with the
 caption `dinner` saves as "Dinner" rather than whatever the LLM extracted.
 
-Line items are stored in the Sheet's `Line Items` tab. Item amounts there are always in the
+Line items are stored in the `line_items` table. Item amounts there are always in the
 trip currency; for a receipt paid in the home currency they are converted at that expense's
 rate. A caption can also carry `split everyone`, `split between me Amir` or `paid by Amir`,
 exactly as in a text expense.
@@ -250,9 +238,8 @@ Set in `.env` locally (copy `.env.example`; never commit `.env`) and as Fly secr
 | Variable | What |
 |---|---|
 | `TELEGRAM_BOT_TOKEN` | the bot's token from BotFather |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | the service account's JSON key, the whole JSON on one line |
+| `DATABASE_URL` | Neon's pooled Postgres connection string (`sslmode=require`) |
 | `ANTHROPIC_API_KEY` | API key from console.anthropic.com |
-| `WHOPAID_CONTROL_SHEET_ID` | ID of the control Sheet holding the Bindings tab |
 | `LOG_LEVEL` | optional: `DEBUG`, `INFO` (default), `WARNING`, `ERROR` |
 
 `BOT_VERSION` is baked into the image at deploy time (the short git SHA) and shown by `/help`.
@@ -267,7 +254,7 @@ uvx pre-commit run --all-files
 uv run python -m app
 ```
 
-The tests need no network or keys: they use an in-memory Sheet, fixed exchange rates and a fake
+The tests need no network or keys: they use an in-memory store, fixed exchange rates and a fake
 receipt reader, and simulate several Telegram users pressing buttons. Run the bot locally only
 while the deployed one is stopped (see Deployment). `docs/manual-test-checklist.md` is the full
 manual regression run against a test group.
@@ -291,7 +278,7 @@ return 409 and both go deaf.
    `fly scale count 1`.
 6. `fly logs`. You see `whopaid started`.
 7. Stop any local copy of the bot, then send `/help` and `500 coffee` in your test group and
-   confirm it; the Sheet gets the row.
+   confirm it; the database gets the row.
 
 ### Updating
 
@@ -393,7 +380,6 @@ balance. It is near-minimal, not guaranteed minimal.
 - **Third currencies are refused.** Only the trip currency and the home currency can be recorded.
 - **SGD figures depend on ECB reference rates**, published once per business day; they are not
   the rate your card or money changer used.
-- **Summary formulas assume Google Sheets**, not Excel; exporting to Excel breaks them.
 - Receipt reading can be wrong; check the total on the card before confirming.
 - Names are matched against people who have sent `/join`; Telegram doesn't let bots see the
   member list.
@@ -405,5 +391,5 @@ balance. It is near-minimal, not guaranteed minimal.
    it for the next trip, `fly scale count 1`.
 3. `fly apps destroy <app name from fly.toml>` removes the app entirely, if you're done for good.
 
-The Sheets keep everything — expenses, balances and settlement live in Google Sheets, not on the
-machine. Start each new trip with a new group and a new Sheet.
+The database keeps everything — expenses, balances and settlement live in Postgres, not on the
+machine. `/settrip` again starts a new trip for the same group; `/deletetrip` erases one.

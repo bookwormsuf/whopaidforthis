@@ -6,10 +6,10 @@ identically to how the running bot would read them. Prints `NAME=value` lines to
 stdout, one per required variable, in `Settings`' declared field order, and nothing
 else to stdout. Never prints a value to stderr or anywhere else.
 
-Required variables are derived from `Settings`: every `SecretStr` field, plus
-`whopaid_control_sheet_id` (not a `SecretStr`, but still required and still sensitive
-enough to live only in `.env`/Fly secrets, never in git). Adding a field to `Settings`
-later therefore updates this list automatically, with no second place to edit.
+Required variables are derived from `Settings`: every `SecretStr` field
+(`TELEGRAM_BOT_TOKEN`, `DATABASE_URL`, `ANTHROPIC_API_KEY`). Adding a `SecretStr`
+field to `Settings` later therefore updates this list automatically, with no second
+place to edit.
 
 LOG_LEVEL and BOT_VERSION are deliberately excluded: neither is a secret, and setting
 BOT_VERSION as a Fly secret would override the image's own `ENV BOT_VERSION=...` and
@@ -42,7 +42,7 @@ ENV_FILE = os.environ.get("WHOPAID_ENV_FILE", ".env")
 
 
 def required_names() -> list[str]:
-    """Env var names to export: Settings' SecretStr fields plus WHOPAID_CONTROL_SHEET_ID.
+    """Env var names to export: every `Settings` SecretStr field.
 
     Walks `Settings.model_fields` in declared order so the output order is stable and
     adding a new SecretStr field to `Settings` is enough to pick it up here too.
@@ -50,7 +50,7 @@ def required_names() -> list[str]:
     return [
         name.upper()
         for name, field in Settings.model_fields.items()
-        if field.annotation is SecretStr or name == "whopaid_control_sheet_id"
+        if field.annotation is SecretStr
     ]
 
 
