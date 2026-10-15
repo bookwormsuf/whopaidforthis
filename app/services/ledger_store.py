@@ -1,6 +1,6 @@
 """The `LedgerStore` interface and an in-memory implementation for tests.
 
-Spec references: pinned-decisions §10.
+Spec references: pinned-decisions §10, §18; ADR 0003.
 """
 
 from __future__ import annotations
@@ -17,10 +17,11 @@ from app.models.user import TripUser
 
 
 class LedgerUnavailable(RuntimeError):
-    """The ledger backend (Google Sheets) could not be reached or refused a call.
+    """The ledger backend (Postgres) could not be reached or refused a call.
 
-    Message must never include a Sheet URL, Sheet ID, or Sheet contents. `status`
-    carries the HTTP status code when one is known (e.g. 429, 500), else None.
+    Message must never include a connection string or row contents. `status` is kept
+    for callers that still branch on it; it is always `None` for the Postgres store
+    (there is no HTTP status to report).
     """
 
     def __init__(self, message: str, status: int | None = None) -> None:
@@ -28,42 +29,27 @@ class LedgerUnavailable(RuntimeError):
         self.status = status
 
 
-class TripSheetInaccessible(RuntimeError):
-    """A chat has a binding row, but the trip Sheet it points to can no longer be
-    opened (403/404/not shared any more). Distinct from `LedgerUnavailable`
-    (a transient/backend problem): this is "the binding itself is stale", which the
-    handlers can offer a specific fix for (`/settrip` again, or re-share).
-
-    Message is generic; never includes a Sheet URL or ID. `sheet_id` carries it for
-    callers that need it internally (never for display).
-    """
-
-    def __init__(self, sheet_id: str) -> None:
-        super().__init__("This group's trip Sheet can no longer be opened")
-        self.sheet_id = sheet_id
-
-
 # The one user-facing line for a LedgerUnavailable, shared by every caller (handlers
 # that catch it locally, and the PTB-wide error handler as the last resort).
-LEDGER_UNAVAILABLE_TEXT = "Couldn't reach Google Sheets, please try again."
+LEDGER_UNAVAILABLE_TEXT = "Couldn't reach the database, please try again."
 
 
 class LedgerStore(Protocol):
-    """Persistence for trip bindings, trip facts, and trip users."""
+    """Persistence for trips, trip users, expenses and exchange rates."""
 
     async def get_binding(self, chat_id: int) -> Trip | None: ...
 
-    async def save_binding(self, trip: Trip) -> None: ...
+    async def save_binding(self, trip: Trip) -> Trip: ...
 
-    async def can_open(self, sheet_id: str) -> bool: ...
+    async def close_trip(self, trip: Trip) -> None: ...
 
-    async def initialise_trip_sheet(self, trip: Trip) -> None: ...
+    async def delete_trips(self, chat_id: int) -> None: ...
+
+    async def list_trips(self, chat_id: int) -> list[Trip]: ...
 
     async def upsert_user(self, trip: Trip, user: TripUser, joined: bool | None) -> TripUser: ...
 
     async def list_users(self, trip: Trip, joined_only: bool = False) -> list[TripUser]: ...
-
-    # -- Sprint 2: expenses, rates, dedup -----------------------------------
 
     async def append_expense(
         self,
@@ -118,63 +104,87 @@ def merge_user(existing: TripUser | None, incoming: TripUser, joined: bool | Non
 
 
 class InMemoryLedgerStore:
-    """In-memory LedgerStore for tests and for use before Sheets wiring exists.
-
-    `unopenable_sheet_ids` simulates Sheets that exist but are not shared with the
-    service account, for testing the `/settrip` access-check path (`can_open`).
-    `inaccessible_sheet_ids` simulates a *currently bound* trip Sheet that has since
-    been unshared/deleted, for testing the `get_binding` -> `TripSheetInaccessible`
-    path.
+    """In-memory LedgerStore for handler tests. Trips are keyed by their assigned
+    `id` (auto-incrementing, like the Postgres `bigserial`); everything else that
+    belongs to a trip (users, expenses) is keyed by that same `trip.id`.
     """
 
-    def __init__(
-        self,
-        unopenable_sheet_ids: frozenset[str] = frozenset(),
-        inaccessible_sheet_ids: frozenset[str] = frozenset(),
-    ) -> None:
-        self._unopenable_sheet_ids = unopenable_sheet_ids
-        self._inaccessible_sheet_ids = inaccessible_sheet_ids
-        self._bindings: dict[int, Trip] = {}
-        self._users: dict[str, dict[int, TripUser]] = {}
-        self.initialised_sheet_ids: set[str] = set()
-        self._expenses: dict[str, dict[str, Expense]] = {}
-        self._expense_order: dict[str, list[str]] = {}
-        self._rates: dict[str, dict[tuple[str, str, date], ExchangeRate]] = {}
+    def __init__(self) -> None:
+        self._trips_by_id: dict[int, Trip] = {}
+        self._trip_ids_by_chat: dict[int, list[int]] = {}
+        self._next_trip_id = 1
+        self._users: dict[int, dict[int, TripUser]] = {}
+        self._expenses: dict[int, dict[str, Expense]] = {}
+        self._expense_order: dict[int, list[str]] = {}
+        self._message_ids: dict[int, set[tuple[int, int]]] = {}
+        self._rates: dict[tuple[str, str, date], ExchangeRate] = {}
         self._line_items: dict[str, list[ReceiptLineItem]] = {}
         self._assignments: dict[str, dict[int, tuple[list[int], str]]] = {}
         self.get_binding_calls = 0
 
     async def get_binding(self, chat_id: int) -> Trip | None:
         self.get_binding_calls += 1
-        trip = self._bindings.get(chat_id)
-        if trip is not None and trip.sheet_id in self._inaccessible_sheet_ids:
-            raise TripSheetInaccessible(trip.sheet_id)
-        return trip
+        for trip_id in reversed(self._trip_ids_by_chat.get(chat_id, [])):
+            trip = self._trips_by_id[trip_id]
+            if trip.closed_at is None:
+                return trip
+        return None
 
-    async def save_binding(self, trip: Trip) -> None:
-        self._bindings[trip.chat_id] = trip
+    async def save_binding(self, trip: Trip) -> Trip:
+        """Insert a new open trip, closing any existing open trip for this chat."""
+        existing = await self.get_binding(trip.chat_id)
+        if existing is not None:
+            self._trips_by_id[existing.id] = existing.model_copy(
+                update={"closed_at": datetime.now(existing.created_at.tzinfo)}
+            )
+        trip_id = self._next_trip_id
+        self._next_trip_id += 1
+        saved = trip.model_copy(update={"id": trip_id})
+        self._trips_by_id[trip_id] = saved
+        self._trip_ids_by_chat.setdefault(trip.chat_id, []).append(trip_id)
+        self._users.setdefault(trip_id, {})
+        self._expenses.setdefault(trip_id, {})
+        self._expense_order.setdefault(trip_id, [])
+        self._message_ids.setdefault(trip_id, set())
+        return saved
 
-    async def can_open(self, sheet_id: str) -> bool:
-        return sheet_id not in self._unopenable_sheet_ids
+    async def close_trip(self, trip: Trip) -> None:
+        assert trip.id is not None
+        current = self._trips_by_id.get(trip.id)
+        if current is not None:
+            self._trips_by_id[trip.id] = current.model_copy(
+                update={"closed_at": datetime.now(current.created_at.tzinfo)}
+            )
 
-    async def initialise_trip_sheet(self, trip: Trip) -> None:
-        self.initialised_sheet_ids.add(trip.sheet_id)
-        self._users.setdefault(trip.sheet_id, {})
+    async def delete_trips(self, chat_id: int) -> None:
+        for trip_id in self._trip_ids_by_chat.pop(chat_id, []):
+            self._trips_by_id.pop(trip_id, None)
+            self._users.pop(trip_id, None)
+            expense_ids = self._expense_order.pop(trip_id, [])
+            expenses = self._expenses.pop(trip_id, {})
+            for expense_id in expense_ids:
+                self._line_items.pop(expense_id, None)
+                self._assignments.pop(expense_id, None)
+            del expenses
+            self._message_ids.pop(trip_id, None)
+
+    async def list_trips(self, chat_id: int) -> list[Trip]:
+        return [self._trips_by_id[tid] for tid in self._trip_ids_by_chat.get(chat_id, [])]
 
     async def upsert_user(self, trip: Trip, user: TripUser, joined: bool | None) -> TripUser:
-        users = self._users.setdefault(trip.sheet_id, {})
+        assert trip.id is not None
+        users = self._users.setdefault(trip.id, {})
         existing = users.get(user.user_id)
         merged = merge_user(existing, user, joined)
         users[user.user_id] = merged
         return merged
 
     async def list_users(self, trip: Trip, joined_only: bool = False) -> list[TripUser]:
-        users = self._users.get(trip.sheet_id, {}).values()
+        assert trip.id is not None
+        users = self._users.get(trip.id, {}).values()
         if joined_only:
             return [user for user in users if user.joined]
         return list(users)
-
-    # -- Sprint 2: expenses, rates, dedup -----------------------------------
 
     async def append_expense(
         self,
@@ -183,10 +193,20 @@ class InMemoryLedgerStore:
         line_items: Sequence[ReceiptLineItem] = (),
         assignments: Mapping[int, tuple[list[int], str]] | None = None,
     ) -> None:
-        expenses = self._expenses.setdefault(trip.sheet_id, {})
-        order = self._expense_order.setdefault(trip.sheet_id, [])
+        """One expense per `(chat_id, message_id)` and one row per expense id -- a
+        repeat of either is "already saved" and returns without changing anything,
+        matching the Postgres store's unique-violation-means-success behaviour.
+        """
+        assert trip.id is not None
+        expenses = self._expenses.setdefault(trip.id, {})
+        order = self._expense_order.setdefault(trip.id, [])
+        seen_messages = self._message_ids.setdefault(trip.id, set())
+        message_key = (expense.chat_id, expense.message_id)
+        if expense.expense_id in expenses or message_key in seen_messages:
+            return
         expenses[expense.expense_id] = expense
         order.append(expense.expense_id)
+        seen_messages.add(message_key)
         if line_items:
             self._line_items[expense.expense_id] = list(line_items)
             self._assignments[expense.expense_id] = dict(assignments or {})
@@ -207,13 +227,15 @@ class InMemoryLedgerStore:
         return None
 
     async def list_expenses(self, trip: Trip) -> list[ExpenseRecord]:
-        expenses = self._expenses.get(trip.sheet_id, {})
-        order = self._expense_order.get(trip.sheet_id, [])
+        assert trip.id is not None
+        expenses = self._expenses.get(trip.id, {})
+        order = self._expense_order.get(trip.id, [])
         return [_expense_to_record(expenses[expense_id]) for expense_id in order]
 
     async def list_splits(self, trip: Trip) -> list[SplitRecord]:
-        expenses = self._expenses.get(trip.sheet_id, {})
-        order = self._expense_order.get(trip.sheet_id, [])
+        assert trip.id is not None
+        expenses = self._expenses.get(trip.id, {})
+        order = self._expense_order.get(trip.id, [])
         return [
             SplitRecord(
                 expense_id=expense_id,
@@ -231,7 +253,8 @@ class InMemoryLedgerStore:
     async def cancel_expense(
         self, trip: Trip, expense_id: str, cancelled_at: datetime, note_suffix: str
     ) -> bool:
-        expenses = self._expenses.get(trip.sheet_id, {})
+        assert trip.id is not None
+        expenses = self._expenses.get(trip.id, {})
         expense = expenses.get(expense_id)
         if expense is None:
             return False
@@ -242,19 +265,18 @@ class InMemoryLedgerStore:
         return True
 
     async def expense_exists(self, trip: Trip, expense_id: str) -> bool:
-        return expense_id in self._expenses.get(trip.sheet_id, {})
+        assert trip.id is not None
+        return expense_id in self._expenses.get(trip.id, {})
 
     async def find_rate(
         self, trip: Trip, base: str, quote: str, requested_date: date
     ) -> ExchangeRate | None:
-        # Plain lookup by requested date; the rate-date-as-cache-key rule (spec §4)
-        # lives only in RateService's in-memory cache, not here.
-        rates = self._rates.get(trip.sheet_id, {})
-        return rates.get((base, quote, requested_date))
+        # Rates are global (spec §18), not per trip: `trip` is accepted only to match
+        # the LedgerStore protocol.
+        return self._rates.get((base, quote, requested_date))
 
     async def save_rate(self, trip: Trip, rate: ExchangeRate) -> None:
-        rates = self._rates.setdefault(trip.sheet_id, {})
-        rates[(rate.base, rate.quote, rate.requested_date)] = rate
+        self._rates[(rate.base, rate.quote, rate.requested_date)] = rate
 
 
 def _expense_to_record(expense: Expense) -> ExpenseRecord:
