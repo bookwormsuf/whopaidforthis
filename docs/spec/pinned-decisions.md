@@ -7,10 +7,10 @@ Vocabulary: see `/CONTEXT.md`. Rationale for the two irreversible ones: `/docs/a
 ## 1. Repo, bot, stack
 
 - Repo: this one (`whopaid`). Bot username `@whopaidforthisbot`; read the actual username from `getMe` at startup, never hardcode it.
-- Python 3.12+, `uv` + `pyproject.toml`, `ruff`, `pytest` + `hypothesis`, `python-telegram-bot` v21 (async, long polling), `gspread` wrapped in `asyncio.to_thread`, `pydantic` v2, `httpx`, Docker.
+- Python 3.12+, `uv` + `pyproject.toml`, `ruff`, `pytest` + `hypothesis`, `python-telegram-bot` v21 (async, long polling), `asyncpg`, `pydantic` v2, `httpx`, Docker.
 - Layout as in the brief (`app/bot/{handlers,keyboards,conversations}`, `app/services`, `app/models`, `app/config`, `tests/`).
 - Secrets only via environment variables. `.env` is gitignored and used only for local runs; production uses `fly secrets set`. Commit `.env.example` with blank values. Add a pre-commit hook (`gitleaks` or equivalent) so the repo can go public. Never log credentials, receipt images, or LLM image payloads.
-- Env vars: `TELEGRAM_BOT_TOKEN`, `GOOGLE_SERVICE_ACCOUNT_JSON` (the JSON string, not a path), `ANTHROPIC_API_KEY`, `WHOPAID_CONTROL_SHEET_ID` (one Sheet, created once, holding the `Bindings` tab), `LOG_LEVEL`. No `FX_API_KEY`, no `DEFAULT_TIMEZONE` (these are per trip).
+- Env vars: `TELEGRAM_BOT_TOKEN`, `DATABASE_URL`, `ANTHROPIC_API_KEY`, `LOG_LEVEL`. No `FX_API_KEY`, no `DEFAULT_TIMEZONE` (these are per trip).
 
 ## 2. Trips (multi-trip, one Sheet each)
 
