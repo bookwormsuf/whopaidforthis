@@ -91,8 +91,10 @@ When the trip is open the second paragraph is followed by one line naming the tr
   `LEDGER_UNAVAILABLE_TEXT`. The menu is never edited to match.
 
 ### Group-added event
-- Handler on `filters.StatusUpdate.NEW_CHAT_MEMBERS` that posts the welcome only when the bot
-  itself is among the new members. Other joins are ignored. Posting failures (bot removed again,
+- Handler on `filters.StatusUpdate.NEW_CHAT_MEMBERS | CHAT_CREATED` that posts the welcome when
+  the bot itself is among the new members, or when the group was created with the bot already in
+  it (Telegram sends `group_chat_created` then, not `new_chat_members`; found on checklist step 1,
+  2026-10-15). Other joins are ignored. Posting failures (bot removed again,
   no send permission) are logged and swallowed.
 
 ## Agent builds
