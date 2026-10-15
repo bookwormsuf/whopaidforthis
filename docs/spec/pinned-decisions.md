@@ -188,7 +188,7 @@ Decided with Sufyan after the post-trip review. ADR 0003 records the why; `docs/
 - `/deletetrip` by the trip starter hard-deletes the chat's trips and rows after a confirm button.
 - `/export` sends one `.xlsx` (Expenses, Shares, Line items, People, Balances), built by code, no model call. A Google Sheet export may come later and reuses the same rows.
 - Hosting: one Fly machine always on. Store tests run against a real Postgres in Docker.
-- Roadmap after Sprint 9: Sprint 10 `/start` menu with buttons (fewer commands to remember); Sprint 11 Google Sheet export and drafts that survive a restart, if still wanted.
+- Roadmap after Sprint 9: Sprint 10 `/start` menu with buttons (shipped 2026-10-15). Sprint 11 (Google Sheet export, persistent drafts, older-trip export) dropped 2026-10-15 as not core; a WhatsApp version is being explored instead.
 
 ## 19. `/start` welcome menu (added 2026-10-15, Sprint 10)
 - Buttons under messages only; no `setMyCommands`, no persistent reply keyboard.

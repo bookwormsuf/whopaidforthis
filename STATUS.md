@@ -918,3 +918,16 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   checklist steps were not reported to Claude and stand on Sufyan's sign-off. Sprint 10 closed.
 - Next action / owner: Sprint 9 steps 5 and 6 still pending / Sufyan. Sprint 11 (Google Sheet
   export, persistent drafts, pick an older trip for `/export`) only if Sufyan asks / Sufyan.
+
+### 2026-10-15 — Sprint 11 dropped; WhatsApp explored and parked
+
+- Performed by: Claude with Sufyan.
+- Sprint 11 grilling got one round in (nine questions: drafts as one JSON row per draft written on
+  every change, 30-minute expiry, shape version, `Other trips…` button under `/export`) before
+  Sufyan judged all three candidates not core. Nothing pinned; the round's recommendations are in
+  the session transcript only. Index and spec roadmap mark it dropped.
+- WhatsApp version checked against Meta's Groups API page directly, after a search agent's
+  summary got the buttons point wrong: Groups API requires an Official Business Account, caps a
+  group at 8 participants, lists interactive messages as unsupported in groups, and bills per
+  message. Unofficial WhatsApp Web libraries risk bans. Verdict: stay on Telegram.
+- Next action / owner: Sprint 9 steps 5 and 6 / Sufyan. No sprint in flight.
