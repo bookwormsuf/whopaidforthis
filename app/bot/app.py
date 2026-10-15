@@ -30,7 +30,12 @@ from app.bot.conversations.settrip import (
     settrip_text_handler,
 )
 from app.bot.deps import Deps, get_deps
-from app.bot.handlers.balances import balances_command, mine_command, settle_command
+from app.bot.handlers.balances import (
+    balances_command,
+    close_trip_callback,
+    mine_command,
+    settle_command,
+)
 from app.bot.handlers.basic import help_command, start_command
 from app.bot.handlers.callbacks import join_button_callback
 from app.bot.handlers.export import export_command
@@ -210,6 +215,7 @@ def build_application(token: str, deps: Deps) -> Application:
     application.add_handler(CallbackQueryHandler(settrip_callback, pattern=r"^st:"))
     application.add_handler(CallbackQueryHandler(join_button_callback, pattern=r"^join:"))
     application.add_handler(CallbackQueryHandler(undo_callback, pattern=r"^undo:"))
+    application.add_handler(CallbackQueryHandler(close_trip_callback, pattern=r"^closetrip:"))
     # A receipt's `Try again` re-reads the photo: non-blocking for the same reason
     # as photo_expense_handler. Registered before the general draft handler, which
     # would otherwise match it first.

@@ -91,6 +91,23 @@ def rebind_keyboard(session_id: str) -> InlineKeyboardMarkup:
     )
 
 
+def close_trip_keyboard(trip_id: int, settle_presser_id: int) -> InlineKeyboardMarkup:
+    """The "Close this trip" button on /settle's reply (sprint 9 item 2). Callback
+    data carries the trip id and the id of whoever ran /settle, since either that
+    person or the trip's `created_by` may press it; the handler re-reads the trip
+    from the store rather than trusting a stale `created_by` baked in here.
+    """
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Close this trip", callback_data=f"closetrip:{trip_id}:{settle_presser_id}"
+                )
+            ]
+        ]
+    )
+
+
 def joined_button(chat_id: int, joined_count: int = 0) -> InlineKeyboardButton:
     """The "I'm in too" button (spec §3), reused on Connected ✅ and Joined ✅
     messages. Label gets a counter once `joined_count` >= 1: "I'm in too (2 joined)".
