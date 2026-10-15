@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import sys
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -18,15 +17,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
     telegram_bot_token: SecretStr
-    google_service_account_json: SecretStr = Field(
-        description=(
-            "The Google service account key as JSON text on one line, not a path to a file."
-        )
+    database_url: SecretStr = Field(
+        description=("Neon's pooled Postgres connection string (sslmode=require). Required.")
     )
     anthropic_api_key: SecretStr
-    whopaid_control_sheet_id: str = Field(
-        description="ID of the control Sheet holding the Bindings tab. Required."
-    )
     log_level: LogLevel = "INFO"
     bot_version: str = Field(
         default="dev",
@@ -40,13 +34,6 @@ class Settings(BaseSettings):
             return value.upper()
         return value
 
-    def service_account_info(self) -> dict[str, Any]:
-        """Parse GOOGLE_SERVICE_ACCOUNT_JSON, never printing the value on failure."""
-        try:
-            return json.loads(self.google_service_account_json.get_secret_value())
-        except json.JSONDecodeError as exc:
-            raise ValueError("GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON") from exc
-
 
 def load_settings() -> Settings:
     """Load Settings from the environment, exiting with code 1 on any missing or invalid value.
@@ -57,7 +44,7 @@ def load_settings() -> Settings:
     Never prints the offending input value.
     """
     try:
-        settings = Settings()
+        return Settings()
     except ValidationError as exc:
         for error in exc.errors():
             field_name = str(error["loc"][0]) if error["loc"] else "unknown"
@@ -70,14 +57,3 @@ def load_settings() -> Settings:
                     file=sys.stderr,
                 )
         raise SystemExit(1) from exc
-
-    try:
-        settings.service_account_info()
-    except ValueError:
-        print(
-            "Invalid value for environment variable: GOOGLE_SERVICE_ACCOUNT_JSON (not valid JSON)",
-            file=sys.stderr,
-        )
-        raise SystemExit(1) from None
-
-    return settings

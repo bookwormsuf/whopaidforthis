@@ -1,6 +1,6 @@
 """The dependency seam: handlers reach services only through `Deps`.
 
-Handlers never import gspread or httpx directly; they get a `LedgerStore` and a
+Handlers never import asyncpg or httpx directly; they get a `LedgerStore` and a
 `CurrencyCatalog` from `context.application.bot_data["deps"]`.
 """
 
@@ -21,14 +21,12 @@ from app.services.receipt_parser import ReceiptReader
 class Deps:
     """Everything a handler needs that isn't already on `Update`/`Context`.
 
-    Dedup (spec §10) lives entirely inside `draft_service`: no handler reads it
-    directly, so it is not a `Deps` field -- it is wired up once, alongside
-    `draft_service`, at construction time (`app.bot.app.run`, `tests/helpers.py`).
+    The idempotency check for a draft's save now lives in the store itself (its
+    unique constraints, spec §18) -- no in-memory dedup is wired up here any more.
     """
 
     ledger: LedgerStore
     currencies: CurrencyCatalog
-    service_account_email: str
     bot_version: str
     draft_service: DraftService
     receipt_reader: ReceiptReader
