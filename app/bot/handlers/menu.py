@@ -123,18 +123,17 @@ def menu_keyboard(state: MenuState, page: int = 1) -> InlineKeyboardMarkup:
     if page == 2:
         return InlineKeyboardMarkup(
             [
-                [_button("Mine", "mine"), _button("Undo last", "undo")],
-                [_button("Export", "export")],
-                [_button("How to add an expense", "howto")],
+                [_button("Settle", "settle"), _button("Export", "export")],
+                [_button("How to add an expense", "howto"), _button("Undo last", "undo")],
                 [_button("Delete trip", "deletetrip")],
                 [InlineKeyboardButton("◂ Back", callback_data="menu:page:1")],
             ]
         )
     return InlineKeyboardMarkup(
         [
-            [_button("Join", "join")],
-            [_button("Balances", "balances"), _button("Settle", "settle")],
+            [_button("Mine", "mine"), _button("Balances", "balances")],
             [_button("Recent", "recent"), _button("Today", "today"), _button("Summary", "summary")],
+            [_button("Join", "join")],
             [InlineKeyboardButton("More ▸", callback_data="menu:page:2")],
         ]
     )

@@ -59,10 +59,10 @@ When the trip is open the second paragraph is followed by one line naming the tr
   `howto`, `deletetrip`, `settrip`. Registered as one `CallbackQueryHandler(pattern=r"^menu:")`.
 - State is computed with `resolve_trip_status` at render time and again at press time.
 - No trip (one page): `Start a trip`.
-- Trip open, page 1: row `Join`; row `Balances` `Settle`; row `Recent` `Today` `Summary`;
-  row `More ▸`.
-  Page 2: row `Mine` `Undo last`; row `Export`; row `How to add an expense`; row `Delete trip`;
-  row `◂ Back`.
+- Trip open, page 1 (reordered 2026-10-15 on the checklist, daily use first): row `Mine`
+  `Balances`; row `Recent` `Today` `Summary`; row `Join`; row `More ▸`.
+  Page 2 (end-of-trip and one-offs): row `Settle` `Export`; row `How to add an expense`
+  `Undo last`; row `Delete trip`; row `◂ Back`.
 - Latest trip closed (one page): row `Start a new trip`; row `Export`; row `Delete trip`.
 - `More ▸` and `◂ Back` call `edit_message_reply_markup` on the same message; the text does not
   change. Everything else posts a new plain message in the chat (not a reply, no quote) and

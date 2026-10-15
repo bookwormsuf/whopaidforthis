@@ -522,7 +522,7 @@ async def test_everyones_in_removes_keyboard_and_appends_closing_line() -> None:
     welcome_text = welcome_kwargs.get("text") or welcome_args[1]
     assert "Trip: Trip (JPY → SGD)" in welcome_text
     labels = [b.text for row in welcome_kwargs["reply_markup"].inline_keyboard for b in row]
-    assert labels[:2] == ["Join", "Balances"]
+    assert labels[:2] == ["Mine", "Balances"]
     context.bot.pin_chat_message.assert_awaited_once()
 
 
