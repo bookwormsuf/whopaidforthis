@@ -723,3 +723,60 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   Items tab gets one row per unit. Spec §9 amended.
 - Checks: `uv run pytest -q` 446 passed; ruff clean.
 - Next action / owner: merge and deploy on Sufyan's approval / Sufyan.
+
+### 2026-10-15 — Whole-codebase review after the trip (sprints 0 to 8)
+
+- Performed by: Claude (Fable 5.1) orchestrating four Opus review agents (standards, spec,
+  architecture, divergent) over everything on `main` since the first commit. Haiku verifiers
+  stalled, so Claude verified each correctness finding by reading the cited code and spec.
+- Surviving findings (details in the review message to Sufyan, 2026-10-15):
+  - Spec: a failed `expense_exists` read during Confirm leaves the draft stuck in `committing`
+    (`drafts.py` `confirm`); a failed save shows only a toast, with no `Retry save` button or
+    error line on the card (spec §10, §14).
+  - Standards: `_KNOWN_COMMANDS` in `app/bot/app.py` lacks `balances`, `mine`, `settle`, so an
+    unbound group gets "Run /settrip first" twice; `setup-flyctl@master` is unpinned in the
+    deploy workflow.
+  - Architecture: six receipt transitions rebuild `Draft(...)` from a hand-kept field list and
+    the rate step is written three times; "confirmed expenses for this chat" is filtered by
+    each caller, not the store; the receipt pipeline lives in a handler; draft action names
+    are plain strings across five files.
+  - Divergent: "Who paid?" is a parallel path beside the existing `PendingName` queue; the
+    duplicate-save guard runs once before a retried, non-idempotent `appendCells`.
+- Dropped below threshold: 10 (dedup checked at start not commit; payer tie order on surplus;
+  40-item cap read as receipt-wide; binding read before draft lookup on callbacks; Decimal
+  docstring claims; dead `headers.index`; model importing a service; no-op `noqa: BLE001`;
+  stale docstrings; undeclared `python-dotenv` in a script).
+- Checks and limitations: review only, no code changed, tests not re-run.
+- Reviewed by / disposition: awaiting Sufyan.
+- Next action / owner: decide which findings to fix before `/settle` / Sufyan.
+
+### 2026-10-15 — Post-trip review: five fixes from the spec/standards findings above
+
+- Performed by: Claude (Fable 5.1), on branch `fix/post-trip-review` off `main`, fixing five
+  items the 2026-10-15 review surfaced. Each fix has a test that failed against the old code
+  first (confirmed by running it on a stash of the pre-fix file), then passed after the fix.
+- Fixes, one commit each:
+  - `expense_exists` moved inside Confirm's try/except (`drafts.py`), so a transport failure on
+    that read restores `preview` instead of stranding the draft in `committing` forever. Also
+    mapped `requests` timeout/connection errors in `google_sheets.py`'s retry helper to
+    `LedgerUnavailable`, since only HTTP-status errors were translated before; now timeouts
+    retry with the same backoff as 429/5xx.
+  - `append_expense`'s own `batch_update` now retries itself (same backoff constants) and checks
+    `expense_exists` before each retry, since `appendCells` is not idempotent: a retryable error
+    after Google had already applied the write would otherwise append the expense twice.
+  - A Confirm that fails now edits the draft card with an error line and relabels the Confirm
+    button "Retry save" (same callback, no new state), instead of only a toast, matching spec
+    §10/§14. Added a plain `render_draft(..., save_error=...)` and `preview_keyboard(...,
+    retry=...)` parameter rather than a duplicate keyboard.
+  - `_KNOWN_COMMANDS` in `app/bot/app.py` is now derived from the same tuple that registers each
+    `CommandHandler`, so the two can't drift again; this also fixed the missing `balances`,
+    `mine`, `settle` entries (an unbound group was getting "Run /settrip first" twice for those).
+  - `setup-flyctl@master` in the deploy workflow pinned to the latest release's commit SHA, with
+    a version comment.
+- Checks: `uv run pytest -q` 438 before this branch -> 453 after (15 new tests across the four
+  behaviour fixes); `uv run ruff check .` and `uv run ruff format --check .` both clean.
+- Could not do: nothing skipped — the "if `_NOT_OPENABLE_EXC` already covers transport errors,
+  skip code changes" escape hatch in the brief didn't apply, since it only covered
+  `SpreadsheetNotFound`/`PermissionError`, not `requests` timeouts, so that part got a real fix.
+- Reviewed by / disposition: not yet reviewed; branch not merged.
+- Next action / owner: review the diff and merge / Sufyan.
