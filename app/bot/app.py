@@ -119,7 +119,10 @@ async def _post_init(application: Application) -> None:
         try:
             await connect()
         except Exception as exc:  # noqa: BLE001 - this is the fail-fast boundary
-            print(f"Could not reach the database: DATABASE_URL ({exc})", file=sys.stderr)
+            print(
+                f"Could not reach the database ({type(exc).__name__}). Check DATABASE_URL.",
+                file=sys.stderr,
+            )
             raise SystemExit(1) from exc
     logger.info(
         "whopaid started",

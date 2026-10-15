@@ -388,3 +388,27 @@ async def test_post_shutdown_hook_logs_whopaid_stopped(caplog: pytest.LogCapture
 
 def test_stop_signals_includes_sigterm() -> None:
     assert signal.SIGTERM in STOP_SIGNALS
+
+
+async def test_post_init_startup_error_never_leaks_the_password(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A DSN with a password embedded in the exception message must never reach
+    stderr (sprint 9 review item 1): only a fixed line naming the exception type.
+    """
+    deps = _fake_deps()
+    deps.ledger.connect = AsyncMock(
+        side_effect=RuntimeError(
+            "could not connect to postgresql://user:hunter2@fake-host/db"
+        )
+    )
+    application = build_application("123456:fake-token", deps)
+
+    with pytest.raises(SystemExit):
+        await application.post_init(application)
+
+    captured = capsys.readouterr()
+    assert "hunter2" not in captured.err
+    assert captured.err.strip() == (
+        "Could not reach the database (RuntimeError). Check DATABASE_URL."
+    )
