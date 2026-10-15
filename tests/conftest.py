@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import AsyncIterator
+from urllib.parse import urlsplit
 
 import asyncpg
 import pytest
@@ -22,6 +23,14 @@ from app.services.postgres_store import PostgresLedgerStore
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL", "postgresql://postgres:postgres@localhost:5433/whopaid_test"
 )
+
+
+def _host_and_port() -> str:
+    """Host and port only, from TEST_DATABASE_URL -- never the credentials or
+    database name, even in a CI failure message (sprint 9 review item 5).
+    """
+    parts = urlsplit(TEST_DATABASE_URL)
+    return f"{parts.hostname}:{parts.port}"
 
 _TABLES = (
     "line_items",
@@ -51,7 +60,12 @@ _REACHABLE = _database_reachable()
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     if _REACHABLE:
         return
-    skip = pytest.mark.skip(reason=f"no Postgres reachable at {TEST_DATABASE_URL}")
+    has_postgres_tests = any("postgres" in item.keywords for item in items)
+    if has_postgres_tests and os.environ.get("CI"):
+        # In CI the Postgres service is expected to be up; a skip here would
+        # silently drop store coverage from every run (sprint 9 review item 5).
+        raise pytest.UsageError(f"no Postgres reachable at {_host_and_port()} (CI=1)")
+    skip = pytest.mark.skip(reason=f"no Postgres reachable at {_host_and_port()}")
     for item in items:
         if "postgres" in item.keywords:
             item.add_marker(skip)
