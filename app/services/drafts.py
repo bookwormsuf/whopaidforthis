@@ -622,6 +622,13 @@ class DraftService:
         await self._drafts.put(committed)
         return committed
 
+    async def get(self, draft_id: str) -> Draft | None:
+        """The current draft with no initiator/state check -- used to re-render
+        the card after `confirm` raises LedgerUnavailable (the presser was
+        already authorized by that call's own `_get_active`).
+        """
+        return await self._drafts.get(draft_id)
+
     async def set_bot_message_id(self, draft_id: str, bot_message_id: int) -> None:
         """Records the message ID of the card once it has been sent."""
         draft = await self._drafts.get(draft_id)

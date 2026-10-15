@@ -92,11 +92,16 @@ def custom_keyboard(draft_id: str, balanced: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([row])
 
 
-def preview_keyboard(draft_id: str) -> InlineKeyboardMarkup:
+def preview_keyboard(draft_id: str, *, retry: bool = False) -> InlineKeyboardMarkup:
+    """`retry=True` (spec §10/§14: a failed save keeps the draft in `preview` with
+    a `Retry save` button) relabels Confirm without changing its callback action,
+    so pressing it simply calls `confirm` again -- no new state needed.
+    """
+    confirm_label = "Retry save" if retry else "Confirm"
     return InlineKeyboardMarkup(
         [
             [
-                _button(draft_id, "Confirm", "confirm"),
+                _button(draft_id, confirm_label, "confirm"),
                 _button(draft_id, "Edit", "edit"),
                 _button(draft_id, "Cancel", "cancel"),
             ]

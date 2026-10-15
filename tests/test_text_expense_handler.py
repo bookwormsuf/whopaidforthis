@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from app.bot.handlers.text_expense import draft_callback, text_expense_handler
 from app.models.trip import Trip
-from app.services.ledger_store import InMemoryLedgerStore
+from app.services.ledger_store import InMemoryLedgerStore, LedgerUnavailable
 from tests.helpers import make_deps
 
 CHAT_ID = -100
@@ -227,3 +227,60 @@ async def test_draft_callback_full_flow_confirm_edits_saved_message() -> None:
     saved = await ledger.list_expenses(trip)
     assert len(saved) == 1
     assert saved[0].status == "confirmed"
+
+
+class _AlwaysFailAppendLedger(InMemoryLedgerStore):
+    async def append_expense(self, trip, expense, line_items=(), assignments=None) -> None:
+        raise LedgerUnavailable("boom")
+
+
+async def test_draft_callback_confirm_failure_shows_retry_save_with_error_line() -> None:
+    """Spec §10/§14: a failed save keeps the draft in preview with a Retry save
+    button and an error line, the message edited with its keyboard intact.
+    """
+    ledger = _AlwaysFailAppendLedger()
+    trip = Trip(
+        chat_id=CHAT_ID,
+        sheet_id="sheet-id-1234567890",
+        name="Japan Trip",
+        trip_currency="JPY",
+        home_currency="SGD",
+        timezone="Asia/Tokyo",
+        created_at=datetime.now(UTC),
+    )
+    await ledger.save_binding(trip)
+    await ledger.initialise_trip_sheet(trip)
+    deps = make_deps(ledger)
+    context = _context(deps)
+    update = _update("1200 yen ramen")
+    await text_expense_handler(update, context)
+
+    draft_id = (
+        update.effective_message.reply_text.call_args.kwargs["reply_markup"]
+        .inline_keyboard[0][0]
+        .callback_data.split(":")[0]
+    )
+
+    justme_update = _callback_update(f"{draft_id}:justme:-")
+    await draft_callback(justme_update, context)
+
+    confirm_update = _callback_update(f"{draft_id}:confirm:-")
+    await draft_callback(confirm_update, context)
+
+    confirm_update.callback_query.answer.assert_awaited_once()
+    confirm_update.callback_query.edit_message_text.assert_awaited_once()
+    (text,), kwargs = confirm_update.callback_query.edit_message_text.call_args
+    assert "Couldn't reach Google Sheets" in text
+    assert "Retry save" in text or any(
+        button.text == "Retry save"
+        for row in kwargs["reply_markup"].inline_keyboard
+        for button in row
+    )
+    buttons = [button for row in kwargs["reply_markup"].inline_keyboard for button in row]
+    retry_button = next(b for b in buttons if b.callback_data == f"{draft_id}:confirm:-")
+    assert retry_button.text == "Retry save"
+    assert any(b.callback_data == f"{draft_id}:edit:-" for b in buttons)
+    assert any(b.callback_data == f"{draft_id}:cancel:-" for b in buttons)
+
+    stuck = await deps.draft_service.get(draft_id)
+    assert stuck.state == "preview"

@@ -47,6 +47,10 @@ from app.services.drafts import (
 )
 from app.services.splitting import Custom, Items
 
+# Spec §10/§14: on a failed save the draft stays in `preview` with a `Retry save`
+# button and this error line on the card.
+SAVE_ERROR_LINE = "⚠️ Couldn't reach Google Sheets. Tap Retry save to try again."
+
 
 def _buttons(draft_id: str, *pairs: tuple[str, str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -59,8 +63,15 @@ def _buttons(draft_id: str, *pairs: tuple[str, str]) -> InlineKeyboardMarkup:
     )
 
 
-def render_draft(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup | None]:
-    """Builds every card, `Saved ✅ ...`/`Cancelled.` included."""
+def render_draft(
+    draft: Draft, trip: Trip, *, save_error: bool = False
+) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Builds every card, `Saved ✅ ...`/`Cancelled.` included.
+
+    `save_error=True` only applies to a `preview` card (spec §10/§14): the draft
+    message is edited with the error line and its keyboard intact, Confirm
+    relabelled `Retry save`.
+    """
     if draft.state == "who_paid":
         return _render_who_paid(draft, trip)
     if draft.state == "detected":
@@ -82,7 +93,7 @@ def render_draft(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup | 
     if draft.state == "items":
         return _render_items(draft, trip)
     if draft.state == "preview":
-        return _render_preview(draft, trip)
+        return _render_preview(draft, trip, save_error=save_error)
     if draft.state == "rate_failed":
         return _render_rate_failed(draft, trip)
     if draft.state == "committed":
@@ -314,7 +325,9 @@ def _render_custom(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]
     return "\n".join(parts), custom_keyboard(draft.draft_id, balanced=remaining == 0)
 
 
-def _render_preview(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+def _render_preview(
+    draft: Draft, trip: Trip, *, save_error: bool = False
+) -> tuple[str, InlineKeyboardMarkup]:
     """ "Check before saving": what, how much, who paid, then each person's share
     as a bullet (sprint 8). Both currencies, trip first, except for an expense
     entered in the home currency, which shows the home currency only (spec §12).
@@ -322,13 +335,16 @@ def _render_preview(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup
     head = f"<b>Check before saving</b>\n{_header(draft, trip)}\n\nEach person's share:"
     if isinstance(draft.split, Items):
         lines = _items_preview_lines(draft, trip)
-        return head + "\n" + "\n".join(lines), preview_keyboard(draft.draft_id)
-    lines = []
-    for pid, (share_trip, share_home) in draft_shares(draft, trip).items():
-        name = escape(person_for(draft, pid).display_name)
-        share = format_expense_amount(trip, draft.currency, share_trip, share_home)
-        lines.append(f"• {name} {share}")
-    return head + "\n" + "\n".join(lines), preview_keyboard(draft.draft_id)
+    else:
+        lines = []
+        for pid, (share_trip, share_home) in draft_shares(draft, trip).items():
+            name = escape(person_for(draft, pid).display_name)
+            share = format_expense_amount(trip, draft.currency, share_trip, share_home)
+            lines.append(f"• {name} {share}")
+    text = head + "\n" + "\n".join(lines)
+    if save_error:
+        text += "\n\n" + SAVE_ERROR_LINE
+    return text, preview_keyboard(draft.draft_id, retry=save_error)
 
 
 def _render_rate_failed(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
