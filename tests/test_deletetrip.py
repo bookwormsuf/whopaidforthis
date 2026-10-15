@@ -14,6 +14,7 @@ from app.bot.handlers.deletetrip import (
     STALE_BUTTON_TEXT,
     deletetrip_callback,
     deletetrip_command,
+    run_deletetrip,
 )
 from app.bot.handlers.join import UNBOUND_TEXT
 from app.models.trip import Trip
@@ -192,3 +193,36 @@ async def test_keep_leaves_the_trip_in_place() -> None:
 
     update.callback_query.edit_message_text.assert_awaited_once_with(KEPT_TEXT, parse_mode="HTML")
     assert len(await ledger.list_trips(CHAT_ID)) == 1
+
+
+async def test_run_deletetrip_asks_the_starter_to_confirm_with_a_fake_send() -> None:
+    ledger, trip = await _bound_ledger()
+    deps = make_deps(ledger)
+    sent: list[tuple[str, dict]] = []
+
+    async def fake_send(text: str, *, reply_markup=None):
+        sent.append((text, {"reply_markup": reply_markup}))
+        return SimpleNamespace(message_id=1)
+
+    await run_deletetrip(
+        deps, SimpleNamespace(id=CHAT_ID), SimpleNamespace(id=STARTER_ID), fake_send
+    )
+
+    assert sent[0][0] == CONFIRM_TEXT
+    assert sent[0][1]["reply_markup"] is not None
+
+
+async def test_run_deletetrip_refuses_a_non_starter_with_a_fake_send() -> None:
+    ledger, trip = await _bound_ledger()
+    deps = make_deps(ledger)
+    sent: list[tuple[str, dict]] = []
+
+    async def fake_send(text: str, *, reply_markup=None):
+        sent.append((text, {"reply_markup": reply_markup}))
+        return SimpleNamespace(message_id=1)
+
+    await run_deletetrip(
+        deps, SimpleNamespace(id=CHAT_ID), SimpleNamespace(id=OTHER_USER_ID), fake_send
+    )
+
+    assert sent[0][0] == NOT_ALLOWED_TEXT

@@ -11,12 +11,13 @@ from datetime import UTC, datetime
 from html import escape
 from zoneinfo import ZoneInfo
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Chat, InlineKeyboardButton, InlineKeyboardMarkup, Update, User
 from telegram.ext import ContextTypes
 
-from app.bot.deps import get_deps
+from app.bot.deps import Deps, get_deps
 from app.bot.formatting import fmt_expense_bullet, fmt_money, format_expense_amount
-from app.bot.handlers.join import require_trip
+from app.bot.handlers.join import require_trip_send
+from app.bot.send import SendFn, build_send
 from app.models.expense import ExpenseRecord
 from app.models.trip import Trip
 from app.models.user import display_name_for
@@ -29,50 +30,51 @@ NO_RECENT_EXPENSES_TEXT = "No expenses yet."
 NO_EXPENSES_TODAY_TEXT = "No expenses today."
 
 
-async def _confirmed(context: ContextTypes.DEFAULT_TYPE, trip: Trip) -> list[ExpenseRecord]:
+async def _confirmed(deps: Deps, trip: Trip) -> list[ExpenseRecord]:
     """Fetches Expenses once, confirmed only. No `chat_id` filter: a trip
     belongs to exactly one chat, so the store's `confirmed_only` already scopes
     this correctly (sprint 9 review item 8). Raises `LedgerUnavailable` straight
     through; every caller wraps its own call in a try/except and replies
     `LEDGER_UNAVAILABLE_TEXT` on that.
     """
-    deps = get_deps(context)
     return await deps.ledger.list_expenses(trip, confirmed_only=True)
 
 
-async def recent_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    trip = await require_trip(update, context)
+async def run_recent(deps: Deps, chat: Chat, user: User, send: SendFn) -> None:
+    trip = await require_trip_send(deps, chat.id, send)
     if trip is None:
         return
-    message = update.effective_message
-    assert message is not None
     try:
-        expenses = await _confirmed(context, trip)
+        expenses = await _confirmed(deps, trip)
     except LedgerUnavailable:
         logger.exception("recent: could not read Expenses")
-        await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
+        await send(LEDGER_UNAVAILABLE_TEXT)
         return
 
     expenses.sort(key=lambda e: e.created_at)
     last_five = expenses[-5:]
     if not last_five:
-        await message.reply_text(NO_RECENT_EXPENSES_TEXT, parse_mode="HTML")
+        await send(NO_RECENT_EXPENSES_TEXT)
         return
     text = "<b>Recent expenses</b>\n" + "\n".join(fmt_expense_bullet(e, trip) for e in last_five)
-    await message.reply_text(text, parse_mode="HTML")
+    await send(text)
 
 
-async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    trip = await require_trip(update, context)
+async def recent_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat, message = update.effective_chat, update.effective_message
+    assert chat is not None and message is not None
+    await run_recent(get_deps(context), chat, update.effective_user, build_send(message))
+
+
+async def run_today(deps: Deps, chat: Chat, user: User, send: SendFn) -> None:
+    trip = await require_trip_send(deps, chat.id, send)
     if trip is None:
         return
-    message = update.effective_message
-    assert message is not None
     try:
-        expenses = await _confirmed(context, trip)
+        expenses = await _confirmed(deps, trip)
     except LedgerUnavailable:
         logger.exception("today: could not read Expenses")
-        await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
+        await send(LEDGER_UNAVAILABLE_TEXT)
         return
 
     today = datetime.now(UTC).astimezone(ZoneInfo(trip.timezone)).date()
@@ -80,7 +82,7 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         (e for e in expenses if e.transaction_date == today), key=lambda e: e.created_at
     )
     if not todays:
-        await message.reply_text(NO_EXPENSES_TODAY_TEXT, parse_mode="HTML")
+        await send(NO_EXPENSES_TODAY_TEXT)
         return
     total_trip = sum(e.trip_amount_minor for e in todays)
     total_home = sum(e.home_amount_minor for e in todays)
@@ -90,20 +92,24 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"Spent today: <b>{fmt_money(total_home, trip.home_currency)}</b> "
         f"({fmt_money(total_trip, trip.trip_currency)})"
     )
-    await message.reply_text("\n".join(lines), parse_mode="HTML")
+    await send("\n".join(lines))
 
 
-async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    trip = await require_trip(update, context)
+async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat, message = update.effective_chat, update.effective_message
+    assert chat is not None and message is not None
+    await run_today(get_deps(context), chat, update.effective_user, build_send(message))
+
+
+async def run_summary(deps: Deps, chat: Chat, user: User, send: SendFn) -> None:
+    trip = await require_trip_send(deps, chat.id, send)
     if trip is None:
         return
-    message = update.effective_message
-    assert message is not None
     try:
-        expenses = await _confirmed(context, trip)
+        expenses = await _confirmed(deps, trip)
     except LedgerUnavailable:
         logger.exception("summary: could not read Expenses")
-        await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
+        await send(LEDGER_UNAVAILABLE_TEXT)
         return
 
     count = len(expenses)
@@ -114,7 +120,13 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         f"{count} expense{'s' if count != 1 else ''} · "
         f"{fmt_money(total_home, trip.home_currency)} · {fmt_money(total_trip, trip.trip_currency)}"
     )
-    await message.reply_text(text, parse_mode="HTML")
+    await send(text)
+
+
+async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat, message = update.effective_chat, update.effective_message
+    assert chat is not None and message is not None
+    await run_summary(get_deps(context), chat, update.effective_user, build_send(message))
 
 
 def _undo_keyboard(expense_id: str) -> InlineKeyboardMarkup:
@@ -128,33 +140,34 @@ def _undo_keyboard(expense_id: str) -> InlineKeyboardMarkup:
     )
 
 
-async def undo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    trip = await require_trip(update, context)
+async def run_undo(deps: Deps, chat: Chat, user: User, send: SendFn) -> None:
+    trip = await require_trip_send(deps, chat.id, send)
     if trip is None:
         return
-    user = update.effective_user
-    message = update.effective_message
-    assert user is not None and message is not None
 
     try:
-        confirmed = await _confirmed(context, trip)
+        confirmed = await _confirmed(deps, trip)
     except LedgerUnavailable:
         logger.exception("undo: could not read Expenses")
-        await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
+        await send(LEDGER_UNAVAILABLE_TEXT)
         return
 
     candidates = [e for e in confirmed if e.created_by_user_id == user.id]
     if not candidates:
-        await message.reply_text(NOTHING_TO_UNDO_TEXT, parse_mode="HTML")
+        await send(NOTHING_TO_UNDO_TEXT)
         return
     latest = max(candidates, key=lambda e: e.created_at)
     amount = format_expense_amount(
         trip, latest.original_currency, latest.trip_amount_minor, latest.home_amount_minor
     )
     text = f"Cancel this? {escape(latest.description)} {amount}"
-    await message.reply_text(
-        text, parse_mode="HTML", reply_markup=_undo_keyboard(latest.expense_id)
-    )
+    await send(text, reply_markup=_undo_keyboard(latest.expense_id))
+
+
+async def undo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat, user, message = update.effective_chat, update.effective_user, update.effective_message
+    assert chat is not None and user is not None and message is not None
+    await run_undo(get_deps(context), chat, user, build_send(message))
 
 
 async def _creator_name(deps, trip: Trip, expense: ExpenseRecord) -> str:

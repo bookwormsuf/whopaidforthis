@@ -323,3 +323,19 @@ def test_awaiting_settrip_text_filter_true_only_when_session_awaits_text() -> No
         chat=SimpleNamespace(id=-100), from_user=SimpleNamespace(id=2)
     )
     assert filt.filter(other_user_message) is False
+
+
+async def test_run_settrip_sends_trip_currency_buttons_with_a_fake_send() -> None:
+    deps = _deps()
+    chat = SimpleNamespace(id=-100, title="Japan Trip")
+    user = SimpleNamespace(id=1, first_name="Ada", last_name=None, username="ada")
+    sent: list[tuple[str, dict]] = []
+
+    async def fake_send(text: str, *, reply_markup=None):
+        sent.append((text, {"reply_markup": reply_markup}))
+        return SimpleNamespace(message_id=42)
+
+    await settrip.run_settrip(deps, chat, user, fake_send)
+
+    assert sent[0][0] == "Trip currency?"
+    assert len(deps.settrip_sessions._sessions) == 1

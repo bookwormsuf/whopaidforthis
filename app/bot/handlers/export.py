@@ -13,12 +13,13 @@ import logging
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo
 
-from telegram import InputFile, Update
+from telegram import Chat, InputFile, Update, User
 from telegram.error import TimedOut
 from telegram.ext import ContextTypes
 
-from app.bot.deps import get_deps
+from app.bot.deps import Deps, get_deps
 from app.bot.handlers.join import UNBOUND_TEXT
+from app.bot.send import SendDocumentFn, SendFn, build_send, build_send_document
 from app.models.trip import Trip
 from app.services.export import build_workbook, slugify
 from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
@@ -29,28 +30,30 @@ UPLOAD_FAILED_TEXT = "Couldn't send the file, please try /export again."
 logger = logging.getLogger(__name__)
 
 
-async def _pick_trip(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> Trip | None:
+async def _pick_trip_for(deps: Deps, chat_id: int) -> Trip | None:
     """The open trip if there is one, else the most recently closed trip of this
     chat, else `None` (no trip at all).
     """
-    deps = get_deps(context)
     return await deps.ledger.latest_trip(chat_id)
 
 
-async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat = update.effective_chat
-    message = update.effective_message
-    assert chat is not None and message is not None
-
-    deps = get_deps(context)
+async def run_export(
+    deps: Deps, chat: Chat, user: User, send: SendFn, send_document: SendDocumentFn
+) -> None:
+    """Deviates from the pinned `run_<name>(deps, chat, user, send)` shape (sprint
+    10 pin, docs/sprints/10-start-menu.md "Agent builds"): `/export`'s reply is a
+    file, not text, so `send` alone can't carry it. `send_document` is the one
+    sibling the sprint pin calls for, built from `message.reply_document` by the
+    typed command the same way `send` is built from `message.reply_text`.
+    """
     try:
-        trip = await _pick_trip(context, chat.id)
+        trip = await _pick_trip_for(deps, chat.id)
     except LedgerUnavailable:
         logger.exception("export: could not read the current binding")
-        await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
+        await send(LEDGER_UNAVAILABLE_TEXT)
         return
     if trip is None:
-        await message.reply_text(UNBOUND_TEXT, parse_mode="HTML")
+        await send(UNBOUND_TEXT)
         return
 
     try:
@@ -62,7 +65,7 @@ async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         line_items = await deps.ledger.list_line_items(trip)
     except LedgerUnavailable:
         logger.exception("export: could not read the ledger")
-        await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
+        await send(LEDGER_UNAVAILABLE_TEXT)
         return
 
     workbook = build_workbook(trip, users, expenses, splits, line_items)
@@ -75,8 +78,8 @@ async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     # tight enough that a slow link times out on the first try. Allow more, then retry once.
     for attempt in (1, 2):
         try:
-            await message.reply_document(
-                document=InputFile(workbook, filename=filename),
+            await send_document(
+                InputFile(workbook, filename=filename),
                 caption=caption,
                 read_timeout=UPLOAD_TIMEOUT_S,
                 write_timeout=UPLOAD_TIMEOUT_S,
@@ -85,6 +88,19 @@ async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         except TimedOut:
             if attempt == 2:
                 logger.warning("export: upload timed out twice")
-                await message.reply_text(UPLOAD_FAILED_TEXT, parse_mode="HTML")
+                await send(UPLOAD_FAILED_TEXT)
                 return
             logger.info("export: upload timed out, retrying once")
+
+
+async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat = update.effective_chat
+    message = update.effective_message
+    assert chat is not None and message is not None
+    await run_export(
+        get_deps(context),
+        chat,
+        update.effective_user,
+        build_send(message),
+        build_send_document(message),
+    )

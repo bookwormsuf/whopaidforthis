@@ -18,16 +18,18 @@ message IDs in the database.
 
 ## Sprint pins (decided with Sufyan, 2026-10-15)
 
-### When the welcome is posted
-- Three triggers, same message each time: the bot is added to a group (a `new_chat_members`
-  service update whose members include the bot's own user ID), `/start` in a group, `/help` in a
-  group. In private chat `/start` and `/help` post the help text with one URL button
-  `Add me to a group` pointing at `https://t.me/<bot_username>?startgroup=true`, the username
-  taken from `getMe` as today (spec §1).
+### When the welcome is posted (amended 2026-10-15 after review)
+- The welcome is posted on being added to a group (a `new_chat_members` service update whose
+  members include the bot's own user ID) and on `/start` in a group. `/help` in a group posts
+  the help text with the menu under it, not the welcome, and is never pinned. In private chat
+  `/start` and `/help` post the help text with one URL button `Add me to a group` pointing at
+  `https://t.me/<bot_username>?startgroup=true`, the username taken from `getMe` as today
+  (spec §1).
 - `/start` in a group no longer joins the sender. Joining is the `Join` button or `/join`.
   Spec §12's "`/start` in group = `/join`" line is superseded by §19.
-- Typed commands all keep working unchanged. `/help` keeps its command list, moved below the
-  explanation paragraph; the menu sits under the message.
+- Typed commands all keep working unchanged (amended 2026-10-15 after review). `/help` keeps
+  its command list, moved below the explanation paragraph; in a group the menu sits under the
+  message too, re-reading state the same way the welcome does.
 
 ### Welcome text (verbatim, HTML)
 ```

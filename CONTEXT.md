@@ -4,7 +4,7 @@ Terms used throughout the code, the spec and the export. Implementation details 
 
 ## People
 
-- **Trip user** — a person who has run `/join` (or `/start`) in the trip's Telegram group. Identified only by Telegram User ID. Username and display name are decoration and may change.
+- **Trip user** — a person who has run `/join` or tapped `Join` in the trip's Telegram group. Identified only by Telegram User ID. Username and display name are decoration and may change.
 - **Everyone** — the set of trip users in this group at the moment a participant choice is made. Not the Telegram member list, which bots cannot see.
 - **Payer** — the trip user who handed money to the merchant. Defaults to the sender of the expense message; may be overridden with "paid by <name>".
 - **Creator** — the trip user who sent the message that produced the expense. Usually the payer, not always.

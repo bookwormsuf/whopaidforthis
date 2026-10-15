@@ -11,6 +11,10 @@ from unittest.mock import AsyncMock, MagicMock
 from app.bot.handlers.reads import (
     NOTHING_TO_UNDO_TEXT,
     recent_command,
+    run_recent,
+    run_summary,
+    run_today,
+    run_undo,
     summary_command,
     today_command,
     undo_callback,
@@ -308,3 +312,57 @@ async def test_undo_cancelled_line_shows_home_only_for_home_currency_expense() -
     (text,), kwargs = cb_update.callback_query.edit_message_text.call_args
     assert text == "Cancelled ✅ Grab S$12.00"
     assert "¥" not in text
+
+
+def _fake_send():
+    sent: list[tuple[str, dict]] = []
+
+    async def send(text: str, *, reply_markup=None):
+        sent.append((text, {"reply_markup": reply_markup}))
+        return SimpleNamespace(message_id=1)
+
+    return send, sent
+
+
+async def test_run_recent_sends_last_five_with_a_fake_send() -> None:
+    ledger, trip = await _bound_ledger()
+    await ledger.append_expense(trip, _expense("e1", transaction_date=date(2026, 9, 20)))
+    deps = make_deps(ledger)
+    send, sent = _fake_send()
+
+    await run_recent(deps, SimpleNamespace(id=CHAT_ID), SimpleNamespace(id=1), send)
+
+    assert sent[0][0].startswith("<b>Recent expenses</b>")
+
+
+async def test_run_today_sends_no_expenses_today_with_a_fake_send() -> None:
+    ledger, trip = await _bound_ledger()
+    deps = make_deps(ledger)
+    send, sent = _fake_send()
+
+    await run_today(deps, SimpleNamespace(id=CHAT_ID), SimpleNamespace(id=1), send)
+
+    assert sent[0][0] == "No expenses today."
+
+
+async def test_run_summary_sends_the_totals_with_a_fake_send() -> None:
+    ledger, trip = await _bound_ledger()
+    await ledger.append_expense(trip, _expense("e1"))
+    deps = make_deps(ledger)
+    send, sent = _fake_send()
+
+    await run_summary(deps, SimpleNamespace(id=CHAT_ID), SimpleNamespace(id=1), send)
+
+    assert sent[0][0].startswith("1 expense ·")
+
+
+async def test_run_undo_offers_the_latest_expense_with_a_fake_send() -> None:
+    ledger, trip = await _bound_ledger()
+    await ledger.append_expense(trip, _expense("e1", created_by=1, description="Ramen"))
+    deps = make_deps(ledger)
+    send, sent = _fake_send()
+
+    await run_undo(deps, SimpleNamespace(id=CHAT_ID), SimpleNamespace(id=1), send)
+
+    assert sent[0][0].startswith("Cancel this? Ramen")
+    assert sent[0][1]["reply_markup"] is not None
