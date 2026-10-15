@@ -255,7 +255,16 @@ def test_balances_sheet_matches_compute_balances_and_settle() -> None:
         i for i, row in enumerate(sheet.iter_rows(values_only=True), start=1) if row[0] == "From"
     )
     settle_rows = list(sheet.iter_rows(min_row=settle_header_row + 1, values_only=True))
-    assert len([r for r in settle_rows if r[0]]) == len(transfers)
+    non_empty = [r for r in settle_rows if r[0]]
+    assert len(non_empty) == len(transfers)
+    # Sprint 9 spec item 9d: compare the actual transfer amounts against
+    # settle()'s output, not just the row count.
+    names = {1: "Ada", 2: "Bo"}
+    actual = [(row[0], row[1], row[2]) for row in non_empty]
+    expected = [
+        (names[t.from_user_id], names[t.to_user_id], t.amount_minor / 100) for t in transfers
+    ]
+    assert actual == expected
 
 
 def test_slugify() -> None:

@@ -96,6 +96,34 @@ async def test_save_and_get_binding_roundtrip(postgres_store: PostgresLedgerStor
     assert fetched.closed_at is None
 
 
+async def test_trips_one_open_per_chat_partial_index_rejects_a_second_open_row(
+    postgres_store: PostgresLedgerStore,
+) -> None:
+    """The invariant is enforced by the schema itself, not just by
+    `save_binding`'s own "close the old one first" logic (sprint 9 spec item
+    9b): a second open trip row inserted directly for the same chat violates
+    the `trips_one_open_per_chat` partial unique index.
+    """
+    trip = await postgres_store.save_binding(_trip())
+
+    with pytest.raises(asyncpg.UniqueViolationError):
+        async with postgres_store.pool.acquire() as conn:
+            await conn.execute(
+                """
+                insert into trips
+                    (chat_id, name, trip_currency, home_currency, timezone, created_by, created_at)
+                values ($1, $2, $3, $4, $5, $6, $7)
+                """,
+                trip.chat_id,
+                "Second open trip",
+                trip.trip_currency,
+                trip.home_currency,
+                trip.timezone,
+                trip.created_by,
+                datetime.now(UTC),
+            )
+
+
 async def test_save_binding_closes_previous_open_trip(postgres_store: PostgresLedgerStore) -> None:
     trip = _trip()
     first = await postgres_store.save_binding(trip)
@@ -205,61 +233,17 @@ async def test_append_expense_same_id_leaves_one_row(postgres_store: PostgresLed
 async def test_append_expense_failing_split_leaves_no_expense_row(
     postgres_store: PostgresLedgerStore,
 ) -> None:
-    """A split with a user id that violates a constraint rolls the whole insert back."""
+    """A split that violates a check constraint rolls the whole insert back,
+    leaving no expense row. Calls `append_expense` itself (sprint 9 spec item
+    9a) rather than reimplementing its SQL by hand.
+    """
     trip = await postgres_store.save_binding(_trip())
     expense = _expense(trip, "01EXPENSE000000000000005")
     bad_split = expense.splits[0].model_copy(update={"split_method": "not-a-real-method"})
     broken = expense.model_copy(update={"splits": [bad_split]})
 
-    async def _do() -> None:
-        async with postgres_store.pool.acquire() as conn, conn.transaction():
-            await conn.execute(
-                """
-                insert into expenses
-                    (id, trip_id, chat_id, message_id, created_by, payer_id, description,
-                     merchant, category, original_amount_minor, original_currency,
-                     trip_amount_minor, home_amount_minor, rate, rate_date, transaction_date,
-                     source_type, split_method, status, created_at, cancelled_at, notes)
-                values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                        $16, $17, $18, $19, $20, $21, $22)
-                """,
-                broken.expense_id,
-                trip.id,
-                broken.chat_id,
-                broken.message_id,
-                broken.created_by_user_id,
-                broken.payer_user_id,
-                broken.description,
-                broken.merchant,
-                str(broken.category),
-                broken.original_amount_minor,
-                broken.original_currency,
-                broken.trip_amount_minor,
-                broken.home_amount_minor,
-                broken.rate,
-                broken.rate_date,
-                broken.transaction_date,
-                broken.source_type,
-                broken.split_method,
-                broken.status,
-                broken.created_at,
-                broken.cancelled_at,
-                broken.notes,
-            )
-            for split in broken.splits:
-                await conn.execute(
-                    "insert into splits "
-                    "(expense_id, user_id, share_trip_minor, share_home_minor, split_method) "
-                    "values ($1, $2, $3, $4, $5)",
-                    broken.expense_id,
-                    split.user_id,
-                    split.share_trip_minor,
-                    split.share_home_minor,
-                    split.split_method,
-                )
-
-    with pytest.raises(asyncpg.CheckViolationError):
-        await _do()
+    with pytest.raises(LedgerUnavailable):
+        await postgres_store.append_expense(trip, broken)
 
     assert broken.expense_id not in await _expense_ids(postgres_store, trip)
 
