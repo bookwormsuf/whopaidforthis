@@ -46,6 +46,7 @@ from app.bot.handlers.join import (
     join_command,
     resolve_trip_status,
 )
+from app.bot.handlers.menu import bot_added_to_group, menu_callback
 from app.bot.handlers.photo_expense import PHOTO_EXPENSE_FILTER, photo_expense_handler
 from app.bot.handlers.reads import (
     recent_command,
@@ -224,6 +225,7 @@ def build_application(token: str, deps: Deps) -> Application:
     application.add_handler(CallbackQueryHandler(undo_callback, pattern=r"^undo:"))
     application.add_handler(CallbackQueryHandler(close_trip_callback, pattern=r"^closetrip:"))
     application.add_handler(CallbackQueryHandler(deletetrip_callback, pattern=r"^deletetrip:"))
+    application.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu:"))
     # A receipt's `Try again` re-reads the photo: non-blocking for the same reason
     # as photo_expense_handler. Registered before the general draft handler, which
     # would otherwise match it first.
@@ -244,6 +246,14 @@ def build_application(token: str, deps: Deps) -> Application:
     # updates one at a time, so a blocking read would stall every other chat.
     application.add_handler(
         MessageHandler(PHOTO_EXPENSE_FILTER, photo_expense_handler, block=False)
+    )
+
+    # Bot added to a group (sprint 10 pin): posts the welcome, pinning it, only
+    # when the bot's own user is among the new members. A `new_chat_members`
+    # service update carries no text, so it never matches `filters.COMMAND`
+    # below and can't trip the unbound-gate catch-all.
+    application.add_handler(
+        MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, bot_added_to_group)
     )
 
     # Fallback gate for any other command in an unbound group (spec §13).
