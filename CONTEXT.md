@@ -1,6 +1,6 @@
 # whopaid — domain glossary
 
-Terms used throughout the code, the spec and the Sheet. Implementation details do not belong here.
+Terms used throughout the code, the spec and the export. Implementation details do not belong here.
 
 ## People
 
@@ -13,7 +13,10 @@ Terms used throughout the code, the spec and the Sheet. Implementation details d
 
 ## Trips and money
 
-- **Trip** — one Telegram group bound to one Google Sheet via `/settrip`, with a trip currency, a home currency and a timezone.
+- **Trip** — one stretch of shared spending in one Telegram group, started with `/settrip`, with a trip currency, a home currency and a timezone. A group has at most one open trip; earlier trips of the same group are closed.
+- **Closed trip** — a trip that takes no new expenses. Closed by `/settrip` starting a new trip or by `Close this trip` after `/settle`. Still readable and exportable.
+- **Trip starter** — the trip user who ran `/settrip` for this trip; the only person who can delete it.
+- **Export** — a spreadsheet file of one trip's records that anyone in the group can download from the chat.
 - **Trip currency** — the currency merchants are paid in during the trip (JPY for Japan).
 - **Home currency** — the currency friends settle with each other in (SGD). Balances and settlement are computed in home currency.
 - **Original amount / original currency** — the amount exactly as paid. Must be either the trip currency or the home currency.

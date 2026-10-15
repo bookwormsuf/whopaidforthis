@@ -14,6 +14,8 @@ Vocabulary: see `/CONTEXT.md`. Rationale for the two irreversible ones: `/docs/a
 
 ## 2. Trips (multi-trip, one Sheet each)
 
+> Superseded 2026-10-15 by §18 (Sprint 9): no Sheet, no binding, no control Sheet. The button order and timezone default below still hold.
+
 - One Telegram group = one trip. Binding is manual: the user creates a blank Sheet, shares it with the service-account email as editor, then runs `/settrip <sheet id or url>` in the group.
 - `/settrip` then asks, via buttons, trip currency, home currency, timezone (default: the timezone conventional for the trip currency, e.g. JPY→Asia/Tokyo, SGD→Asia/Singapore). It writes the `Trip` tab and creates all other tabs, headers and Summary formulas. Re-running `/settrip` on a bound group asks for confirmation and rebinds; it never wipes the old Sheet.
 - The group→Sheet mapping is persisted in a `Bindings` tab (Chat ID | Sheet ID | Bound At) of a single **control Sheet** (`WHOPAID_CONTROL_SHEET_ID`). Nothing is stored on the machine running the bot. The `Trip` tab inside each trip Sheet is for humans and holds the same facts.
@@ -103,6 +105,8 @@ Pure functions in `app/services/splitting.py`, no I/O, property-tested.
 
 ## 10. Persistence (Google Sheets)
 
+> Superseded 2026-10-15 by §18 (Sprint 9). Column vocabularies (`Source Type`, `Status`, `Kind`, `Allocation Method`) and the ID rules carry over; everything Sheet-specific is retired.
+
 - `LedgerStore` interface with a `SheetsLedgerStore` implementation. All Sheets calls run in `asyncio.to_thread`. Retries: 3 with exponential backoff on 429/5xx; then the draft stays in `preview` with a `Retry save` button and an error line.
 - Commit = one spreadsheets.batchUpdate containing appendCells requests in this order: Line Items rows, Splits rows, the Expenses row last. A single batchUpdate is applied atomically. Every reader joins through Expenses; orphan Splits/Line Items rows are ignored.
 - IDs: Expense ID = the draft's ULID. Item ID = `"{expense_id}-{n:02d}"`.
@@ -172,3 +176,16 @@ Phase 3: line items in the receipt schema surfaced to the UI, item claiming, sha
 ## 17. Tests (minimum)
 
 All items in brief §27, plus: remainder rule skips payer; largest-remainder tie-break; home-currency expense needs no conversion for shares; total-selection rule (single confident candidate saves, two candidates asks); ≤12-word gate; stale/foreign callback rejection; commit write order; `/undo` marks not deletes; Summary formula strings reference whole columns; hypothesis: for random totals, participant sets and rates, both invariants in §5 hold.
+
+## 18. Persistence (Postgres on Neon) and multi-group use (added 2026-10-15, Sprint 9)
+
+Decided with Sufyan after the post-trip review. ADR 0003 records the why; `docs/sprints/09-neon-store-and-export.md` holds the full pins. Summary:
+
+- Postgres on Neon is the only store, via `PostgresLedgerStore` behind `LedgerStore`. `DATABASE_URL` (Neon pooled string) replaces `GOOGLE_SERVICE_ACCOUNT_JSON` and `WHOPAID_CONTROL_SHEET_ID`. No Sheets code remains.
+- Money columns are `bigint` minor units. Expense ID stays the draft ULID. Rates are a global table keyed by `(base, quote, requested_date)`.
+- Saving an expense is one transaction. One expense per Telegram message and one write per draft are unique constraints; a violation means "already saved". The in-memory dedup set and the pre-retry existence check are retired. The `update.update_id` LRU guard stays.
+- `/settrip` is buttons only: trip currency, home currency, timezone. Currency keyboard order SGD, MYR, JPY, CNY, then `Other…`. One open trip per chat; `/settrip` again closes the old trip after confirmation. `/settle` offers `Close this trip`. A closed trip answers with "This trip is closed. Run /settrip to start a new one."
+- `/deletetrip` by the trip starter hard-deletes the chat's trips and rows after a confirm button.
+- `/export` sends one `.xlsx` (Expenses, Shares, Line items, People, Balances), built by code, no model call. A Google Sheet export may come later and reuses the same rows.
+- Hosting: one Fly machine always on. Store tests run against a real Postgres in Docker.
+- Roadmap after Sprint 9: Sprint 10 `/start` menu with buttons (fewer commands to remember); Sprint 11 Google Sheet export and drafts that survive a restart, if still wanted.

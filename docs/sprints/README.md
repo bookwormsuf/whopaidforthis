@@ -1,6 +1,6 @@
 # Sprints
 
-The initiative is cut into eight sprints. Each has a sub-spec in this folder. The master spec
+The initiative was cut into eight sprints; Sprints 9 to 11 were added on 2026-10-15 after the first trip. Each has a sub-spec in this folder. The master spec
 (`../spec/pinned-decisions.md`) is the source of truth; a sub-spec only adds what is specific to its
 sprint and points at the master spec sections it implements.
 
@@ -15,6 +15,9 @@ sprint and points at the master spec sections it implements.
 | 6 | [Item claiming](06-item-claiming.md) | Tap items on a receipt, tax spread proportionally | Yes, ~10 min |
 | 7 | [Hardening and go-live](07-hardening-and-go-live.md) | Real group, real Sheet, friends joined | Yes, everyone |
 | 8 | [Clearer messages](08-clearer-messages.md) | Spent, paid and owed read at a glance; item card in three kinds | Yes, ~5 min |
+| 9 | [Neon store and export](09-neon-store-and-export.md) | `/settrip` with buttons only, no Google; `/export` opens on your phone; `/deletetrip` | Yes, ~5 min (delete refusal) |
+| 10 | `/start` menu with buttons (spec to be written) | A new group never types a command name | No |
+| 11 | Google Sheet export, persistent drafts (spec to be written, if still wanted) | | No |
 
 ## How a sprint runs
 

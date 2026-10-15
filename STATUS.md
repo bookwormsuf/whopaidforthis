@@ -19,6 +19,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 6 Item claiming | written (+ §7 amendment) | done | green (404) | 2026-10-01, findings fixed | 2026-10-02, single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 6 closed. Next: run sprint 7 / agent |
 | 7 Hardening and go-live | written | done | green (429) | 2026-10-02, findings fixed (screenshots after the trip) | 2026-10-03, live in the real trip group | 2026-10-03 | Live. After the trip: `/settle`, then `fly scale count 0` / Sufyan |
 | 8 Clearer messages | written (+ §9 amendment) | done | green (432) | 2026-10-03, findings fixed | 2026-10-04, in the real trip group | 2026-10-04 | Sprint 8 closed. After the trip: `/settle`, then `fly scale count 0` / Sufyan |
+| 9 Neon store and export | written 2026-10-15 | not started | - | - | - | - | Neon project + `DATABASE_URL` secret / Sufyan; then run sprint 9 / agent |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -780,3 +781,22 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   `SpreadsheetNotFound`/`PermissionError`, not `requests` timeouts, so that part got a real fix.
 - Reviewed by / disposition: not yet reviewed; branch not merged.
 - Next action / owner: review the diff and merge / Sufyan.
+### 2026-10-15 — Sprint 9 grilled and pinned: Neon replaces Sheets
+
+- Performed by: Claude (Fable 5.1) in a /grill-for-implementation session with Sufyan; a Haiku
+  agent verified Supabase and Neon free-tier terms on the providers' pages, another mapped the
+  Sheets coupling in the code.
+- Decisions: the Japan trip is settled, no import; Postgres on Neon is the only store; Sheets
+  code removed, Google client kept only as a future export target; `/settrip` buttons only with
+  SGD, MYR, JPY, CNY first; one open trip per chat, closable; `/deletetrip` by the starter;
+  `/export` to `.xlsx` by code; one Fly machine always on; tests against Postgres in Docker;
+  drafts stay in memory for now. WhatsApp ruled out (no bots in groups). Two bots ruled out.
+- Evidence / outputs: `docs/adr/0003-postgres-on-neon-replaces-sheets.md` (supersedes 0002),
+  `docs/sprints/09-neon-store-and-export.md`, spec §18 plus supersession notes on §2 and §10,
+  `CONTEXT.md` (Trip redefined; Closed trip, Trip starter, Export added),
+  `docs/sprints/README.md` rows 9 to 11. Branch `docs/sprint-9-plan`, not merged.
+- Checks and limitations: docs only, no code. Fly machine cost ("US$2 to 3 a month") is from
+  memory, not verified on Fly's pricing page.
+- Reviewed by / disposition: Sufyan confirmed every pin in conversation ("ok sounds good").
+- Next action / owner: Neon project in Singapore and `DATABASE_URL` in `.env` and Fly secrets /
+  Sufyan; merge `fix/post-trip-review` and this branch / Sufyan; then "run sprint 9" / agent.
