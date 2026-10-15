@@ -7,13 +7,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from app.bot.deps import Deps
-from app.bot.handlers.basic import start_command
+from app.bot.handlers.basic import HELP_TEXT, help_command, start_command
 from app.bot.handlers.join import (
     CLOSED_TRIP_TEXT,
     UNAVAILABLE_TEXT,
     UNBOUND_TEXT,
     join_command,
-    require_trip,
+    require_trip_send,
     run_join,
 )
 from app.models.trip import Trip
@@ -29,6 +29,7 @@ def _deps(ledger: InMemoryLedgerStore) -> Deps:
 def _context(deps: Deps) -> MagicMock:
     context = MagicMock()
     context.application.bot_data = {"deps": deps}
+    context.args = []
     return context
 
 
@@ -56,7 +57,7 @@ async def test_join_on_unbound_chat_replies_run_settrip_first() -> None:
 
 async def test_require_trip_on_closed_trip_replies_trip_is_closed() -> None:
     """sprint 9 item 3: once the chat's latest trip is closed and none is open,
-    require_trip (used by every gated command) replies the closed-trip line
+    require_trip_send (used by every gated command) replies the closed-trip line
     instead of "Run /settrip first"."""
     ledger = InMemoryLedgerStore()
     trip = Trip(
@@ -70,15 +71,17 @@ async def test_require_trip_on_closed_trip_replies_trip_is_closed() -> None:
     trip = await ledger.save_binding(trip)
     await ledger.close_trip(trip)
     deps = _deps(ledger)
-    context = _context(deps)
-    update = _update()
 
-    result = await require_trip(update, context)
+    sent: list[tuple[str, dict]] = []
+
+    async def fake_send(text: str, *, reply_markup=None):
+        sent.append((text, {"reply_markup": reply_markup}))
+        return SimpleNamespace(message_id=1)
+
+    result = await require_trip_send(deps, -100, fake_send)
 
     assert result is None
-    update.effective_message.reply_text.assert_awaited_once_with(
-        CLOSED_TRIP_TEXT, parse_mode="HTML"
-    )
+    assert sent == [(CLOSED_TRIP_TEXT, {"reply_markup": None})]
 
 
 async def test_join_twice_is_idempotent_one_row_joined_true() -> None:
@@ -134,6 +137,71 @@ async def test_start_in_group_no_longer_joins() -> None:
     assert "Trip: Trip (JPY → SGD)" in text
 
 
+async def test_start_with_args_in_group_posts_nothing() -> None:
+    """Review fix: the `?startgroup=true` link's follow-up `/start@bot true`
+    (non-empty context.args) must not post a second welcome."""
+    ledger = InMemoryLedgerStore()
+    deps = _deps(ledger)
+    context = _context(deps)
+    context.bot = MagicMock()
+    context.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=1))
+    context.args = ["true"]
+    update = _update()
+
+    await start_command(update, context)
+
+    context.bot.send_message.assert_not_awaited()
+    update.effective_message.reply_text.assert_not_called()
+
+
+async def test_start_without_args_in_group_posts_the_welcome() -> None:
+    ledger = InMemoryLedgerStore()
+    deps = _deps(ledger)
+    context = _context(deps)
+    context.bot = MagicMock()
+    context.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=1))
+    context.bot.pin_chat_message = AsyncMock()
+    context.args = []
+    update = _update()
+
+    await start_command(update, context)
+
+    context.bot.send_message.assert_awaited_once()
+
+
+async def test_help_in_group_posts_help_text_with_menu_not_pinned() -> None:
+    """Review fix, amended 2026-10-15: /help in a group posts the help text
+    (not the welcome) with the state's menu under it, and is never pinned."""
+    from app.bot.handlers.menu import menu_keyboard
+
+    ledger = InMemoryLedgerStore()
+    trip = Trip(
+        chat_id=-100,
+        name="Trip",
+        trip_currency="JPY",
+        home_currency="SGD",
+        timezone="Asia/Tokyo",
+        created_at=datetime.now(UTC),
+    )
+    await ledger.save_binding(trip)
+    deps = _deps(ledger)
+    context = _context(deps)
+    context.bot = MagicMock()
+    context.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=1))
+    context.bot.pin_chat_message = AsyncMock()
+    context.bot.username = "whopaidbot"
+    update = _update()
+
+    await help_command(update, context)
+
+    update.effective_message.reply_text.assert_not_called()
+    context.bot.pin_chat_message.assert_not_awaited()
+    context.bot.send_message.assert_awaited_once()
+    (_, text), kwargs = context.bot.send_message.call_args
+    assert text.startswith(HELP_TEXT)
+    assert kwargs["reply_markup"] == menu_keyboard("open", 1)
+
+
 async def test_join_reports_ledger_unavailable() -> None:
     ledger = InMemoryLedgerStore()
     trip = Trip(
@@ -168,6 +236,24 @@ async def test_start_in_private_shows_help() -> None:
     update.message.reply_text.assert_awaited_once()
     args, kwargs = update.message.reply_text.call_args
     assert kwargs.get("parse_mode") == "HTML"
+
+
+async def test_start_in_private_shows_single_add_to_group_url_button() -> None:
+    ledger = InMemoryLedgerStore()
+    deps = _deps(ledger)
+    context = _context(deps)
+    context.bot.username = "livebot"
+    update = _update(chat_type="private")
+
+    await start_command(update, context)
+
+    update.message.reply_text.assert_awaited_once()
+    _, kwargs = update.message.reply_text.call_args
+    markup = kwargs["reply_markup"]
+    assert len(markup.inline_keyboard) == 1
+    assert len(markup.inline_keyboard[0]) == 1
+    button = markup.inline_keyboard[0][0]
+    assert button.url == "https://t.me/livebot?startgroup=true"
 
 
 async def test_join_button_joins_presser_not_initiator() -> None:

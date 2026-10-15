@@ -89,9 +89,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """In a group, posts the welcome menu; /start no longer behaves as /join
     (sprint 10 pin, superseding spec §12). In private, it shows help.
+
+    Telegram's `?startgroup=true` "Add me to a group" link adds the bot (which
+    already triggers the welcome via `bot_added_to_group`) and then immediately
+    sends `/start@bot true` into the group; a non-empty `context.args` here
+    means this is that follow-up message, so skip to avoid a double welcome
+    (review fix).
     """
     chat = update.effective_chat
     if chat is not None and chat.type in ("group", "supergroup"):
+        if context.args:
+            return
         try:
             await post_welcome(get_deps(context), context.bot, chat)
         except Exception:  # noqa: BLE001 - a failed welcome must not crash the handler
