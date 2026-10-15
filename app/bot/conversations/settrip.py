@@ -190,6 +190,18 @@ async def _create_trip(
     await query.edit_message_text(
         text, parse_mode="HTML", reply_markup=joined_keyboard(trip.chat_id)
     )
+    # Sprint 10 amendment (2026-10-15): the moment a trip starts is when the group
+    # wants the buttons, so post a fresh welcome with the full menu and pin it. The
+    # earlier "Start a trip" welcome is left as it is (old menus are never edited).
+    # Local import: menu.py imports run_settrip from this module.
+    from app.bot.handlers.menu import post_welcome
+
+    chat = update.effective_chat
+    if chat is not None:
+        try:
+            await post_welcome(deps, context.bot, chat)
+        except Exception:  # noqa: BLE001 - the trip is saved; a missing menu must not crash
+            logger.exception("settrip: could not post the welcome after the trip started")
 
 
 def _retry_keyboard(session_id: str) -> InlineKeyboardMarkup:

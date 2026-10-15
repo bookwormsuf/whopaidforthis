@@ -193,6 +193,7 @@ Decided with Sufyan after the post-trip review. ADR 0003 records the why; `docs/
 ## 19. `/start` welcome menu (added 2026-10-15, Sprint 10)
 - Buttons under messages only; no `setMyCommands`, no persistent reply keyboard.
 - The welcome (text pinned in `docs/sprints/10-start-menu.md`) is posted when the bot is added to a group, and on `/start` in a group. `/help` in a group posts the help text with the menu under it, not the welcome, and is never pinned (amended 2026-10-15 after review). The bot tries to pin the welcome; if it lacks the right it appends "Pin this message so everyone can find the buttons." and never asks to be made admin.
+- A finished `/settrip` posts and pins a fresh welcome with the open-trip menu (amended 2026-10-15).
 - Menu is state-aware (no trip / open / closed), two pages when open, paging edits the keyboard of the same message. Every other press posts a new plain message and leaves the menu alone.
 - A press is the typed command by the presser: same coroutine, same gates, same permission checks. State is re-read at press time; old menus are never edited.
 - `/start` in a group no longer joins the sender. Private `/start` and `/help` carry an `Add me to a group` URL button (`?startgroup=true`).

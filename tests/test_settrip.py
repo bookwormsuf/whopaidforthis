@@ -98,11 +98,22 @@ async def test_settrip_happy_path_creates_trip() -> None:
     await settrip.settrip_callback(_callback_update(session_id, "tz", "Asia/Tokyo"), context)
 
     confirm_update = _callback_update(session_id, "confirm", "yes")
+    confirm_update.effective_chat = SimpleNamespace(id=-100, title="Japan Trip", type="supergroup")
+    context.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=7))
+    context.bot.pin_chat_message = AsyncMock()
     await settrip.settrip_callback(confirm_update, context)
 
     confirm_update.callback_query.edit_message_text.assert_awaited_once()
     (text,), kwargs = confirm_update.callback_query.edit_message_text.call_args
     assert text.startswith("Connected ✅ Japan Trip")
+    # Sprint 10 amendment: a fresh welcome with the open-trip menu follows and is pinned.
+    context.bot.send_message.assert_awaited_once()
+    welcome_args, welcome_kwargs = context.bot.send_message.call_args
+    welcome_text = welcome_kwargs.get("text") or welcome_args[1]
+    assert "Trip: Japan Trip (JPY → SGD)" in welcome_text
+    labels = [b.text for row in welcome_kwargs["reply_markup"].inline_keyboard for b in row]
+    assert labels[:2] == ["Join", "Balances"]
+    context.bot.pin_chat_message.assert_awaited_once()
     assert "JPY → SGD" in text
     assert "Asia/Tokyo" in text
     assert kwargs["reply_markup"] is not None
