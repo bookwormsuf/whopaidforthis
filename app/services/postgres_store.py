@@ -310,9 +310,15 @@ class PostgresLedgerStore:
             await self._call(_do)
         except LedgerUnavailable:
             raise
-        except asyncpg.UniqueViolationError:
-            logger.info("expense %s: already saved", expense.expense_id)
-            return
+        except asyncpg.UniqueViolationError as exc:
+            # Only a repeat of the expense's own identity (its id, or the
+            # (chat_id, message_id) pair) means "already saved". Any other unique
+            # violation (e.g. a duplicate split row) is a bug, not a duplicate send,
+            # and must not be swallowed (sprint 9 review item 3).
+            if exc.constraint_name in ("expenses_pkey", "expenses_one_per_message"):
+                logger.info("expense %s: already saved", expense.expense_id)
+                return
+            raise LedgerUnavailable("Could not reach the database") from exc
         except asyncpg.PostgresError as exc:
             raise LedgerUnavailable("Could not reach the database") from exc
 

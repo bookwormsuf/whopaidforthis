@@ -259,6 +259,33 @@ async def test_append_expense_failing_split_leaves_no_expense_row(
     assert not await postgres_store.expense_exists(trip, broken.expense_id)
 
 
+async def test_duplicate_split_user_id_raises_ledger_unavailable_not_already_saved(
+    postgres_store: PostgresLedgerStore,
+) -> None:
+    """A unique violation on anything other than the expense's own identity (here,
+    two splits for the same user) is a bug, not a duplicate send, and must not be
+    swallowed as "already saved" (sprint 9 review item 3).
+    """
+    trip = await postgres_store.save_binding(_trip())
+    expense = _expense(trip, "01EXPENSE0000000000DUPE")
+    split = expense.splits[0]
+    duplicated = split.model_copy(
+        update={"share_trip_minor": split.share_trip_minor // 2, "share_home_minor": 0}
+    )
+    remainder = split.model_copy(
+        update={
+            "share_trip_minor": split.share_trip_minor - duplicated.share_trip_minor,
+            "share_home_minor": split.share_home_minor,
+        }
+    )
+    broken = expense.model_copy(update={"splits": [duplicated, remainder]})
+
+    with pytest.raises(LedgerUnavailable):
+        await postgres_store.append_expense(trip, broken)
+
+    assert not await postgres_store.expense_exists(trip, broken.expense_id)
+
+
 async def test_delete_trips_removes_everything(postgres_store: PostgresLedgerStore) -> None:
     trip = await postgres_store.save_binding(_trip())
     expense = _expense(trip, "01EXPENSE000000000000006")
