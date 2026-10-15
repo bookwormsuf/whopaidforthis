@@ -27,7 +27,7 @@ from app.bot.handlers.deletetrip import run_deletetrip
 from app.bot.handlers.export import run_export
 from app.bot.handlers.join import resolve_trip_status, run_join
 from app.bot.handlers.reads import run_recent, run_summary, run_today, run_undo
-from app.bot.send import SendDocumentFn, SendFn
+from app.bot.send import SendFn, build_chat_send, build_chat_send_document
 from app.models.trip import Trip
 from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
 
@@ -166,31 +166,6 @@ async def post_welcome(deps: Deps, bot: Bot, chat: Chat) -> None:
         )
 
 
-def _build_send(bot: Bot, chat_id: int) -> SendFn:
-    """A `SendFn` that posts a new plain message in the chat (not a reply),
-    for a menu button press (sprint 10 pin).
-    """
-
-    async def send(text: str, *, reply_markup: object | None = None):
-        kwargs: dict[str, object] = {"parse_mode": "HTML"}
-        if reply_markup is not None:
-            kwargs["reply_markup"] = reply_markup
-        return await bot.send_message(chat_id, text, **kwargs)
-
-    return send
-
-
-def _build_send_document(bot: Bot, chat_id: int) -> SendDocumentFn:
-    """`run_export`'s sibling to `_build_send`, mirroring `build_send_document`."""
-
-    async def send_document(document: object, *, caption: str | None = None, **kwargs: object):
-        if caption is not None:
-            kwargs["caption"] = caption
-        return await bot.send_document(chat_id, document=document, **kwargs)
-
-    return send_document
-
-
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """`menu:<action>` dispatches to the same `run_<name>` coroutine the typed
     command uses; `menu:page:<n>` only edits this message's keyboard.
@@ -219,7 +194,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     action = data.removeprefix("menu:")
     deps = get_deps(context)
-    send = _build_send(context.bot, chat.id)
+    send = build_chat_send(context.bot, chat.id)
 
     if action == "howto":
         await send(HOWTO_TEXT)
@@ -227,7 +202,9 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     try:
         if action == "export":
-            await run_export(deps, chat, presser, send, _build_send_document(context.bot, chat.id))
+            await run_export(
+                deps, chat, presser, send, build_chat_send_document(context.bot, chat.id)
+            )
             return
 
         run = _ACTIONS.get(action)
