@@ -34,6 +34,24 @@ class ReceiptLineItem(BaseModel):
     kind: LineItemKind
 
 
+class LineItemRecord(BaseModel):
+    """One `line_items` table row, read back for export (spec §10, §18). Amount is
+    always in the trip currency; `assigned_user_ids` is the raw Telegram user ids
+    (no name lookup -- that's the `People` sheet's job).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    expense_id: str
+    position: int
+    description: str
+    quantity: int
+    amount_trip_minor: int
+    kind: LineItemKind
+    allocation_method: Literal["claimed", "everyone", "proportional", "unassigned"]
+    assigned_user_ids: list[int]
+
+
 class CandidateTotal(BaseModel):
     """One number on the receipt that could plausibly be the grand total."""
 

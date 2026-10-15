@@ -16,17 +16,10 @@ SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "export_fly_secret
 
 FAKE_ENV = (
     "TELEGRAM_BOT_TOKEN=123456:fake-token\n"
-    'GOOGLE_SERVICE_ACCOUNT_JSON="{\\"client_email\\": \\"fake@x.iam.gserviceaccount.com\\", '
-    '\\"private_key\\": \\"-----BEGIN KEY-----\\\\nabc\\\\n-----END KEY-----\\\\n\\"}"\n'
+    "DATABASE_URL=postgresql://user:hunter2@fake-host/db\n"
     "ANTHROPIC_API_KEY=sk-fake-key\n"
-    "WHOPAID_CONTROL_SHEET_ID=fake-sheet-id\n"
     "LOG_LEVEL=DEBUG\n"
     "BOT_VERSION=abc1234\n"
-)
-
-EXPECTED_JSON_VALUE = (
-    '{"client_email": "fake@x.iam.gserviceaccount.com", '
-    '"private_key": "-----BEGIN KEY-----\\nabc\\n-----END KEY-----\\n"}'
 )
 
 
@@ -47,9 +40,8 @@ def test_exports_exact_name_value_lines_in_settings_order(tmp_path: Path) -> Non
     assert result.stderr == ""
     assert result.stdout.splitlines() == [
         "TELEGRAM_BOT_TOKEN=123456:fake-token",
-        f"GOOGLE_SERVICE_ACCOUNT_JSON={EXPECTED_JSON_VALUE}",
+        "DATABASE_URL=postgresql://user:hunter2@fake-host/db",
         "ANTHROPIC_API_KEY=sk-fake-key",
-        "WHOPAID_CONTROL_SHEET_ID=fake-sheet-id",
     ]
 
 
@@ -59,9 +51,8 @@ def test_names_flag_prints_names_only(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert result.stdout.splitlines() == [
         "TELEGRAM_BOT_TOKEN",
-        "GOOGLE_SERVICE_ACCOUNT_JSON",
+        "DATABASE_URL",
         "ANTHROPIC_API_KEY",
-        "WHOPAID_CONTROL_SHEET_ID",
     ]
 
 
@@ -76,10 +67,8 @@ def test_log_level_and_bot_version_are_excluded(tmp_path: Path) -> None:
 
 def test_missing_required_variable_exits_1_naming_it(tmp_path: Path) -> None:
     (tmp_path / ".env").write_text(
-        "TELEGRAM_BOT_TOKEN=123456:fake-token\n"
-        "GOOGLE_SERVICE_ACCOUNT_JSON={}\n"
-        "ANTHROPIC_API_KEY=sk-fake-key\n"
-        # WHOPAID_CONTROL_SHEET_ID missing.
+        "TELEGRAM_BOT_TOKEN=123456:fake-token\nANTHROPIC_API_KEY=sk-fake-key\n"
+        # DATABASE_URL missing.
     )
     result = subprocess.run(
         [sys.executable, str(SCRIPT)],
@@ -89,5 +78,5 @@ def test_missing_required_variable_exits_1_naming_it(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 1
-    assert "WHOPAID_CONTROL_SHEET_ID" in result.stderr
+    assert "DATABASE_URL" in result.stderr
     assert result.stdout == ""

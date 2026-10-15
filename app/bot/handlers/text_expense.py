@@ -16,6 +16,7 @@ from telegram.ext import ContextTypes, filters
 
 from app.bot.deps import get_deps
 from app.bot.formatting import unsupported_currency_text
+from app.bot.handlers.join import require_trip_for_expense
 from app.bot.handlers.photo_expense import handle_manual_amount_reply, read_receipt_photo
 from app.bot.handlers.split import handle_custom_split_reply, handle_item_reply
 from app.bot.handlers.tags import join_tagged, tags_as_text
@@ -30,14 +31,12 @@ from app.services.drafts import (
     DraftError,
     DraftExpired,
     DraftToast,
-    DuplicateMessage,
     NotInitiator,
 )
 from app.services.expense_parser import parse_expense
 from app.services.ledger_store import (
     LEDGER_UNAVAILABLE_TEXT,
     LedgerUnavailable,
-    TripSheetInaccessible,
 )
 
 __all__ = [
@@ -90,18 +89,11 @@ async def text_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     if await handle_item_reply(update, context):
         return
 
-    try:
-        trip = await deps.ledger.get_binding(chat.id)
-    except TripSheetInaccessible:
-        # Stay silent for plain text (spec §13); the commands (/join, /settrip, the
-        # unbound gate) are where a user finds out and gets a fix to run.
-        logger.info("text_expense: trip Sheet inaccessible, chat_id=%s", chat.id)
-        return
-    except LedgerUnavailable:
-        logger.exception("text_expense: could not read the current binding")
-        return  # unbound/unavailable: stay silent for plain text (spec §13)
+    trip = await require_trip_for_expense(update, context)
     if trip is None:
-        return  # unbound group: stay silent for plain text, unlike a command
+        # Unbound group: stay silent, unlike a command (spec §13). A closed trip
+        # gets the "This trip is closed..." reply instead (sprint 9 item 3).
+        return
 
     bot_username = context.bot.username or ""
     text, tagged_users = tags_as_text(message)
@@ -140,9 +132,6 @@ async def text_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             trip=trip,
             transaction_date=transaction_date,
         )
-    except DuplicateMessage:
-        logger.info("text_expense: duplicate (chat, message) skipped")
-        return
     except LedgerUnavailable:
         logger.exception("text_expense: could not start draft")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
@@ -183,10 +172,6 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     try:
         trip = await deps.ledger.get_binding(chat.id)
-    except TripSheetInaccessible:
-        logger.info("draft %s: trip Sheet inaccessible", draft_id)
-        await answer()
-        return
     except LedgerUnavailable:
         logger.exception("draft %s: could not read the current binding", draft_id)
         await answer(LEDGER_UNAVAILABLE_TEXT)

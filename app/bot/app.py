@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import signal
+import sys
 from typing import Any
 
 import anthropic
@@ -29,10 +30,22 @@ from app.bot.conversations.settrip import (
     settrip_text_handler,
 )
 from app.bot.deps import Deps, get_deps
-from app.bot.handlers.balances import balances_command, mine_command, settle_command
+from app.bot.handlers.balances import (
+    balances_command,
+    close_trip_callback,
+    mine_command,
+    settle_command,
+)
 from app.bot.handlers.basic import help_command, start_command
 from app.bot.handlers.callbacks import join_button_callback
-from app.bot.handlers.join import UNBOUND_TEXT, join_command, lost_access_text
+from app.bot.handlers.deletetrip import deletetrip_callback, deletetrip_command
+from app.bot.handlers.export import export_command
+from app.bot.handlers.join import (
+    CLOSED_TRIP_TEXT,
+    UNBOUND_TEXT,
+    join_command,
+    resolve_trip_status,
+)
 from app.bot.handlers.photo_expense import PHOTO_EXPENSE_FILTER, photo_expense_handler
 from app.bot.handlers.reads import (
     recent_command,
@@ -48,17 +61,12 @@ from app.bot.handlers.text_expense import (
     draft_callback,
     text_expense_handler,
 )
-from app.bot.session_state import Dedup
 from app.config.settings import Settings
 from app.services.currencies import FrankfurterCurrencyCatalog
 from app.services.drafts import DraftService, InMemoryDraftStore
 from app.services.exchange_rates import FrankfurterProvider, RateService
-from app.services.google_sheets import SheetsLedgerStore
-from app.services.ledger_store import (
-    LEDGER_UNAVAILABLE_TEXT,
-    LedgerUnavailable,
-    TripSheetInaccessible,
-)
+from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
+from app.services.postgres_store import PostgresLedgerStore
 from app.services.receipt_parser import AnthropicReceiptReader
 
 logger = logging.getLogger(__name__)
@@ -83,6 +91,8 @@ _COMMANDS: tuple[tuple[str, Any, filters.BaseFilter | None], ...] = (
     ("balances", balances_command, None),
     ("mine", mine_command, None),
     ("settle", settle_command, None),
+    ("export", export_command, None),
+    ("deletetrip", deletetrip_command, None),
 )
 
 _KNOWN_COMMANDS = {name for name, _, _ in _COMMANDS}
@@ -93,13 +103,24 @@ STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGABRT)
 
 
 async def _post_init(application: Application) -> None:
-    """Log the one startup line once the bot's own identity is known (sprint 3 pin).
+    """Create the database pool and apply migrations, then log the one startup
+    line once the bot's own identity is known (sprint 3 pin).
 
-    Spec §1: the bot's username is read from getMe at startup, never hardcoded.
-    Exactly one INFO line, message `whopaid started`, fields `bot_username` and
-    `version`. Nothing else about config goes in this line.
+    Spec §18: fails fast, naming DATABASE_URL, if the pool can't be created or a
+    migration fails -- same shape as the missing/invalid env var checks in
+    `load_settings`. Spec §1: the bot's username is read from getMe at startup,
+    never hardcoded. Exactly one INFO line, message `whopaid started`, fields
+    `bot_username` and `version`. Nothing else about config goes in this line.
     """
     deps: Deps = application.bot_data["deps"]
+    try:
+        await deps.ledger.connect()
+    except Exception as exc:  # noqa: BLE001 - this is the fail-fast boundary
+        print(
+            f"Could not reach the database ({type(exc).__name__}). Check DATABASE_URL.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
     logger.info(
         "whopaid started",
         extra={"bot_username": application.bot.username, "version": deps.bot_version},
@@ -107,12 +128,22 @@ async def _post_init(application: Application) -> None:
 
 
 async def _post_shutdown(application: Application) -> None:
-    """Log the one shutdown line once polling has stopped (sprint 3 pin)."""
+    """Close the ledger store (releases the Postgres pool), then log the one
+    shutdown line once polling has stopped (sprint 3 pin; store lifecycle: sprint
+    9 review item 7).
+    """
+    deps: Deps = application.bot_data["deps"]
+    await deps.ledger.close()
     logger.info("whopaid stopped")
 
 
 async def _unbound_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Fallback for commands with no dedicated handler yet: gate unbound groups."""
+    """Fallback for commands with no dedicated handler yet: gates unbound groups
+    ("Run /settrip first") and, since sprint 9 item 3, groups whose latest trip is
+    closed ("This trip is closed..."). Every known command (including /export,
+    /settrip, /help, /start, which are exempt from the closed-trip gate) has its
+    own handler and never reaches here.
+    """
     message = update.effective_message
     chat = update.effective_chat
     if message is None or chat is None or chat.type not in ("group", "supergroup"):
@@ -123,21 +154,19 @@ async def _unbound_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     deps = get_deps(context)
     try:
-        trip = await deps.ledger.get_binding(chat.id)
-    except TripSheetInaccessible:
-        await message.reply_text(lost_access_text(deps.service_account_email), parse_mode="HTML")
-        return
+        trip, latest_is_closed = await resolve_trip_status(deps, chat.id)
     except LedgerUnavailable:
         logger.exception("unbound gate: could not read the current binding")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
         return
     if trip is None:
-        await message.reply_text(UNBOUND_TEXT, parse_mode="HTML")
+        text = CLOSED_TRIP_TEXT if latest_is_closed else UNBOUND_TEXT
+        await message.reply_text(text, parse_mode="HTML")
 
 
 async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     """PTB-wide fallback: log every unhandled error and give the user one line --
-    "Couldn't reach Google Sheets" for `LedgerUnavailable`, else "Something went
+    "Couldn't reach the database" for `LedgerUnavailable`, else "Something went
     wrong" -- instead of leaving them without a reply (spec §14: the bot never
     raises to the user). A button press gets it as a toast. Never logs message text.
     """
@@ -193,6 +222,8 @@ def build_application(token: str, deps: Deps) -> Application:
     application.add_handler(CallbackQueryHandler(settrip_callback, pattern=r"^st:"))
     application.add_handler(CallbackQueryHandler(join_button_callback, pattern=r"^join:"))
     application.add_handler(CallbackQueryHandler(undo_callback, pattern=r"^undo:"))
+    application.add_handler(CallbackQueryHandler(close_trip_callback, pattern=r"^closetrip:"))
+    application.add_handler(CallbackQueryHandler(deletetrip_callback, pattern=r"^deletetrip:"))
     # A receipt's `Try again` re-reads the photo: non-blocking for the same reason
     # as photo_expense_handler. Registered before the general draft handler, which
     # would otherwise match it first.
@@ -225,22 +256,21 @@ def build_application(token: str, deps: Deps) -> Application:
 
 
 def run(settings: Settings) -> None:
-    """Build production dependencies and the application, then run it with long polling."""
-    service_account_info = settings.service_account_info()
+    """Build production dependencies and the application, then run it with long
+    polling. The database pool is created and migrated in `_post_init` (it must run
+    inside the application's own event loop: an `asyncpg` pool is bound to the loop
+    it was created in), so a bad or unreachable `DATABASE_URL` fails fast there,
+    before polling starts.
+    """
     http_client = httpx.AsyncClient()
-    ledger = SheetsLedgerStore(
-        service_account_info=service_account_info,
-        control_sheet_id=settings.whopaid_control_sheet_id,
-        bot_version=settings.bot_version,
-    )
+    ledger = PostgresLedgerStore(settings.database_url.get_secret_value())
     rates = RateService(FrankfurterProvider(http_client), ledger)
     anthropic_client = anthropic.Anthropic(api_key=settings.anthropic_api_key.get_secret_value())
     deps = Deps(
         ledger=ledger,
         currencies=FrankfurterCurrencyCatalog(http_client),
-        service_account_email=service_account_info["client_email"],
         bot_version=settings.bot_version,
-        draft_service=DraftService(ledger, rates, InMemoryDraftStore(), Dedup()),
+        draft_service=DraftService(ledger, rates, InMemoryDraftStore()),
         receipt_reader=AnthropicReceiptReader(anthropic_client),
     )
     application = build_application(settings.telegram_bot_token.get_secret_value(), deps)

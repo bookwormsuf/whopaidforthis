@@ -19,29 +19,27 @@ from app.services.exchange_rates import (
 )
 
 
-def _trip(trip_currency: str = "JPY", home_currency: str = "SGD", sheet_id: str = "sheet-1"):
-    return SimpleNamespace(
-        sheet_id=sheet_id, trip_currency=trip_currency, home_currency=home_currency
-    )
+def _trip(trip_currency: str = "JPY", home_currency: str = "SGD"):
+    return SimpleNamespace(trip_currency=trip_currency, home_currency=home_currency)
 
 
 class _FakeLedger:
-    """Scoped by `trip.sheet_id`, like the real ledger's per-trip Exchange Rates tab."""
+    """Global, like the real `exchange_rates` table (spec §18: a rate is a fact
+    about a currency pair and a date, not about a trip).
+    """
 
     def __init__(self) -> None:
         self.saved: list[ExchangeRate] = []
-        self.stored: dict[str, dict[tuple[str, str, date], ExchangeRate]] = {}
+        self.stored: dict[tuple[str, str, date], ExchangeRate] = {}
         self.find_calls = 0
 
     async def find_rate(self, trip, base, quote, requested_date):
         self.find_calls += 1
-        return self.stored.get(trip.sheet_id, {}).get((base, quote, requested_date))
+        return self.stored.get((base, quote, requested_date))
 
     async def save_rate(self, trip, rate: ExchangeRate) -> None:
         self.saved.append(rate)
-        self.stored.setdefault(trip.sheet_id, {})[(rate.base, rate.quote, rate.requested_date)] = (
-            rate
-        )
+        self.stored[(rate.base, rate.quote, rate.requested_date)] = rate
 
 
 async def test_rate_service_hits_memory_second_time_without_ledger_or_provider() -> None:
@@ -87,7 +85,7 @@ async def test_rate_service_reads_ledger_before_provider() -> None:
         provider="frankfurter",
         retrieved_at=datetime.now(UTC),
     )
-    ledger.stored[trip.sheet_id] = {("JPY", "SGD", date(2026, 9, 20)): stored_rate}
+    ledger.stored[("JPY", "SGD", date(2026, 9, 20))] = stored_rate
 
     service = RateService(provider, ledger)
     result = await service.rate_for(trip, date(2026, 9, 20))
@@ -113,17 +111,20 @@ async def test_rate_service_identity_when_trip_currency_equals_home_currency() -
     assert ledger.find_calls == 0
 
 
-async def test_rate_service_caches_per_trip_sheet_id() -> None:
+async def test_rate_service_cache_is_shared_across_trips_with_the_same_pair() -> None:
+    """Rates are global (spec §18): two different trips with the same trip/home
+    currency pair share one cache entry and the provider is hit only once.
+    """
     provider = StaticRateProvider(Decimal("0.0081"), date(2026, 9, 19))
     ledger = _FakeLedger()
     service = RateService(provider, ledger)
-    trip_a = _trip(sheet_id="sheet-a")
-    trip_b = _trip(sheet_id="sheet-b")
+    trip_a = _trip()
+    trip_b = _trip()
 
     await service.rate_for(trip_a, date(2026, 9, 20))
     await service.rate_for(trip_b, date(2026, 9, 20))
 
-    assert len(provider.calls) == 2  # each trip's cache is independent
+    assert len(provider.calls) == 1  # shared cache entry, not one per trip
 
 
 async def test_frankfurter_provider_parses_response() -> None:

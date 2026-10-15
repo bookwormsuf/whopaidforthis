@@ -113,22 +113,24 @@ class RateService:
 
     - Same-currency trip (spec §4): returns an identity rate (1.0) without touching
       the provider or the ledger.
-    - Otherwise, lookup order is memory -> ledger (`Exchange Rates` tab) -> provider.
-      The in-memory cache is keyed by `(trip.sheet_id, requested_date)` and, once a
-      rate is known, also `(trip.sheet_id, rate_date)` -- so a weekend lookup (which
-      resolves to the previous business day) is a hit next time that same requested
-      date is asked for, without a second ledger read or provider call. This class is
-      the only place that rate-date-as-cache-key rule lives; `LedgerStore.find_rate`
-      is a plain lookup by requested date.
+    - Otherwise, lookup order is memory -> ledger (the global `exchange_rates`
+      table, spec §18) -> provider. The in-memory cache is keyed by
+      `(base, quote, requested_date)` and, once a rate is known, also
+      `(base, quote, rate_date)` -- so a weekend lookup (which resolves to the
+      previous business day) is a hit next time that same requested date is asked
+      for, without a second ledger read or provider call. This class is the only
+      place that rate-date-as-cache-key rule lives; `LedgerStore.find_rate` is a
+      plain lookup by requested date.
 
-    One instance serves every trip (keyed internally by `trip.sheet_id`), so a
-    single, process-wide `Deps` can hold it.
+    Rates are global, not per trip (spec §18: a rate is a fact about a currency
+    pair and a date), so the cache key no longer involves the trip at all. One
+    instance serves every trip, so a single, process-wide `Deps` can hold it.
     """
 
     def __init__(self, provider: ExchangeRateProvider, ledger: _LedgerRateStore) -> None:
         self._provider = provider
         self._ledger = ledger
-        self._memory: dict[tuple[str, date], ExchangeRate] = {}
+        self._memory: dict[tuple[str, str, date], ExchangeRate] = {}
 
     async def rate_for(self, trip: Trip, on_date: date) -> ExchangeRate:
         base, quote = trip.trip_currency, trip.home_currency
@@ -143,7 +145,7 @@ class RateService:
                 retrieved_at=datetime.now(UTC),
             )
 
-        key = (trip.sheet_id, on_date)
+        key = (base, quote, on_date)
         cached = self._memory.get(key)
         if cached is not None:
             return cached
@@ -151,11 +153,11 @@ class RateService:
         found = await self._ledger.find_rate(trip, base, quote, on_date)
         if found is not None:
             self._memory[key] = found
-            self._memory[(trip.sheet_id, found.rate_date)] = found
+            self._memory[(base, quote, found.rate_date)] = found
             return found
 
         rate = await self._provider.get_rate(base, quote, on_date)
         await self._ledger.save_rate(trip, rate)
         self._memory[key] = rate
-        self._memory[(trip.sheet_id, rate.rate_date)] = rate
+        self._memory[(base, quote, rate.rate_date)] = rate
         return rate

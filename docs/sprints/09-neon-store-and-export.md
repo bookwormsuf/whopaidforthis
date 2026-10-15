@@ -86,6 +86,9 @@ is settled and its Sheet is its archive). Webhooks instead of polling. WhatsApp.
   deletes the trip and its rows in one transaction (`on delete cascade`). Closed trips of the
   same chat are deleted too. Reply: "Deleted. Run /settrip to start a new trip."
 - Trip name: the group's title at `/settrip` time, as today.
+- Amended 2026-10-15: `/start` in a group with a closed trip gets the closed-trip line like any
+  other command (it is `/join`); `/deletetrip` is exempt from the closed-trip gate so a closed
+  latest trip can be deleted.
 
 ### Export
 - `/export` in a group with any trip (open or closed) sends one `.xlsx` built with `openpyxl`,

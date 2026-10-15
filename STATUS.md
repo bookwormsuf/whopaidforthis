@@ -19,7 +19,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 6 Item claiming | written (+ §7 amendment) | done | green (404) | 2026-10-01, findings fixed | 2026-10-02, single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 6 closed. Next: run sprint 7 / agent |
 | 7 Hardening and go-live | written | done | green (429) | 2026-10-02, findings fixed (screenshots after the trip) | 2026-10-03, live in the real trip group | 2026-10-03 | Live. After the trip: `/settle`, then `fly scale count 0` / Sufyan |
 | 8 Clearer messages | written (+ §9 amendment) | done | green (432) | 2026-10-03, findings fixed | 2026-10-04, in the real trip group | 2026-10-04 | Sprint 8 closed. After the trip: `/settle`, then `fly scale count 0` / Sufyan |
-| 9 Neon store and export | written 2026-10-15 | not started | - | - | - | - | Neon project + `DATABASE_URL` secret / Sufyan; then run sprint 9 / agent |
+| 9 Neon store and export | written 2026-10-15 (+ closed-trip amendment) | done | green (444, 21 against Postgres) | 2026-10-15, findings fixed | - | - | merge PR, deploy, checklist in a fresh test group / Sufyan; then "sign off sprint 9" |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -800,3 +800,36 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Reviewed by / disposition: Sufyan confirmed every pin in conversation ("ok sounds good").
 - Next action / owner: Neon project in Singapore and `DATABASE_URL` in `.env` and Fly secrets /
   Sufyan; merge `fix/post-trip-review` and this branch / Sufyan; then "run sprint 9" / agent.
+
+### 2026-10-15 — Sprint 9 build and review: Neon replaces Sheets
+
+- Performed by: Claude (Fable 5.1) orchestrating three Sonnet build agents (store, trip flows,
+  export), four Opus review agents, and one Sonnet fix agent. Branch `sprint-9`, 27 commits.
+- Scope and reason: `docs/sprints/09-neon-store-and-export.md`, every pin.
+- Evidence / outputs: `app/db/` (asyncpg pool, numbered SQL migrations, `001_initial.sql`),
+  `app/services/postgres_store.py`, `app/services/export.py`, `app/bot/handlers/{deletetrip,export}.py`,
+  `resolve_trip_status` in `join.py`, settrip buttons only, `Close this trip` on `/settle`,
+  `docker-compose.yml`, CI Postgres service, README and `.env.example` for Neon, "What is stored
+  and how to delete it" section. Deleted: every Sheets module, `gspread`, `Dedup`,
+  `expense_exists`, `Trip.sheet_id`, the two Google env vars.
+- Checks: `uv run pytest -q` 444 passed (21 marked `postgres`, run against a local postgres:16
+  container; CI fails rather than skips if the database is unreachable); ruff check and format
+  clean. Not yet run against Neon or the deployed bot; that is the checklist.
+- Review (`/review`, four Opus axes): fixed: the startup error could print the connection string's
+  password to Fly logs; a stale `/deletetrip` confirm button could wipe a trip someone else
+  started later; every unique violation was treated as "already saved" (now only the expense's
+  own two constraints); `InterfaceError`/`InternalClientError` escaped the store; CI could skip
+  the store tests silently; "which trip does this chat mean" was decided four ways (now
+  `latest_trip`/`get_trip` on the store); store lifecycle via `connect`/`close`, pool closed on
+  shutdown; confirmed filter moved into the store and dead `chat_id` filters dropped;
+  `cancel_expense` scoped by trip; four tests the spec required were missing or hollow; export
+  regained the §10 ID columns at the end of each sheet. Below threshold: fresh database per
+  session (truncate is used), `get_binding`/`save_binding` naming, rate methods' unused `trip`.
+- Deviations from pins, kept and written into the spec: `/start` in a group with a closed trip
+  gets the closed-trip line (it is `/join`); `/deletetrip` bypasses the closed-trip gate.
+  Expenses carry no denormalised names; reads `LEFT JOIN trip_users` instead.
+- Process note: two Phase 2 agents were meant to run in separate worktrees but shared one
+  checkout; history stayed linear and nothing was lost, but the branch had to be folded back.
+- Reviewed by / disposition: agent review only; awaiting Sufyan's checklist and sign-off.
+- Next action / owner: push, PR, merge (deploys; the old Google secrets can be unset after),
+  then the seven-step checklist in the sprint doc / Sufyan; then "sign off sprint 9".

@@ -8,10 +8,13 @@ from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-TRIP_CCY_CHOICES: list[str] = ["JPY", "KRW", "THB", "EUR", "GBP", "USD", "MYR", "IDR"]
-HOME_CCY_CHOICES: list[str] = ["SGD", "JPY", "KRW", "THB", "EUR", "GBP", "USD", "MYR", "IDR"]
+# Sprint 9 pin (spec §18): SGD, MYR, JPY, CNY shown first, then "Other…" (a 3-letter
+# code by reply). Same order for both the trip- and home-currency keyboards.
+_CCY_CHOICES: list[str] = ["SGD", "MYR", "JPY", "CNY"]
+TRIP_CCY_CHOICES: list[str] = _CCY_CHOICES
+HOME_CCY_CHOICES: list[str] = _CCY_CHOICES
 
-_OTHER = "Other"
+_OTHER = "Other…"
 _ROW_WIDTH = 3
 
 
@@ -59,7 +62,7 @@ def confirm_keyboard(session_id: str) -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton(
-                    "Create Sheet", callback_data=_callback(session_id, "confirm", "yes")
+                    "Start trip", callback_data=_callback(session_id, "confirm", "yes")
                 ),
                 InlineKeyboardButton(
                     "Cancel", callback_data=_callback(session_id, "confirm", "cancel")
@@ -70,15 +73,36 @@ def confirm_keyboard(session_id: str) -> InlineKeyboardMarkup:
 
 
 def rebind_keyboard(session_id: str) -> InlineKeyboardMarkup:
+    """Asked when `/settrip` runs again on a group with an open trip (sprint 9
+    item 1): `Start new trip` closes the old trip and moves on to the currency
+    buttons; `Keep current` ends the conversation with one line.
+    """
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    "Switch Sheet", callback_data=_callback(session_id, "rebind", "yes")
+                    "Start new trip", callback_data=_callback(session_id, "rebind", "yes")
                 ),
                 InlineKeyboardButton(
                     "Keep current", callback_data=_callback(session_id, "rebind", "no")
                 ),
+            ]
+        ]
+    )
+
+
+def close_trip_keyboard(trip_id: int, settle_presser_id: int) -> InlineKeyboardMarkup:
+    """The "Close this trip" button on /settle's reply (sprint 9 item 2). Callback
+    data carries the trip id and the id of whoever ran /settle, since either that
+    person or the trip's `created_by` may press it; the handler re-reads the trip
+    from the store rather than trusting a stale `created_by` baked in here.
+    """
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Close this trip", callback_data=f"closetrip:{trip_id}:{settle_presser_id}"
+                )
             ]
         ]
     )

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+from app.bot.handlers.join import CLOSED_TRIP_TEXT
 from app.bot.handlers.text_expense import draft_callback, text_expense_handler
 from app.models.trip import Trip
 from app.services.ledger_store import InMemoryLedgerStore, LedgerUnavailable
@@ -18,15 +19,13 @@ async def _bound_ledger() -> tuple[InMemoryLedgerStore, Trip]:
     ledger = InMemoryLedgerStore()
     trip = Trip(
         chat_id=CHAT_ID,
-        sheet_id="sheet-id-1234567890",
         name="Japan Trip",
         trip_currency="JPY",
         home_currency="SGD",
         timezone="Asia/Tokyo",
         created_at=datetime.now(UTC),
     )
-    await ledger.save_binding(trip)
-    await ledger.initialise_trip_sheet(trip)
+    trip = await ledger.save_binding(trip)
     return ledger, trip
 
 
@@ -63,6 +62,22 @@ async def test_silent_on_unbound_chat() -> None:
     await text_expense_handler(update, context)
 
     update.effective_message.reply_text.assert_not_awaited()
+
+
+async def test_closed_trip_replies_with_closed_text() -> None:
+    """sprint 9 item 3: a closed trip (no open trip for the chat) replies the
+    one-line closed text, instead of staying silent like an unbound chat."""
+    ledger, trip = await _bound_ledger()
+    await ledger.close_trip(trip)
+    deps = make_deps(ledger)
+    context = _context(deps)
+    update = _update("1200 yen ramen")
+
+    await text_expense_handler(update, context)
+
+    update.effective_message.reply_text.assert_awaited_once_with(
+        CLOSED_TRIP_TEXT, parse_mode="HTML"
+    )
 
 
 async def test_silent_on_non_expense_text() -> None:
@@ -107,10 +122,12 @@ async def test_valid_expense_sends_draft_card_and_joins_sender() -> None:
     assert users[0].user_id == 1
 
 
-async def test_duplicate_message_id_is_silently_skipped() -> None:
-    """Once (chat, message) has actually been committed, a re-send of the same
-    Telegram message (same message_id) starts no new draft and gets no reply --
-    DraftService.start's own dedup check (spec §10), not a handler-level check.
+async def test_duplicate_message_id_still_leaves_one_saved_expense() -> None:
+    """There is no in-memory dedup any more (spec §18): a re-send of the same
+    Telegram message (same message_id) starts a second draft and gets its own
+    reply, but the store's own unique constraint on (chat_id, message_id) means
+    confirming it leaves exactly one expense row -- the store's insert is the
+    idempotency check.
     """
     ledger, trip = await _bound_ledger()
     deps = make_deps(ledger)
@@ -119,17 +136,28 @@ async def test_duplicate_message_id_is_silently_skipped() -> None:
     first = _update("1200 yen ramen", message_id=42, update_id=1)
     await text_expense_handler(first, context)
     first.effective_message.reply_text.assert_awaited_once()
-    draft_id = (
+    first_draft_id = (
         first.effective_message.reply_text.call_args.kwargs["reply_markup"]
         .inline_keyboard[0][0]
         .callback_data.split(":")[0]
     )
-    await deps.draft_service.choose_just_me(draft_id, presser_id=1)
-    await deps.draft_service.confirm(draft_id, presser_id=1)
+    await deps.draft_service.choose_just_me(first_draft_id, presser_id=1)
+    await deps.draft_service.confirm(first_draft_id, presser_id=1)
 
     second = _update("1200 yen ramen", message_id=42, update_id=2)
     await text_expense_handler(second, context)
-    second.effective_message.reply_text.assert_not_awaited()
+    second.effective_message.reply_text.assert_awaited_once()
+    second_draft_id = (
+        second.effective_message.reply_text.call_args.kwargs["reply_markup"]
+        .inline_keyboard[0][0]
+        .callback_data.split(":")[0]
+    )
+    await deps.draft_service.choose_just_me(second_draft_id, presser_id=1)
+    await deps.draft_service.confirm(second_draft_id, presser_id=1)
+
+    saved = await ledger.list_expenses(trip)
+    assert len(saved) == 1
+    assert saved[0].expense_id == first_draft_id
 
 
 async def test_replayed_update_id_is_silently_skipped() -> None:
@@ -241,15 +269,13 @@ async def test_draft_callback_confirm_failure_shows_retry_save_with_error_line()
     ledger = _AlwaysFailAppendLedger()
     trip = Trip(
         chat_id=CHAT_ID,
-        sheet_id="sheet-id-1234567890",
         name="Japan Trip",
         trip_currency="JPY",
         home_currency="SGD",
         timezone="Asia/Tokyo",
         created_at=datetime.now(UTC),
     )
-    await ledger.save_binding(trip)
-    await ledger.initialise_trip_sheet(trip)
+    trip = await ledger.save_binding(trip)
     deps = make_deps(ledger)
     context = _context(deps)
     update = _update("1200 yen ramen")
@@ -270,7 +296,7 @@ async def test_draft_callback_confirm_failure_shows_retry_save_with_error_line()
     confirm_update.callback_query.answer.assert_awaited_once()
     confirm_update.callback_query.edit_message_text.assert_awaited_once()
     (text,), kwargs = confirm_update.callback_query.edit_message_text.call_args
-    assert "Couldn't reach Google Sheets" in text
+    assert "Couldn't save" in text
     assert "Retry save" in text or any(
         button.text == "Retry save"
         for row in kwargs["reply_markup"].inline_keyboard

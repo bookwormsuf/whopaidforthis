@@ -148,12 +148,6 @@ class PendingName:
     candidate_ids: tuple[int, ...]
 
 
-class DuplicateMessage(DraftError):
-    """The (chat_id, message_id) this draft would be started from was already
-    committed; the caller should stay silent (spec §10 dedup).
-    """
-
-
 @dataclass(frozen=True)
 class Draft:
     """Source-neutral: `amount_minor`/`currency`/`description`/`category`/`merchant`
@@ -416,21 +410,13 @@ class InMemoryDraftStore:
         return None
 
 
-class Dedup(Protocol):
-    def is_loaded(self, chat_id: int) -> bool: ...
-
-    def load_many(self, chat_id: int, message_ids: object) -> None: ...
-
-    def seen(self, chat_id: int, message_id: int) -> bool: ...
-
-    def add(self, chat_id: int, message_id: int) -> None: ...
-
-
 class DraftService:
     """Owns the draft lifecycle: `start`, `choose_just_me`, `confirm`, `cancel`,
     `retry_rate`. Only the initiator may act on a draft (spec §8); this is enforced
-    on every call via `_get_active`. Also owns the dedup lazy-load and check (spec
-    §10): `start` is the only place a `(chat_id, message_id)` is checked.
+    on every call via `_get_active`. One expense per Telegram message is the
+    store's own unique constraint now (spec §18) -- there is no in-memory dedup
+    here any more; `confirm` just inserts and trusts the store to no-op on a
+    repeat.
     """
 
     def __init__(
@@ -438,12 +424,10 @@ class DraftService:
         ledger: LedgerStore,
         rates: RateService,
         drafts: DraftStore,
-        dedup: Dedup,
     ) -> None:
         self._ledger = ledger
         self._rates = rates
         self._drafts = drafts
-        self._dedup = dedup
 
     async def _trip_for(self, draft: Draft) -> Trip:
         trip = await self._ledger.get_binding(draft.chat_id)
@@ -463,14 +447,6 @@ class DraftService:
             raise NotInitiator(draft.initiator_name)
         return draft
 
-    async def _ensure_not_duplicate(self, trip: Trip, chat_id: int, message_id: int) -> None:
-        if not self._dedup.is_loaded(chat_id):
-            expenses = await self._ledger.list_expenses(trip)
-            message_ids = [e.message_id for e in expenses if e.chat_id == chat_id]
-            self._dedup.load_many(chat_id, message_ids)
-        if self._dedup.seen(chat_id, message_id):
-            raise DuplicateMessage()
-
     async def start(
         self,
         *,
@@ -483,7 +459,6 @@ class DraftService:
         trip: Trip,
         transaction_date: date,
     ) -> Draft:
-        await self._ensure_not_duplicate(trip, chat_id, message_id)
 
         draft_id = str(ULID())
         common = dict(
@@ -596,9 +571,11 @@ class DraftService:
         return draft_items_split(draft, trip).assignments
 
     async def confirm(self, draft_id: str, presser_id: int) -> Draft:
-        """Idempotent: if a previous attempt's `append_expense` raised after the row
-        was actually written server-side, a retry does not double-append -- it
-        checks `expense_exists` (keyed by the draft's own ULID) before appending.
+        """Idempotent: the store's own unique constraints on `expenses.id` and
+        `(chat_id, message_id)` are the save's idempotency check (spec §18) -- a
+        retry after a previous attempt's row actually landed server-side just
+        inserts again, and the store treats that as "already saved" and returns
+        normally instead of raising.
         """
         draft = await self._get_active(draft_id, presser_id)
         if draft.state != "preview":
@@ -608,16 +585,14 @@ class DraftService:
 
         await self._drafts.put(replace(draft, state="committing"))
         try:
-            if not await self._ledger.expense_exists(trip, expense.expense_id):
-                await self._ledger.append_expense(
-                    trip, expense, draft.line_items, self._assignments(draft, trip)
-                )
+            await self._ledger.append_expense(
+                trip, expense, draft.line_items, self._assignments(draft, trip)
+            )
         except LedgerUnavailable:
             logger.exception("draft %s: could not append expense", draft.draft_id)
             await self._drafts.put(replace(draft, state="preview"))
             raise
 
-        self._dedup.add(draft.chat_id, draft.message_id)
         committed = replace(draft, state="committed")
         await self._drafts.put(committed)
         return committed
@@ -1284,7 +1259,6 @@ class DraftService:
         participants_text: str | None = None,
         payer_text: str | None = None,
     ) -> Draft:
-        await self._ensure_not_duplicate(trip, chat_id, message_id)
         base = dict(
             draft_id=str(ULID()),
             chat_id=chat_id,
@@ -1326,7 +1300,6 @@ class DraftService:
         `Try again` / `Enter amount manually`. `read_problem` says why when the reader
         service failed rather than the photo.
         """
-        await self._ensure_not_duplicate(trip, chat_id, message_id)
         description, category = caption_override or ("Expense", Category.OTHER)
         draft = Draft(
             draft_id=str(ULID()),

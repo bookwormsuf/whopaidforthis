@@ -20,6 +20,26 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: whopaid_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5433/whopaid_test
+      # GitHub Actions already sets this, but pin it explicitly: conftest.py fails
+      # collection (rather than skipping) the postgres-marked tests when CI is set
+      # and no database is reachable (sprint 9 review item 5).
+      CI: "true"
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6

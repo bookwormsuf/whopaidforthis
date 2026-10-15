@@ -17,6 +17,7 @@ from telegram.ext import ContextTypes
 from app.bot.deps import get_deps
 from app.bot.formatting import fmt_expense_bullet, fmt_money
 from app.bot.handlers.join import require_trip
+from app.bot.keyboards.settrip import close_trip_keyboard
 from app.models.expense import ExpenseRecord, SplitRecord
 from app.models.trip import Trip
 from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
@@ -27,8 +28,8 @@ logger = logging.getLogger(__name__)
 NO_BALANCES_TEXT = "No expenses yet."
 ALL_SQUARE_TEXT = "All square 🎉"
 UNBALANCED_TEXT = (
-    "⚠️ The Sheet's shares don't add up to its expenses (off by {amount}). "
-    "Was a Splits or Expenses row edited by hand? Fix it, or /undo and re-send the expense."
+    "⚠️ The recorded shares don't add up to the expenses (off by {amount}). "
+    "Was a row edited by hand? Fix it, or /undo and re-send the expense."
 )
 SETTLE_HINT = "Settle up with /settle"
 
@@ -47,16 +48,15 @@ class _Ledger:
         return self.names.get(user_id, f"User {user_id}")
 
 
-async def _load(context: ContextTypes.DEFAULT_TYPE, trip: Trip, chat_id: int) -> _Ledger:
-    """Raises `LedgerUnavailable` straight through, like the other read commands."""
+async def _load(context: ContextTypes.DEFAULT_TYPE, trip: Trip) -> _Ledger:
+    """Raises `LedgerUnavailable` straight through, like the other read commands.
+
+    No `chat_id` filter: a trip belongs to exactly one chat, so the store's
+    `confirmed_only` already scopes this correctly (sprint 9 review item 8).
+    """
     deps = get_deps(context)
-    expenses = [
-        e
-        for e in await deps.ledger.list_expenses(trip)
-        if e.chat_id == chat_id and e.status == "confirmed"
-    ]
-    ids = {e.expense_id for e in expenses}
-    splits = [s for s in await deps.ledger.list_splits(trip) if s.expense_id in ids]
+    expenses = await deps.ledger.list_expenses(trip, confirmed_only=True)
+    splits = await deps.ledger.list_splits(trip, confirmed_only=True)
     # Names: the Splits and Expenses rows first, then the Users tab, which is the
     # freshest (a renamed user shows their current name).
     names: dict[int, str] = {}
@@ -91,11 +91,10 @@ async def _loaded(update: Update, context: ContextTypes.DEFAULT_TYPE, command: s
     trip = await require_trip(update, context)
     if trip is None:
         return None
-    chat = update.effective_chat
     message = update.effective_message
-    assert chat is not None and message is not None
+    assert message is not None
     try:
-        ledger = await _load(context, trip, chat.id)
+        ledger = await _load(context, trip)
     except LedgerUnavailable:
         logger.exception("%s: could not read the ledger", command)
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
@@ -173,14 +172,18 @@ async def mine_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def settle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """ "To settle up:" then one bullet per transfer, `Amir pays Ada S$31.20`
-    (sprint 8), or "All square 🎉".
+    (sprint 8), or "All square 🎉". Ends with a `Close this trip` button (sprint 9
+    item 2), usable by the trip starter or whoever ran /settle.
     """
     loaded = await _loaded(update, context, "settle")
     if loaded is None:
         return
     trip, ledger = loaded
     message = update.effective_message
-    assert message is not None
+    user = update.effective_user
+    assert message is not None and user is not None
+    assert trip.id is not None
+    close_markup = close_trip_keyboard(trip.id, user.id)
     balances = compute_balances(ledger.expenses, ledger.splits)
     off_by = unbalanced_by(balances)
     if off_by:
@@ -192,11 +195,80 @@ async def settle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
     transfers = settle({uid: b.net_minor for uid, b in balances.items()})
     if not transfers:
-        await message.reply_text(ALL_SQUARE_TEXT, parse_mode="HTML")
+        await message.reply_text(ALL_SQUARE_TEXT, parse_mode="HTML", reply_markup=close_markup)
         return
     lines = ["<b>To settle up:</b>"] + [
         f"• {escape(ledger.name(t.from_user_id))} pays {escape(ledger.name(t.to_user_id))} "
         f"<b>{fmt_money(t.amount_minor, trip.home_currency)}</b>"
         for t in transfers
     ]
-    await message.reply_text("\n".join(lines), parse_mode="HTML")
+    await message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=close_markup)
+
+
+CLOSE_TRIP_NOT_ALLOWED_TOAST = "Only the person who started the trip or ran /settle can close it"
+TRIP_CLOSED_SUFFIX = "\n\nTrip closed. Run /settrip to start a new one."
+
+
+async def close_trip_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """`closetrip:{trip_id}:{settle_presser_id}` from the `Close this trip` button
+    on /settle's reply (sprint 9 item 2). Allowed for the trip's `created_by` or
+    the user who ran /settle; anyone else gets a toast.
+    """
+    query = update.callback_query
+    assert query is not None
+    data = query.data or ""
+    parts = data.split(":")
+    if len(parts) != 3 or parts[0] != "closetrip":
+        await query.answer()
+        return
+    try:
+        trip_id, settle_presser_id = int(parts[1]), int(parts[2])
+    except ValueError:
+        await query.answer()
+        return
+
+    deps = get_deps(context)
+    presser = query.from_user
+    chat = update.effective_chat
+    if presser is None or chat is None:
+        await query.answer()
+        return
+
+    try:
+        trip = await deps.ledger.get_trip(chat.id, trip_id)
+    except LedgerUnavailable:
+        logger.exception("close_trip_callback: could not read the trip")
+        await query.answer(LEDGER_UNAVAILABLE_TEXT)
+        return
+    if trip is None:
+        await query.answer()
+        return
+
+    allowed = {settle_presser_id}
+    if trip.created_by is not None:
+        allowed.add(trip.created_by)
+    if presser.id not in allowed:
+        await query.answer(CLOSE_TRIP_NOT_ALLOWED_TOAST)
+        return
+
+    if trip.closed_at is not None:
+        await query.answer()
+        return
+
+    try:
+        await deps.ledger.close_trip(trip)
+    except LedgerUnavailable:
+        logger.exception("close_trip_callback: could not close the trip")
+        await query.answer(LEDGER_UNAVAILABLE_TEXT)
+        return
+
+    await query.answer()
+    message = query.message
+    current_text = message.text_html if message is not None else None
+    if current_text is not None:
+        try:
+            await query.edit_message_text(
+                current_text + TRIP_CLOSED_SUFFIX, parse_mode="HTML", reply_markup=None
+            )
+        except Exception:  # noqa: BLE001 - editing an already-changed message is not fatal
+            logger.debug("close_trip_callback: could not edit message")

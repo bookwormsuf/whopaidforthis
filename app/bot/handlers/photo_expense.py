@@ -26,24 +26,21 @@ from telegram.ext import ContextTypes, filters
 
 from app.bot.deps import Deps, get_deps
 from app.bot.formatting import unsupported_currency_text
+from app.bot.handlers.join import require_trip_for_expense
 from app.bot.handlers.tags import join_tagged, tags_as_text
 from app.bot.render.draft import render_draft
 from app.models.category import Category
 from app.models.receipt import Receipt
 from app.models.trip import Trip
 from app.models.user import TripUser
-from app.services.drafts import Draft, DraftError, DuplicateMessage
+from app.services.drafts import Draft, DraftError
 from app.services.expense_parser import (
     parse_amount_only,
     parse_caption_clauses,
     parse_caption_description,
 )
 from app.services.images import ImageTooLarge, prepare_image
-from app.services.ledger_store import (
-    LEDGER_UNAVAILABLE_TEXT,
-    LedgerUnavailable,
-    TripSheetInaccessible,
-)
+from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
 from app.services.receipt_parser import (
     ReceiptServiceUnavailable,
     ReceiptUnreadable,
@@ -130,16 +127,11 @@ async def photo_expense_handler(update: Update, context: ContextTypes.DEFAULT_TY
             return
         deps.recent_updates.add(update.update_id)
 
-    try:
-        trip = await deps.ledger.get_binding(chat.id)
-    except TripSheetInaccessible:
-        logger.info("photo_expense: trip Sheet inaccessible, chat_id=%s", chat.id)
-        return
-    except LedgerUnavailable:
-        logger.exception("photo_expense: could not read the current binding")
-        return
+    trip = await require_trip_for_expense(update, context)
     if trip is None:
-        return  # unbound group: stay silent for a photo, same as plain text
+        # Unbound group: stay silent for a photo, same as plain text (spec §13). A
+        # closed trip gets the "This trip is closed..." reply (sprint 9 item 3).
+        return
 
     largest = message.photo[-1]
     if largest.file_size and largest.file_size > MAX_PHOTO_BYTES:
@@ -209,9 +201,6 @@ async def photo_expense_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 date_source=outcome.date_source,
                 **common,
             )
-    except DuplicateMessage:
-        logger.info("photo_expense: duplicate (chat, message) skipped")
-        return
     except LedgerUnavailable:
         logger.exception("photo_expense: could not start draft")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
@@ -248,7 +237,7 @@ async def handle_manual_amount_reply(update: Update, context: ContextTypes.DEFAU
 
     try:
         trip = await deps.ledger.get_binding(chat.id)
-    except (TripSheetInaccessible, LedgerUnavailable):
+    except LedgerUnavailable:
         logger.exception("manual_amount_reply: could not read the current binding")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
         return True

@@ -115,17 +115,16 @@ class FakeGroup:
     @classmethod
     async def create(cls, *members: Member, trip_currency: str = "JPY") -> FakeGroup:
         ledger = InMemoryLedgerStore()
-        trip = Trip(
-            chat_id=CHAT_ID,
-            sheet_id="sheet-id-1234567890",
-            name="Test Trip",
-            trip_currency=trip_currency,
-            home_currency="SGD",
-            timezone="Asia/Tokyo",
-            created_at=datetime.now(UTC),
+        trip = await ledger.save_binding(
+            Trip(
+                chat_id=CHAT_ID,
+                name="Test Trip",
+                trip_currency=trip_currency,
+                home_currency="SGD",
+                timezone="Asia/Tokyo",
+                created_at=datetime.now(UTC),
+            )
         )
-        await ledger.save_binding(trip)
-        await ledger.initialise_trip_sheet(trip)
         reader = FakeReceiptReader()
         group = cls(ledger=ledger, trip=trip, deps=make_deps(ledger, receipt_reader=reader))
         group.reader = reader

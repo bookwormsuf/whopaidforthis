@@ -49,7 +49,7 @@ from app.services.splitting import Custom, Items
 
 # Spec §10/§14: on a failed save the draft stays in `preview` with a `Retry save`
 # button and this error line on the card.
-SAVE_ERROR_LINE = "⚠️ Couldn't reach Google Sheets. Tap Retry save to try again."
+SAVE_ERROR_LINE = "⚠️ Couldn't save. Tap Retry save to try again."
 
 
 def _buttons(draft_id: str, *pairs: tuple[str, str]) -> InlineKeyboardMarkup:

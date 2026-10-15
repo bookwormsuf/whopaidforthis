@@ -107,7 +107,7 @@ async def join_button_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         trip = await deps.ledger.get_binding(chat_id)
     except LedgerUnavailable:
         logger.exception("join button: could not read the current binding")
-        await query.answer("Couldn't reach Google Sheets, try again.")
+        await query.answer("Couldn't save, try again.")
         return
     if trip is None:
         await query.answer("This trip is no longer connected.")
@@ -133,7 +133,7 @@ async def join_button_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         joined_user = await deps.ledger.upsert_user(trip, tg_user, joined=True)
     except LedgerUnavailable:
         logger.exception("join button: could not upsert user")
-        await query.answer("Couldn't reach Google Sheets, try again.")
+        await query.answer("Couldn't save, try again.")
         return
 
     await query.answer(f"Joined ✅ {joined_user.display_name}")

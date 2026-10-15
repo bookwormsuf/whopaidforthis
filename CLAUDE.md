@@ -1,6 +1,6 @@
 # whopaid
 
-Telegram group expense tracker for trips. Records into Google Sheets, converts at historical rates,
+Telegram group expense tracker for trips. Records into Postgres, converts at historical rates,
 splits receipts, settles in the home currency.
 
 Before writing any code, read in this order:
