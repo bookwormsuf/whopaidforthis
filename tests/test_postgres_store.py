@@ -311,6 +311,51 @@ async def test_delete_trips_removes_everything(postgres_store: PostgresLedgerSto
     assert not await postgres_store.expense_exists(trip, expense.expense_id)
 
 
+async def test_latest_trip_prefers_open_over_newer_closed(
+    postgres_store: PostgresLedgerStore,
+) -> None:
+    chat_id = -200
+    first = await postgres_store.save_binding(_trip(chat_id=chat_id, name="First"))
+    await postgres_store.close_trip(first)
+    second = await postgres_store.save_binding(_trip(chat_id=chat_id, name="Second"))
+    await postgres_store.close_trip(second)
+    third = await postgres_store.save_binding(_trip(chat_id=chat_id, name="Third"))  # open
+
+    latest = await postgres_store.latest_trip(chat_id)
+    assert latest is not None
+    assert latest.id == third.id
+
+
+async def test_latest_trip_with_no_open_trip_picks_most_recently_created(
+    postgres_store: PostgresLedgerStore,
+) -> None:
+    chat_id = -201
+    first = await postgres_store.save_binding(_trip(chat_id=chat_id, name="First"))
+    await postgres_store.close_trip(first)
+    second = await postgres_store.save_binding(_trip(chat_id=chat_id, name="Second"))
+    await postgres_store.close_trip(second)
+
+    latest = await postgres_store.latest_trip(chat_id)
+    assert latest is not None
+    assert latest.id == second.id
+
+
+async def test_latest_trip_for_unknown_chat_is_none(postgres_store: PostgresLedgerStore) -> None:
+    assert await postgres_store.latest_trip(-99999) is None
+
+
+async def test_get_trip_scoped_to_chat(postgres_store: PostgresLedgerStore) -> None:
+    chat_id = -202
+    trip = await postgres_store.save_binding(_trip(chat_id=chat_id))
+
+    found = await postgres_store.get_trip(chat_id, trip.id)
+    assert found is not None
+    assert found.id == trip.id
+
+    assert await postgres_store.get_trip(chat_id, trip.id + 999) is None
+    assert await postgres_store.get_trip(chat_id + 1, trip.id) is None
+
+
 async def test_find_and_save_rate_roundtrip(postgres_store: PostgresLedgerStore) -> None:
     trip = await postgres_store.save_binding(_trip())
     rate = ExchangeRate(

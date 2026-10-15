@@ -30,13 +30,7 @@ async def _pick_trip(context: ContextTypes.DEFAULT_TYPE, chat_id: int) -> Trip |
     chat, else `None` (no trip at all).
     """
     deps = get_deps(context)
-    trip = await deps.ledger.get_binding(chat_id)
-    if trip is not None:
-        return trip
-    closed = [t for t in await deps.ledger.list_trips(chat_id) if t.closed_at is not None]
-    if not closed:
-        return None
-    return max(closed, key=lambda t: t.closed_at)
+    return await deps.ledger.latest_trip(chat_id)
 
 
 async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

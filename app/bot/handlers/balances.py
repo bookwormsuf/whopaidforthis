@@ -237,12 +237,11 @@ async def close_trip_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     try:
-        trips = await deps.ledger.list_trips(chat.id)
+        trip = await deps.ledger.get_trip(chat.id, trip_id)
     except LedgerUnavailable:
-        logger.exception("close_trip_callback: could not read trips")
+        logger.exception("close_trip_callback: could not read the trip")
         await query.answer(LEDGER_UNAVAILABLE_TEXT)
         return
-    trip = next((t for t in trips if t.id == trip_id), None)
     if trip is None:
         await query.answer()
         return

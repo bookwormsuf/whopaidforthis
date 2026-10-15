@@ -44,11 +44,7 @@ async def _target_trip(deps, chat_id: int):
     """The chat's open trip, or its latest trip if none is open, or `None` if the
     chat has never had a trip at all.
     """
-    trips = await deps.ledger.list_trips(chat_id)
-    if not trips:
-        return None
-    open_trip = next((t for t in trips if t.closed_at is None), None)
-    return open_trip if open_trip is not None else trips[-1]
+    return await deps.ledger.latest_trip(chat_id)
 
 
 async def deletetrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

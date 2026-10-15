@@ -47,6 +47,10 @@ class LedgerStore(Protocol):
 
     async def list_trips(self, chat_id: int) -> list[Trip]: ...
 
+    async def latest_trip(self, chat_id: int) -> Trip | None: ...
+
+    async def get_trip(self, chat_id: int, trip_id: int) -> Trip | None: ...
+
     async def upsert_user(self, trip: Trip, user: TripUser, joined: bool | None) -> TripUser: ...
 
     async def list_users(self, trip: Trip, joined_only: bool = False) -> list[TripUser]: ...
@@ -172,6 +176,21 @@ class InMemoryLedgerStore:
 
     async def list_trips(self, chat_id: int) -> list[Trip]:
         return [self._trips_by_id[tid] for tid in self._trip_ids_by_chat.get(chat_id, [])]
+
+    async def latest_trip(self, chat_id: int) -> Trip | None:
+        """The chat's open trip, or (if none is open) its most recently created
+        trip, or `None` if the chat has never had one.
+        """
+        trips = [self._trips_by_id[tid] for tid in self._trip_ids_by_chat.get(chat_id, [])]
+        if not trips:
+            return None
+        return max(trips, key=lambda t: (t.closed_at is None, t.created_at))
+
+    async def get_trip(self, chat_id: int, trip_id: int) -> Trip | None:
+        for tid in self._trip_ids_by_chat.get(chat_id, []):
+            if tid == trip_id:
+                return self._trips_by_id[tid]
+        return None
 
     async def upsert_user(self, trip: Trip, user: TripUser, joined: bool | None) -> TripUser:
         assert trip.id is not None

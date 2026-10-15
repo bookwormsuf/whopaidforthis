@@ -187,3 +187,48 @@ async def test_in_memory_ledger_store_list_line_items() -> None:
     assert records[0].allocation_method == "claimed"
     assert records[1].allocation_method == "unassigned"  # no entry for position 1
     assert records[1].assigned_user_ids == []
+
+
+async def test_latest_trip_prefers_the_open_trip_over_a_newer_closed_one() -> None:
+    """Ordering matches the spec: the open trip wins regardless of creation
+    order (sprint 9 review item 6).
+    """
+    store = InMemoryLedgerStore()
+    first = await store.save_binding(_trip())
+    await store.close_trip(first)
+    second = await store.save_binding(_trip())  # open
+    await store.close_trip(second)
+    third = await store.save_binding(_trip())  # open: most recently created too
+
+    latest = await store.latest_trip(first.chat_id)
+    assert latest is not None
+    assert latest.id == third.id
+
+
+async def test_latest_trip_with_no_open_trip_picks_the_most_recently_created() -> None:
+    store = InMemoryLedgerStore()
+    first = await store.save_binding(_trip())
+    await store.close_trip(first)
+    second = await store.save_binding(_trip())
+    await store.close_trip(second)
+
+    latest = await store.latest_trip(first.chat_id)
+    assert latest is not None
+    assert latest.id == second.id
+
+
+async def test_latest_trip_for_a_chat_with_no_trips_is_none() -> None:
+    store = InMemoryLedgerStore()
+    assert await store.latest_trip(-999) is None
+
+
+async def test_get_trip_returns_the_matching_trip_scoped_to_its_chat() -> None:
+    store = InMemoryLedgerStore()
+    trip = await store.save_binding(_trip())
+
+    found = await store.get_trip(trip.chat_id, trip.id)
+    assert found is not None
+    assert found.id == trip.id
+
+    assert await store.get_trip(trip.chat_id, trip.id + 999) is None
+    assert await store.get_trip(trip.chat_id + 1, trip.id) is None

@@ -169,6 +169,31 @@ class PostgresLedgerStore:
 
         return await self._run(_do)
 
+    async def latest_trip(self, chat_id: int) -> Trip | None:
+        async def _do() -> Trip | None:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    """
+                    select * from trips where chat_id = $1
+                    order by (closed_at is null) desc, created_at desc
+                    limit 1
+                    """,
+                    chat_id,
+                )
+            return _row_to_trip(row) if row is not None else None
+
+        return await self._run(_do)
+
+    async def get_trip(self, chat_id: int, trip_id: int) -> Trip | None:
+        async def _do() -> Trip | None:
+            async with self.pool.acquire() as conn:
+                row = await conn.fetchrow(
+                    "select * from trips where chat_id = $1 and id = $2", chat_id, trip_id
+                )
+            return _row_to_trip(row) if row is not None else None
+
+        return await self._run(_do)
+
     # -- Trip users -----------------------------------------------------------
 
     async def upsert_user(self, trip: Trip, user: TripUser, joined: bool | None) -> TripUser:

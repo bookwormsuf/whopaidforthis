@@ -39,12 +39,12 @@ async def resolve_trip_status(deps: Deps, chat_id: int) -> tuple[Trip | None, bo
     has never had a trip at all (`False`). Raises `LedgerUnavailable` straight
     through; every caller wraps this in its own try/except.
     """
-    trip = await deps.ledger.get_binding(chat_id)
-    if trip is not None:
+    trip = await deps.ledger.latest_trip(chat_id)
+    if trip is None:
+        return None, False
+    if trip.closed_at is None:
         return trip, False
-    trips = await deps.ledger.list_trips(chat_id)
-    latest_is_closed = bool(trips) and trips[-1].closed_at is not None
-    return None, latest_is_closed
+    return None, True
 
 
 async def require_trip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Trip | None:
