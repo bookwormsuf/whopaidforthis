@@ -11,13 +11,14 @@ from __future__ import annotations
 import logging
 from html import escape
 
-from telegram import Update
+from telegram import Chat, Update, User
 from telegram.ext import ContextTypes
 
-from app.bot.deps import get_deps
+from app.bot.deps import Deps, get_deps
 from app.bot.formatting import fmt_expense_bullet, fmt_money
-from app.bot.handlers.join import require_trip
+from app.bot.handlers.join import require_trip_send
 from app.bot.keyboards.settrip import close_trip_keyboard
+from app.bot.send import SendFn, build_send
 from app.models.expense import ExpenseRecord, SplitRecord
 from app.models.trip import Trip
 from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
@@ -48,13 +49,12 @@ class _Ledger:
         return self.names.get(user_id, f"User {user_id}")
 
 
-async def _load(context: ContextTypes.DEFAULT_TYPE, trip: Trip) -> _Ledger:
+async def _load(deps: Deps, trip: Trip) -> _Ledger:
     """Raises `LedgerUnavailable` straight through, like the other read commands.
 
     No `chat_id` filter: a trip belongs to exactly one chat, so the store's
     `confirmed_only` already scopes this correctly (sprint 9 review item 8).
     """
-    deps = get_deps(context)
     expenses = await deps.ledger.list_expenses(trip, confirmed_only=True)
     splits = await deps.ledger.list_splits(trip, confirmed_only=True)
     # Names: the Splits and Expenses rows first, then the Users tab, which is the
@@ -87,34 +87,30 @@ def _balance_line(name: str, balance: Balance, currency: str) -> str:
     )
 
 
-async def _loaded(update: Update, context: ContextTypes.DEFAULT_TYPE, command: str):
-    trip = await require_trip(update, context)
+async def _loaded(deps: Deps, chat: Chat, send: SendFn, command: str):
+    trip = await require_trip_send(deps, chat.id, send)
     if trip is None:
         return None
-    message = update.effective_message
-    assert message is not None
     try:
-        ledger = await _load(context, trip)
+        ledger = await _load(deps, trip)
     except LedgerUnavailable:
         logger.exception("%s: could not read the ledger", command)
-        await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
+        await send(LEDGER_UNAVAILABLE_TEXT)
         return None
     return trip, ledger
 
 
-async def balances_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def run_balances(deps: Deps, chat: Chat, user: User, send: SendFn) -> None:
     """Who is owed and who owes, per user with any activity, most owed first, each
     with paid and share underneath (sprint 8 wording).
     """
-    loaded = await _loaded(update, context, "balances")
+    loaded = await _loaded(deps, chat, send, "balances")
     if loaded is None:
         return
     trip, ledger = loaded
-    message = update.effective_message
-    assert message is not None
     balances = compute_balances(ledger.expenses, ledger.splits)
     if not balances:
-        await message.reply_text(NO_BALANCES_TEXT, parse_mode="HTML")
+        await send(NO_BALANCES_TEXT)
         return
     ordered = sorted(
         balances.values(), key=lambda b: (-b.net_minor, ledger.name(b.user_id).casefold())
@@ -125,20 +121,23 @@ async def balances_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if off_by:
         lines.append(UNBALANCED_TEXT.format(amount=fmt_money(abs(off_by), trip.home_currency)))
     lines.append(SETTLE_HINT)
-    await message.reply_text("\n".join(lines), parse_mode="HTML")
+    await send("\n".join(lines))
 
 
-async def mine_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def balances_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat, message = update.effective_chat, update.effective_message
+    assert chat is not None and message is not None
+    await run_balances(get_deps(context), chat, update.effective_user, build_send(message))
+
+
+async def run_mine(deps: Deps, chat: Chat, user: User, send: SendFn) -> None:
     """The caller's paid, share and bottom line in plain sentences (sprint 8), then
     their last 3 expenses (paid by them or shared with them) with their own share.
     """
-    loaded = await _loaded(update, context, "mine")
+    loaded = await _loaded(deps, chat, send, "mine")
     if loaded is None:
         return
     trip, ledger = loaded
-    message = update.effective_message
-    user = update.effective_user
-    assert message is not None and user is not None
     home = trip.home_currency
     balance = compute_balances(ledger.expenses, ledger.splits).get(user.id, Balance(user.id, 0, 0))
     my_shares = {s.expense_id: s.share_home_minor for s in ledger.splits if s.user_id == user.id}
@@ -167,42 +166,48 @@ async def mine_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             else:
                 detail = "you're not in this one"
             lines.append(fmt_expense_bullet(expense, trip, detail))
-    await message.reply_text("\n".join(lines), parse_mode="HTML")
+    await send("\n".join(lines))
 
 
-async def settle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def mine_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat, user, message = update.effective_chat, update.effective_user, update.effective_message
+    assert chat is not None and user is not None and message is not None
+    await run_mine(get_deps(context), chat, user, build_send(message))
+
+
+async def run_settle(deps: Deps, chat: Chat, user: User, send: SendFn) -> None:
     """ "To settle up:" then one bullet per transfer, `Amir pays Ada S$31.20`
     (sprint 8), or "All square 🎉". Ends with a `Close this trip` button (sprint 9
     item 2), usable by the trip starter or whoever ran /settle.
     """
-    loaded = await _loaded(update, context, "settle")
+    loaded = await _loaded(deps, chat, send, "settle")
     if loaded is None:
         return
     trip, ledger = loaded
-    message = update.effective_message
-    user = update.effective_user
-    assert message is not None and user is not None
     assert trip.id is not None
     close_markup = close_trip_keyboard(trip.id, user.id)
     balances = compute_balances(ledger.expenses, ledger.splits)
     off_by = unbalanced_by(balances)
     if off_by:
         logger.warning("settle: nets off by %s minor units", off_by)
-        await message.reply_text(
-            UNBALANCED_TEXT.format(amount=fmt_money(abs(off_by), trip.home_currency)),
-            parse_mode="HTML",
-        )
+        await send(UNBALANCED_TEXT.format(amount=fmt_money(abs(off_by), trip.home_currency)))
         return
     transfers = settle({uid: b.net_minor for uid, b in balances.items()})
     if not transfers:
-        await message.reply_text(ALL_SQUARE_TEXT, parse_mode="HTML", reply_markup=close_markup)
+        await send(ALL_SQUARE_TEXT, reply_markup=close_markup)
         return
     lines = ["<b>To settle up:</b>"] + [
         f"• {escape(ledger.name(t.from_user_id))} pays {escape(ledger.name(t.to_user_id))} "
         f"<b>{fmt_money(t.amount_minor, trip.home_currency)}</b>"
         for t in transfers
     ]
-    await message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=close_markup)
+    await send("\n".join(lines), reply_markup=close_markup)
+
+
+async def settle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat, user, message = update.effective_chat, update.effective_user, update.effective_message
+    assert chat is not None and user is not None and message is not None
+    await run_settle(get_deps(context), chat, user, build_send(message))
 
 
 CLOSE_TRIP_NOT_ALLOWED_TOAST = "Only the person who started the trip or ran /settle can close it"

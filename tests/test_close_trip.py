@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,8 +11,13 @@ from app.bot.handlers.balances import (
     CLOSE_TRIP_NOT_ALLOWED_TOAST,
     TRIP_CLOSED_SUFFIX,
     close_trip_callback,
+    run_balances,
+    run_mine,
+    run_settle,
     settle_command,
 )
+from app.models.category import Category
+from app.models.expense import Expense, ExpenseSplit
 from app.models.trip import Trip
 from app.services.ledger_store import InMemoryLedgerStore
 from tests.helpers import make_deps
@@ -126,3 +132,87 @@ async def test_close_trip_button_denied_for_other_user() -> None:
     update.callback_query.edit_message_text.assert_not_awaited()
     reloaded = (await ledger.list_trips(CHAT_ID))[0]
     assert reloaded.closed_at is None
+
+
+def _fake_send():
+    sent: list[tuple[str, dict]] = []
+
+    async def send(text: str, *, reply_markup=None):
+        sent.append((text, {"reply_markup": reply_markup}))
+        return SimpleNamespace(message_id=1)
+
+    return send, sent
+
+
+def _expense(payer_id: int) -> Expense:
+    return Expense(
+        expense_id="e1",
+        created_at=datetime.now(UTC),
+        transaction_date=date(2026, 10, 1),
+        chat_id=CHAT_ID,
+        message_id=1,
+        created_by_user_id=payer_id,
+        payer_user_id=payer_id,
+        payer_username="ada",
+        payer_display_name="Ada",
+        description="Ramen",
+        merchant=None,
+        category=Category.FOOD,
+        original_amount_minor=1200,
+        original_currency="JPY",
+        trip_currency="JPY",
+        home_currency="SGD",
+        trip_amount_minor=1200,
+        home_amount_minor=1000,
+        rate=Decimal("0.0081"),
+        rate_date=date(2026, 9, 30),
+        source_type="text",
+        split_method="equal",
+        status="confirmed",
+        cancelled_at=None,
+        notes=None,
+        splits=[
+            ExpenseSplit(
+                user_id=payer_id,
+                username="ada",
+                display_name="Ada",
+                share_trip_minor=1200,
+                share_home_minor=1000,
+                split_method="equal",
+            )
+        ],
+    )
+
+
+async def test_run_balances_sends_who_owes_what_with_a_fake_send() -> None:
+    ledger, trip = await _bound_ledger()
+    await ledger.append_expense(trip, _expense(STARTER_ID))
+    deps = make_deps(ledger)
+    send, sent = _fake_send()
+
+    await run_balances(deps, SimpleNamespace(id=CHAT_ID), SimpleNamespace(id=STARTER_ID), send)
+
+    assert sent[0][0].startswith("<b>Who owes what</b>")
+
+
+async def test_run_mine_sends_the_callers_standing_with_a_fake_send() -> None:
+    ledger, trip = await _bound_ledger()
+    await ledger.append_expense(trip, _expense(STARTER_ID))
+    deps = make_deps(ledger)
+    send, sent = _fake_send()
+
+    await run_mine(deps, SimpleNamespace(id=CHAT_ID), SimpleNamespace(id=STARTER_ID), send)
+
+    assert "You paid" in sent[0][0]
+
+
+async def test_run_settle_sends_all_square_with_a_close_button() -> None:
+    ledger, trip = await _bound_ledger()
+    await ledger.append_expense(trip, _expense(STARTER_ID))
+    deps = make_deps(ledger)
+    send, sent = _fake_send()
+
+    await run_settle(deps, SimpleNamespace(id=CHAT_ID), SimpleNamespace(id=STARTER_ID), send)
+
+    assert sent[0][0] == "All square 🎉"
+    assert sent[0][1]["reply_markup"] is not None
