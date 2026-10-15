@@ -26,6 +26,7 @@ from telegram.ext import ContextTypes, filters
 
 from app.bot.deps import Deps, get_deps
 from app.bot.formatting import unsupported_currency_text
+from app.bot.handlers.join import require_trip_for_expense
 from app.bot.handlers.tags import join_tagged, tags_as_text
 from app.bot.render.draft import render_draft
 from app.models.category import Category
@@ -126,13 +127,11 @@ async def photo_expense_handler(update: Update, context: ContextTypes.DEFAULT_TY
             return
         deps.recent_updates.add(update.update_id)
 
-    try:
-        trip = await deps.ledger.get_binding(chat.id)
-    except LedgerUnavailable:
-        logger.exception("photo_expense: could not read the current binding")
-        return
+    trip = await require_trip_for_expense(update, context)
     if trip is None:
-        return  # unbound group: stay silent for a photo, same as plain text
+        # Unbound group: stay silent for a photo, same as plain text (spec §13). A
+        # closed trip gets the "This trip is closed..." reply (sprint 9 item 3).
+        return
 
     largest = message.photo[-1]
     if largest.file_size and largest.file_size > MAX_PHOTO_BYTES:

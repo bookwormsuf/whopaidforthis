@@ -8,7 +8,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 from app.bot.deps import Deps
 from app.bot.handlers.basic import start_command
-from app.bot.handlers.join import UNAVAILABLE_TEXT, UNBOUND_TEXT, join_command
+from app.bot.handlers.join import (
+    CLOSED_TRIP_TEXT,
+    UNAVAILABLE_TEXT,
+    UNBOUND_TEXT,
+    join_command,
+    require_trip,
+)
 from app.models.trip import Trip
 from app.models.user import TripUser
 from app.services.ledger_store import InMemoryLedgerStore, LedgerUnavailable
@@ -45,6 +51,33 @@ async def test_join_on_unbound_chat_replies_run_settrip_first() -> None:
     await join_command(update, context)
 
     update.effective_message.reply_text.assert_awaited_once_with(UNBOUND_TEXT, parse_mode="HTML")
+
+
+async def test_require_trip_on_closed_trip_replies_trip_is_closed() -> None:
+    """sprint 9 item 3: once the chat's latest trip is closed and none is open,
+    require_trip (used by every gated command) replies the closed-trip line
+    instead of "Run /settrip first"."""
+    ledger = InMemoryLedgerStore()
+    trip = Trip(
+        chat_id=-100,
+        name="Trip",
+        trip_currency="JPY",
+        home_currency="SGD",
+        timezone="Asia/Tokyo",
+        created_at=datetime.now(UTC),
+    )
+    trip = await ledger.save_binding(trip)
+    await ledger.close_trip(trip)
+    deps = _deps(ledger)
+    context = _context(deps)
+    update = _update()
+
+    result = await require_trip(update, context)
+
+    assert result is None
+    update.effective_message.reply_text.assert_awaited_once_with(
+        CLOSED_TRIP_TEXT, parse_mode="HTML"
+    )
 
 
 async def test_join_twice_is_idempotent_one_row_joined_true() -> None:

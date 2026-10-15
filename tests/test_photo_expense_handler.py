@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from PIL import Image
 
+from app.bot.handlers.join import CLOSED_TRIP_TEXT
 from app.bot.handlers.photo_expense import photo_expense_handler
 from app.bot.handlers.text_expense import draft_callback, text_expense_handler
 from app.models.trip import Trip
@@ -103,6 +104,23 @@ async def test_confident_receipt_sends_detected_card() -> None:
     assert "Konbini Snacks" in text
     assert kwargs["reply_markup"] is not None
     assert len(reader.calls) == 1
+
+
+async def test_closed_trip_replies_with_closed_text() -> None:
+    """sprint 9 item 3: same closed-trip reply as text expenses, not silence."""
+    ledger, trip = await _bound_ledger()
+    await ledger.close_trip(trip)
+    reader = FakeReceiptReader(extraction=_confident_extraction())
+    deps = make_deps(ledger, receipt_reader=reader)
+    context = _context(deps)
+    update = _update()
+
+    await photo_expense_handler(update, context)
+
+    update.effective_message.reply_text.assert_awaited_once_with(
+        CLOSED_TRIP_TEXT, parse_mode="HTML"
+    )
+    assert len(reader.calls) == 0
 
 
 async def test_caption_overrides_description() -> None:

@@ -33,7 +33,13 @@ from app.bot.deps import Deps, get_deps
 from app.bot.handlers.balances import balances_command, mine_command, settle_command
 from app.bot.handlers.basic import help_command, start_command
 from app.bot.handlers.callbacks import join_button_callback
-from app.bot.handlers.join import UNBOUND_TEXT, join_command
+from app.bot.handlers.export import export_command
+from app.bot.handlers.join import (
+    CLOSED_TRIP_TEXT,
+    UNBOUND_TEXT,
+    join_command,
+    resolve_trip_status,
+)
 from app.bot.handlers.photo_expense import PHOTO_EXPENSE_FILTER, photo_expense_handler
 from app.bot.handlers.reads import (
     recent_command,
@@ -79,6 +85,7 @@ _COMMANDS: tuple[tuple[str, Any, filters.BaseFilter | None], ...] = (
     ("balances", balances_command, None),
     ("mine", mine_command, None),
     ("settle", settle_command, None),
+    ("export", export_command, None),
 )
 
 _KNOWN_COMMANDS = {name for name, _, _ in _COMMANDS}
@@ -119,7 +126,12 @@ async def _post_shutdown(application: Application) -> None:
 
 
 async def _unbound_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Fallback for commands with no dedicated handler yet: gate unbound groups."""
+    """Fallback for commands with no dedicated handler yet: gates unbound groups
+    ("Run /settrip first") and, since sprint 9 item 3, groups whose latest trip is
+    closed ("This trip is closed..."). Every known command (including /export,
+    /settrip, /help, /start, which are exempt from the closed-trip gate) has its
+    own handler and never reaches here.
+    """
     message = update.effective_message
     chat = update.effective_chat
     if message is None or chat is None or chat.type not in ("group", "supergroup"):
@@ -130,13 +142,14 @@ async def _unbound_gate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
     deps = get_deps(context)
     try:
-        trip = await deps.ledger.get_binding(chat.id)
+        trip, latest_is_closed = await resolve_trip_status(deps, chat.id)
     except LedgerUnavailable:
         logger.exception("unbound gate: could not read the current binding")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
         return
     if trip is None:
-        await message.reply_text(UNBOUND_TEXT, parse_mode="HTML")
+        text = CLOSED_TRIP_TEXT if latest_is_closed else UNBOUND_TEXT
+        await message.reply_text(text, parse_mode="HTML")
 
 
 async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
+from app.bot.handlers.join import CLOSED_TRIP_TEXT
 from app.bot.handlers.text_expense import draft_callback, text_expense_handler
 from app.models.trip import Trip
 from app.services.ledger_store import InMemoryLedgerStore, LedgerUnavailable
@@ -61,6 +62,22 @@ async def test_silent_on_unbound_chat() -> None:
     await text_expense_handler(update, context)
 
     update.effective_message.reply_text.assert_not_awaited()
+
+
+async def test_closed_trip_replies_with_closed_text() -> None:
+    """sprint 9 item 3: a closed trip (no open trip for the chat) replies the
+    one-line closed text, instead of staying silent like an unbound chat."""
+    ledger, trip = await _bound_ledger()
+    await ledger.close_trip(trip)
+    deps = make_deps(ledger)
+    context = _context(deps)
+    update = _update("1200 yen ramen")
+
+    await text_expense_handler(update, context)
+
+    update.effective_message.reply_text.assert_awaited_once_with(
+        CLOSED_TRIP_TEXT, parse_mode="HTML"
+    )
 
 
 async def test_silent_on_non_expense_text() -> None:

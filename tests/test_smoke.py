@@ -6,6 +6,7 @@ import json
 import logging
 import signal
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -25,9 +26,10 @@ from app.bot.app import (
 from app.bot.deps import Deps
 from app.bot.handlers.balances import balances_command
 from app.bot.handlers.basic import HELP_TEXT, help_command
-from app.bot.handlers.join import UNBOUND_TEXT
+from app.bot.handlers.join import CLOSED_TRIP_TEXT, UNBOUND_TEXT
 from app.config.settings import Settings, load_settings
 from app.logging_setup import JsonFormatter
+from app.models.trip import Trip
 from app.services.ledger_store import (
     LEDGER_UNAVAILABLE_TEXT,
     InMemoryLedgerStore,
@@ -171,6 +173,35 @@ async def test_balances_in_unbound_group_produces_exactly_one_reply() -> None:
     await _unbound_gate(update, context)  # group 1's fallback gate
 
     message.reply_text.assert_awaited_once_with(UNBOUND_TEXT, parse_mode="HTML")
+
+
+async def test_unbound_gate_on_closed_trip_replies_trip_is_closed() -> None:
+    """sprint 9 item 3: an unrecognised command in a group whose latest trip is
+    closed gets the closed-trip line from the shared fallback gate."""
+    ledger = InMemoryLedgerStore()
+    trip = Trip(
+        chat_id=-100,
+        name="Trip",
+        trip_currency="JPY",
+        home_currency="SGD",
+        timezone="Asia/Tokyo",
+        created_at=datetime.now(UTC),
+    )
+    trip = await ledger.save_binding(trip)
+    await ledger.close_trip(trip)
+    deps = make_deps(ledger)
+    update = MagicMock(spec=Update)
+    update.effective_chat = SimpleNamespace(id=-100, type="group")
+    message = MagicMock()
+    message.text = "/notarealcommand"
+    message.reply_text = AsyncMock()
+    update.effective_message = message
+    context = MagicMock()
+    context.application.bot_data = {"deps": deps}
+
+    await _unbound_gate(update, context)
+
+    message.reply_text.assert_awaited_once_with(CLOSED_TRIP_TEXT, parse_mode="HTML")
 
 
 def test_json_formatter_output_parses_with_expected_keys() -> None:
