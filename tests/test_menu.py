@@ -149,9 +149,9 @@ def test_keyboard_closed_trip() -> None:
 def test_keyboard_open_page_1() -> None:
     markup = menu_keyboard("open", page=1)
     assert _labels(markup) == [
-        ["Join"],
-        ["Balances", "Settle"],
+        ["Mine", "Balances"],
         ["Recent", "Today", "Summary"],
+        ["Join"],
         ["More ▸"],
     ]
     assert _callbacks(markup)[-1] == ["menu:page:2"]
@@ -160,9 +160,8 @@ def test_keyboard_open_page_1() -> None:
 def test_keyboard_open_page_2() -> None:
     markup = menu_keyboard("open", page=2)
     assert _labels(markup) == [
-        ["Mine", "Undo last"],
-        ["Export"],
-        ["How to add an expense"],
+        ["Settle", "Export"],
+        ["How to add an expense", "Undo last"],
         ["Delete trip"],
         ["◂ Back"],
     ]
