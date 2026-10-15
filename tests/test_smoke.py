@@ -7,6 +7,7 @@ import logging
 import signal
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -14,13 +15,17 @@ from pydantic import ValidationError
 from telegram import Update
 
 from app.bot.app import (
+    _KNOWN_COMMANDS,
     SOMETHING_WENT_WRONG_TEXT,
     STOP_SIGNALS,
     _error_handler,
+    _unbound_gate,
     build_application,
 )
 from app.bot.deps import Deps
+from app.bot.handlers.balances import balances_command
 from app.bot.handlers.basic import HELP_TEXT, help_command
+from app.bot.handlers.join import UNBOUND_TEXT
 from app.config.settings import Settings, load_settings
 from app.logging_setup import JsonFormatter
 from app.services.ledger_store import (
@@ -164,6 +169,32 @@ def test_build_application_registers_start_and_help_commands() -> None:
     for handler in handlers:
         commands |= getattr(handler, "commands", set())
     assert {"start", "help", "join", "settrip", "cancel"} <= commands
+
+
+def test_known_commands_includes_balances_mine_settle() -> None:
+    assert {"balances", "mine", "settle"} <= _KNOWN_COMMANDS
+
+
+async def test_balances_in_unbound_group_produces_exactly_one_reply() -> None:
+    """Both group 0's own /balances handler and group 1's fallback gate run on
+    every update (PTB does not stop at the first matching group); if "balances"
+    is missing from _KNOWN_COMMANDS the gate replies too, so an unbound group
+    gets UNBOUND_TEXT twice.
+    """
+    deps = make_deps(InMemoryLedgerStore())  # chat is never bound
+    update = MagicMock(spec=Update)
+    update.effective_chat = SimpleNamespace(id=-100, type="group")
+    message = MagicMock()
+    message.text = "/balances"
+    message.reply_text = AsyncMock()
+    update.effective_message = message
+    context = MagicMock()
+    context.application.bot_data = {"deps": deps}
+
+    await balances_command(update, context)  # group 0's dedicated handler
+    await _unbound_gate(update, context)  # group 1's fallback gate
+
+    message.reply_text.assert_awaited_once_with(UNBOUND_TEXT, parse_mode="HTML")
 
 
 def test_json_formatter_output_parses_with_expected_keys() -> None:

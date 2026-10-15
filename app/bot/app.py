@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import signal
+from typing import Any
 
 import anthropic
 import httpx
@@ -64,19 +65,27 @@ logger = logging.getLogger(__name__)
 
 SOMETHING_WENT_WRONG_TEXT = "Something went wrong, please try again."
 
-# Commands with their own handler in group 0. Anything else, in a group, falls through
-# to the "Run /settrip first" gate below (spec §13, sprint 1 pin "Unbound groups").
-_KNOWN_COMMANDS = {
-    "start",
-    "help",
-    "settrip",
-    "join",
-    "cancel",
-    "recent",
-    "today",
-    "summary",
-    "undo",
-}
+# Commands with their own handler in group 0 (registered from this same tuple in
+# build_application, so the two can't drift). Anything else, in a group, falls
+# through to the "Run /settrip first" gate below (spec §13, sprint 1 pin
+# "Unbound groups").
+_COMMANDS: tuple[tuple[str, Any, filters.BaseFilter | None], ...] = (
+    ("start", start_command, None),
+    ("help", help_command, None),
+    ("join", join_command, None),
+    ("settrip", settrip_command, filters.ChatType.GROUPS),
+    ("settrip", settrip_private_command, filters.ChatType.PRIVATE),
+    ("cancel", cancel_command, None),
+    ("recent", recent_command, None),
+    ("today", today_command, None),
+    ("summary", summary_command, None),
+    ("undo", undo_command, None),
+    ("balances", balances_command, None),
+    ("mine", mine_command, None),
+    ("settle", settle_command, None),
+)
+
+_KNOWN_COMMANDS = {name for name, _, _ in _COMMANDS}
 
 # Pinned explicitly (sprint 3) rather than left to PTB's platform-dependent default, so
 # SIGTERM is guaranteed to stop polling and exit within fly.toml's kill_timeout.
@@ -176,23 +185,11 @@ def build_application(token: str, deps: Deps) -> Application:
     application.bot_data["deps"] = deps
     application.add_error_handler(_error_handler)
 
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("join", join_command))
-    application.add_handler(
-        CommandHandler("settrip", settrip_command, filters=filters.ChatType.GROUPS)
-    )
-    application.add_handler(
-        CommandHandler("settrip", settrip_private_command, filters=filters.ChatType.PRIVATE)
-    )
-    application.add_handler(CommandHandler("cancel", cancel_command))
-    application.add_handler(CommandHandler("recent", recent_command))
-    application.add_handler(CommandHandler("today", today_command))
-    application.add_handler(CommandHandler("summary", summary_command))
-    application.add_handler(CommandHandler("undo", undo_command))
-    application.add_handler(CommandHandler("balances", balances_command))
-    application.add_handler(CommandHandler("mine", mine_command))
-    application.add_handler(CommandHandler("settle", settle_command))
+    for name, callback, cmd_filters in _COMMANDS:
+        if cmd_filters is None:
+            application.add_handler(CommandHandler(name, callback))
+        else:
+            application.add_handler(CommandHandler(name, callback, filters=cmd_filters))
     application.add_handler(CallbackQueryHandler(settrip_callback, pattern=r"^st:"))
     application.add_handler(CallbackQueryHandler(join_button_callback, pattern=r"^join:"))
     application.add_handler(CallbackQueryHandler(undo_callback, pattern=r"^undo:"))
