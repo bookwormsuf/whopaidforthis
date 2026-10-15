@@ -27,7 +27,12 @@ from app.bot.handlers.deletetrip import run_deletetrip
 from app.bot.handlers.export import run_export
 from app.bot.handlers.join import resolve_trip_status, run_join
 from app.bot.handlers.reads import run_recent, run_summary, run_today, run_undo
-from app.bot.send import SendFn, build_chat_send, build_chat_send_document
+from app.bot.send import (
+    SOMETHING_WENT_WRONG_TEXT,
+    SendFn,
+    build_chat_send,
+    build_chat_send_document,
+)
 from app.models.trip import Trip
 from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
 
@@ -212,8 +217,6 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             return
         await run(deps, chat, presser, send)
     except Exception:  # noqa: BLE001 - an action must not crash the handler
-        from app.bot.app import SOMETHING_WENT_WRONG_TEXT
-
         logger.exception("menu_callback: run_%s failed", action)
         await send(SOMETHING_WENT_WRONG_TEXT)
 

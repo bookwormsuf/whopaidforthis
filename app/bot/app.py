@@ -62,6 +62,7 @@ from app.bot.handlers.text_expense import (
     draft_callback,
     text_expense_handler,
 )
+from app.bot.send import SOMETHING_WENT_WRONG_TEXT
 from app.config.settings import Settings
 from app.services.currencies import FrankfurterCurrencyCatalog
 from app.services.drafts import DraftService, InMemoryDraftStore
@@ -72,7 +73,6 @@ from app.services.receipt_parser import AnthropicReceiptReader
 
 logger = logging.getLogger(__name__)
 
-SOMETHING_WENT_WRONG_TEXT = "Something went wrong, please try again."
 
 # Commands with their own handler in group 0 (registered from this same tuple in
 # build_application, so the two can't drift). Anything else, in a group, falls

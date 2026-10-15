@@ -22,6 +22,9 @@ from typing import Any
 
 from telegram import Bot, Message
 
+SOMETHING_WENT_WRONG_TEXT = "Something went wrong, please try again."
+"""The generic error line (spec §14), shared by the app-level error handler and the menu."""
+
 SendFn = Callable[..., Awaitable[Message]]
 """`async def send(text: str, *, reply_markup=None) -> Message`. Always HTML parse
 mode; the caller decides where the reply lands."""
