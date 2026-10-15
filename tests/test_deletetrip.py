@@ -11,6 +11,7 @@ from app.bot.handlers.deletetrip import (
     DELETED_TEXT,
     KEPT_TEXT,
     NOT_ALLOWED_TEXT,
+    STALE_BUTTON_TEXT,
     deletetrip_callback,
     deletetrip_command,
 )
@@ -65,6 +66,7 @@ def _callback_update(data: str, presser_id: int) -> MagicMock:
     query.from_user = SimpleNamespace(id=presser_id)
     query.answer = AsyncMock()
     query.edit_message_text = AsyncMock()
+    query.edit_message_reply_markup = AsyncMock()
     return update
 
 
@@ -148,6 +150,35 @@ async def test_delete_everything_denied_for_non_starter() -> None:
     update.callback_query.answer.assert_awaited_once_with(NOT_ALLOWED_TEXT)
     update.callback_query.edit_message_text.assert_not_awaited()
     assert len(await ledger.list_trips(CHAT_ID)) == 1
+
+
+async def test_stale_button_for_a_superseded_trip_deletes_nothing() -> None:
+    """Trip A's confirm button pressed after trip B has been started: the button
+    is out of date and must never delete trip B (sprint 9 review item 2).
+    """
+    ledger, trip_a = await _bound_ledger()
+    await ledger.save_binding(
+        Trip(
+            chat_id=CHAT_ID,
+            name="Korea Trip",
+            trip_currency="JPY",
+            home_currency="SGD",
+            timezone="Asia/Tokyo",
+            created_at=datetime.now(UTC),
+            created_by=STARTER_ID,
+        )
+    )
+    deps = make_deps(ledger)
+    context = _context(deps)
+    stale_data = f"deletetrip:{trip_a.id}:yes"
+    update = _callback_update(stale_data, STARTER_ID)
+
+    await deletetrip_callback(update, context)
+
+    update.callback_query.answer.assert_awaited_once_with(STALE_BUTTON_TEXT)
+    update.callback_query.edit_message_text.assert_not_awaited()
+    update.callback_query.edit_message_reply_markup.assert_awaited_once_with(reply_markup=None)
+    assert len(await ledger.list_trips(CHAT_ID)) == 2
 
 
 async def test_keep_leaves_the_trip_in_place() -> None:

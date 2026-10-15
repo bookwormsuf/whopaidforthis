@@ -24,6 +24,7 @@ NOT_ALLOWED_TEXT = "Only the person who started this trip can delete it."
 CONFIRM_TEXT = "Delete this trip and every expense in it? This cannot be undone."
 DELETED_TEXT = "Deleted. Run /settrip to start a new trip."
 KEPT_TEXT = "Kept."
+STALE_BUTTON_TEXT = "This button is out of date. Run /deletetrip again."
 
 
 def _confirm_keyboard(trip_id: int) -> InlineKeyboardMarkup:
@@ -100,14 +101,25 @@ async def deletetrip_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     try:
-        trips = await deps.ledger.list_trips(chat.id)
+        trip = await _target_trip(deps, chat.id)
     except LedgerUnavailable:
         logger.exception("deletetrip_callback: could not read trips")
         await query.answer(LEDGER_UNAVAILABLE_TEXT)
         return
-    trip = next((t for t in trips if t.id == trip_id), None)
     if trip is None:
         await query.answer()
+        return
+
+    # The button only makes sense for the chat's *current* target trip (the open
+    # one, else the latest). If another trip was started or deleted since the
+    # button was sent, its trip_id no longer matches -- never delete the wrong
+    # trip (sprint 9 review item 2).
+    if trip.id != trip_id:
+        await query.answer(STALE_BUTTON_TEXT)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:  # noqa: BLE001 - editing an already-changed message is not fatal
+            logger.debug("deletetrip_callback: could not remove the stale keyboard")
         return
 
     if presser.id != trip.created_by:
