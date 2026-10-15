@@ -17,6 +17,8 @@ Terms used throughout the code, the spec and the export. Implementation details 
 - **Closed trip** — a trip that takes no new expenses. Closed by `/settrip` starting a new trip or by `Close this trip` after `/settle`. Still readable and exportable.
 - **Trip starter** — the trip user who ran `/settrip` for this trip; the only person who can delete it.
 - **Export** — a spreadsheet file of one trip's records that anyone in the group can download from the chat.
+- **Welcome** — the bot's pinned message in a group carrying the menu. Posted when the bot joins the group, on `/start` and on `/help`.
+- **Menu** — the buttons under the welcome. What it offers depends on whether the group has no trip, an open trip or a closed trip; a press is the same as typing the command.
 - **Trip currency** — the currency merchants are paid in during the trip (JPY for Japan).
 - **Home currency** — the currency friends settle with each other in (SGD). Balances and settlement are computed in home currency.
 - **Original amount / original currency** — the amount exactly as paid. Must be either the trip currency or the home currency.

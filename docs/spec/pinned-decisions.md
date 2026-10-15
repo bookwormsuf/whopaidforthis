@@ -146,7 +146,7 @@ Formulas must reference whole columns (`Expenses!A:W`) so appended rows are incl
 
 ## 12. Commands
 
-`/start` (in group = `/join`; in private = help), `/help`, `/join`, `/settrip`, `/summary`, `/today`, `/mine`, `/recent` (last 5, oldest first), `/balances`, `/settle`, `/undo`. All read commands filter by chat id and `confirmed`. `/today` uses the trip timezone. Every reply is one compact message, HTML parse mode, amounts formatted with symbol and thousands separators. Amount order: per-expense lines show trip currency then home (`¥1,200 · S$10.42`); totals and balances show home currency first. An expense entered in the home currency is shown in the home currency only; the trip-currency equivalent is stored but not displayed.
+`/start` (superseded by §19 on 2026-10-15: shows the welcome menu, no longer joins), `/help`, `/join`, `/settrip`, `/summary`, `/today`, `/mine`, `/recent` (last 5, oldest first), `/balances`, `/settle`, `/undo`. All read commands filter by chat id and `confirmed`. `/today` uses the trip timezone. Every reply is one compact message, HTML parse mode, amounts formatted with symbol and thousands separators. Amount order: per-expense lines show trip currency then home (`¥1,200 · S$10.42`); totals and balances show home currency first. An expense entered in the home currency is shown in the home currency only; the trip-currency equivalent is stored but not displayed.
 
 - `/balances`: per joined user, Paid / Share / Net in home currency; trip-currency equivalents in a second line at the expense-weighted rate are **not** shown (they would be misleading). Just home currency.
 - `/settle`: greedy debtor/creditor matching in home minor units: sort debtors and creditors by magnitude, repeatedly transfer `min(debt, credit)` from largest debtor to largest creditor. Produces at most n−1 transfers. Documented in README as near-minimal, not guaranteed minimal.
@@ -189,3 +189,11 @@ Decided with Sufyan after the post-trip review. ADR 0003 records the why; `docs/
 - `/export` sends one `.xlsx` (Expenses, Shares, Line items, People, Balances), built by code, no model call. A Google Sheet export may come later and reuses the same rows.
 - Hosting: one Fly machine always on. Store tests run against a real Postgres in Docker.
 - Roadmap after Sprint 9: Sprint 10 `/start` menu with buttons (fewer commands to remember); Sprint 11 Google Sheet export and drafts that survive a restart, if still wanted.
+
+## 19. `/start` welcome menu (added 2026-10-15, Sprint 10)
+- Buttons under messages only; no `setMyCommands`, no persistent reply keyboard.
+- The welcome (text pinned in `docs/sprints/10-start-menu.md`) is posted when the bot is added to a group, on `/start` and on `/help` in a group. The bot tries to pin it; if it lacks the right it appends "Pin this message so everyone can find the buttons." and never asks to be made admin.
+- Menu is state-aware (no trip / open / closed), two pages when open, paging edits the keyboard of the same message. Every other press posts a new plain message and leaves the menu alone.
+- A press is the typed command by the presser: same coroutine, same gates, same permission checks. State is re-read at press time; old menus are never edited.
+- `/start` in a group no longer joins the sender. Private `/start` and `/help` carry an `Add me to a group` URL button (`?startgroup=true`).
+- Typed commands stay; `/help` keeps its list under the explanation paragraph.
