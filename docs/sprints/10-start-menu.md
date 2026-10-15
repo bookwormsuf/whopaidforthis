@@ -75,9 +75,10 @@ When the trip is open the second paragraph is followed by one line naming the tr
   exposes a coroutine `run_<name>(deps, chat, user, send)` where `send(text, reply_markup=None)`
   posts to the chat; `CommandHandler` and the menu dispatcher both call it. No command logic is
   duplicated.
-- Amended 2026-10-15 (checklist step 3): when `/settrip` finishes (the "Connected" message) the
-  bot posts a fresh welcome with the full open-trip menu and pins it, so the group has the
-  buttons the moment the trip starts. The earlier `Start a trip` welcome is left untouched.
+- Amended 2026-10-15 (checklist step 3): when someone taps `Everyone's in` on the "Connected"
+  message, the bot posts a fresh welcome with the full open-trip menu and pins it. Not on
+  "Connected" itself: that message's own buttons are the one call to action until joining is
+  closed. The earlier `Start a trip` welcome is left untouched.
 - `Start a trip` / `Start a new trip` runs the `/settrip` flow unchanged (currency, currency,
   timezone buttons; the "close the current trip?" confirm when one is open). The presser becomes
   the trip starter.

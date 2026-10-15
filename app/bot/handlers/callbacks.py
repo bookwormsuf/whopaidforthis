@@ -117,7 +117,8 @@ async def join_button_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     current_text = message.text_html if message is not None else None
 
     if action == "done":
-        await _handle_done(query, deps, trip, presser, current_text)
+        if await _handle_done(query, deps, trip, presser, current_text):
+            await _post_menu_after_done(deps, context, update)
         return
 
     if current_text is not None and is_closed(current_text):
@@ -151,18 +152,37 @@ async def join_button_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.debug("join button: could not edit message")
 
 
-async def _handle_done(query, deps, trip, presser, current_text: str | None) -> None:
+async def _post_menu_after_done(deps, context, update: Update) -> None:
+    """Sprint 10 amendment (2026-10-15): the full menu appears once everyone is in,
+    not on "Connected", so the group has one call to action at a time. Posts and
+    pins a fresh welcome; the earlier welcome is never edited. Runs only when the
+    press actually closed joining (`_handle_done` returned True). Local import:
+    menu.py imports from the handlers package this module sits in.
+    """
+    from app.bot.handlers.menu import post_welcome
+
+    chat = update.effective_chat
+    if chat is None:
+        return
+    try:
+        await post_welcome(deps, context.bot, chat)
+    except Exception:  # noqa: BLE001 - joining is closed; a missing menu must not crash
+        logger.exception("join button: could not post the welcome after Everyone's in")
+
+
+async def _handle_done(query, deps, trip, presser, current_text: str | None) -> bool:
     """`Everyone's in`: any joined user may press it; it closes joining on this
-    message (removes the keyboard, appends the closing line).
+    message (removes the keyboard, appends the closing line). Returns True when
+    this press closed joining, False when it was refused or already closed.
     """
     if current_text is not None and is_closed(current_text):
         await query.answer()  # already closed; nothing to do
-        return
+        return False
 
     joined_users = await deps.ledger.list_users(trip, joined_only=True)
     if not any(user.user_id == presser.id for user in joined_users):
         await query.answer(_NOT_JOINED_TEXT)
-        return
+        return False
 
     await query.answer()
     if current_text is not None:
@@ -171,3 +191,4 @@ async def _handle_done(query, deps, trip, presser, current_text: str | None) -> 
             await query.edit_message_text(new_text, parse_mode="HTML", reply_markup=None)
         except Exception:  # noqa: BLE001 - editing an already-changed message is not fatal
             logger.debug("join button: could not edit message (done)")
+    return True
