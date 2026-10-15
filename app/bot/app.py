@@ -38,6 +38,7 @@ from app.bot.handlers.balances import (
 )
 from app.bot.handlers.basic import help_command, start_command
 from app.bot.handlers.callbacks import join_button_callback
+from app.bot.handlers.deletetrip import deletetrip_callback, deletetrip_command
 from app.bot.handlers.export import export_command
 from app.bot.handlers.join import (
     CLOSED_TRIP_TEXT,
@@ -91,6 +92,7 @@ _COMMANDS: tuple[tuple[str, Any, filters.BaseFilter | None], ...] = (
     ("mine", mine_command, None),
     ("settle", settle_command, None),
     ("export", export_command, None),
+    ("deletetrip", deletetrip_command, None),
 )
 
 _KNOWN_COMMANDS = {name for name, _, _ in _COMMANDS}
@@ -216,6 +218,7 @@ def build_application(token: str, deps: Deps) -> Application:
     application.add_handler(CallbackQueryHandler(join_button_callback, pattern=r"^join:"))
     application.add_handler(CallbackQueryHandler(undo_callback, pattern=r"^undo:"))
     application.add_handler(CallbackQueryHandler(close_trip_callback, pattern=r"^closetrip:"))
+    application.add_handler(CallbackQueryHandler(deletetrip_callback, pattern=r"^deletetrip:"))
     # A receipt's `Try again` re-reads the photo: non-blocking for the same reason
     # as photo_expense_handler. Registered before the general draft handler, which
     # would otherwise match it first.
