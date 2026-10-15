@@ -30,14 +30,12 @@ from app.services.drafts import (
     DraftError,
     DraftExpired,
     DraftToast,
-    DuplicateMessage,
     NotInitiator,
 )
 from app.services.expense_parser import parse_expense
 from app.services.ledger_store import (
     LEDGER_UNAVAILABLE_TEXT,
     LedgerUnavailable,
-    TripSheetInaccessible,
 )
 
 __all__ = [
@@ -92,11 +90,6 @@ async def text_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 
     try:
         trip = await deps.ledger.get_binding(chat.id)
-    except TripSheetInaccessible:
-        # Stay silent for plain text (spec §13); the commands (/join, /settrip, the
-        # unbound gate) are where a user finds out and gets a fix to run.
-        logger.info("text_expense: trip Sheet inaccessible, chat_id=%s", chat.id)
-        return
     except LedgerUnavailable:
         logger.exception("text_expense: could not read the current binding")
         return  # unbound/unavailable: stay silent for plain text (spec §13)
@@ -140,9 +133,6 @@ async def text_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             trip=trip,
             transaction_date=transaction_date,
         )
-    except DuplicateMessage:
-        logger.info("text_expense: duplicate (chat, message) skipped")
-        return
     except LedgerUnavailable:
         logger.exception("text_expense: could not start draft")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
@@ -183,10 +173,6 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     try:
         trip = await deps.ledger.get_binding(chat.id)
-    except TripSheetInaccessible:
-        logger.info("draft %s: trip Sheet inaccessible", draft_id)
-        await answer()
-        return
     except LedgerUnavailable:
         logger.exception("draft %s: could not read the current binding", draft_id)
         await answer(LEDGER_UNAVAILABLE_TEXT)

@@ -32,18 +32,14 @@ from app.models.category import Category
 from app.models.receipt import Receipt
 from app.models.trip import Trip
 from app.models.user import TripUser
-from app.services.drafts import Draft, DraftError, DuplicateMessage
+from app.services.drafts import Draft, DraftError
 from app.services.expense_parser import (
     parse_amount_only,
     parse_caption_clauses,
     parse_caption_description,
 )
 from app.services.images import ImageTooLarge, prepare_image
-from app.services.ledger_store import (
-    LEDGER_UNAVAILABLE_TEXT,
-    LedgerUnavailable,
-    TripSheetInaccessible,
-)
+from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
 from app.services.receipt_parser import (
     ReceiptServiceUnavailable,
     ReceiptUnreadable,
@@ -132,9 +128,6 @@ async def photo_expense_handler(update: Update, context: ContextTypes.DEFAULT_TY
 
     try:
         trip = await deps.ledger.get_binding(chat.id)
-    except TripSheetInaccessible:
-        logger.info("photo_expense: trip Sheet inaccessible, chat_id=%s", chat.id)
-        return
     except LedgerUnavailable:
         logger.exception("photo_expense: could not read the current binding")
         return
@@ -209,9 +202,6 @@ async def photo_expense_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 date_source=outcome.date_source,
                 **common,
             )
-    except DuplicateMessage:
-        logger.info("photo_expense: duplicate (chat, message) skipped")
-        return
     except LedgerUnavailable:
         logger.exception("photo_expense: could not start draft")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
@@ -248,7 +238,7 @@ async def handle_manual_amount_reply(update: Update, context: ContextTypes.DEFAU
 
     try:
         trip = await deps.ledger.get_binding(chat.id)
-    except (TripSheetInaccessible, LedgerUnavailable):
+    except LedgerUnavailable:
         logger.exception("manual_amount_reply: could not read the current binding")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
         return True

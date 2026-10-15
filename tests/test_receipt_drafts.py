@@ -11,22 +11,20 @@ from decimal import Decimal
 import pytest
 
 from app.bot.render.draft import render_draft
-from app.bot.session_state import Dedup
 from app.models.category import Category
 from app.models.receipt import Receipt
 from app.models.trip import Trip
+from app.services.conversion import both_amounts
 from app.services.drafts import DraftError, DraftService, InMemoryDraftStore
 from app.services.exchange_rates import RateService, StaticRateProvider
 from app.services.ledger_store import InMemoryLedgerStore
 from app.services.llm_schemas import ReceiptExtraction
 from app.services.receipt_parser import to_receipt
-from app.services.sheet_rows import line_item_to_row
 
 
 def _trip() -> Trip:
     return Trip(
         chat_id=-100,
-        sheet_id="sheet-id-1234567890",
         name="Japan Trip",
         trip_currency="JPY",
         home_currency="SGD",
@@ -37,14 +35,11 @@ def _trip() -> Trip:
 
 async def _setup():
     ledger = InMemoryLedgerStore()
-    trip = _trip()
-    await ledger.save_binding(trip)
-    await ledger.initialise_trip_sheet(trip)
+    trip = await ledger.save_binding(_trip())
     provider = StaticRateProvider(Decimal("0.0081"), date(2026, 9, 19))
     rates = RateService(provider, ledger)
     drafts = InMemoryDraftStore()
-    dedup = Dedup()
-    service = DraftService(ledger, rates, drafts, dedup)
+    service = DraftService(ledger, rates, drafts)
     return service, ledger, trip
 
 
@@ -405,15 +400,20 @@ async def test_home_currency_line_items_written_in_trip_currency() -> None:
     committed = await service.confirm(draft.draft_id, presser_id=42)
 
     expense = ledger.expense_for(committed.draft_id)
-    row = line_item_to_row(ledger.line_items_for(committed.draft_id)[0], expense, 1)
-    # S$12.50 / 0.0081 = ¥1,543.2... -> 1543
-    assert row[4] == 1543.0
-    assert row[1] == f"{committed.draft_id}-01"
-    assert row[5:] == ["", "unassigned", "item"]
-    claimed = line_item_to_row(
-        ledger.line_items_for(committed.draft_id)[0], expense, 1, [42, 7], "claimed"
+    item = ledger.line_items_for(committed.draft_id)[0]
+    # Items are stored in the receipt's own currency (spec §10); a store with a
+    # dedicated trip-currency column (PostgresLedgerStore) converts at write time,
+    # same as this: S$12.50 / 0.0081 = ¥1,543.2... -> 1543.
+    amount_trip_minor, _ = both_amounts(
+        item.amount_minor,
+        expense.original_currency,
+        expense.trip_currency,
+        expense.home_currency,
+        expense.rate,
     )
-    assert claimed[5:] == ["42,7", "claimed", "item"]
+    assert amount_trip_minor == 1543
+    assignments = ledger.assignments_for(committed.draft_id)
+    assert assignments == {}  # unassigned until claiming (no assignments map)
 
 
 async def test_single_total_far_from_items_asks_to_reconcile() -> None:

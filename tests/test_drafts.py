@@ -1,7 +1,7 @@
 """Tests for app.services.drafts.DraftService: the full detected -> justme -> preview
--> confirm flow, plus permission, dedup, and idempotency-on-retry paths (spec §8,
-sprint 2 pins). Card text/keyboard assertions render through
-`app.bot.render.draft.render_draft`, since rendering is a pure bot-layer concern.
+-> confirm flow, plus permission and idempotency-on-retry paths (spec §8, §18).
+Card text/keyboard assertions render through `app.bot.render.draft.render_draft`,
+since rendering is a pure bot-layer concern.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from decimal import Decimal
 import pytest
 
 from app.bot.render.draft import render_draft
-from app.bot.session_state import Dedup
 from app.models.category import Category
 from app.models.trip import Trip
 from app.services.drafts import (
@@ -20,7 +19,6 @@ from app.services.drafts import (
     AlreadySaved,
     DraftExpired,
     DraftService,
-    DuplicateMessage,
     InMemoryDraftStore,
     NotInitiator,
 )
@@ -32,7 +30,6 @@ from app.services.ledger_store import InMemoryLedgerStore, LedgerUnavailable
 def _trip() -> Trip:
     return Trip(
         chat_id=-100,
-        sheet_id="sheet-id-1234567890",
         name="Japan Trip",
         trip_currency="JPY",
         home_currency="SGD",
@@ -48,15 +45,12 @@ class _FailingProvider:
 
 async def _setup(provider=None, ledger=None):
     ledger = ledger or InMemoryLedgerStore()
-    trip = _trip()
-    await ledger.save_binding(trip)
-    await ledger.initialise_trip_sheet(trip)
+    trip = await ledger.save_binding(_trip())
     provider = provider or StaticRateProvider(Decimal("0.0081"), date(2026, 9, 19))
     rates = RateService(provider, ledger)
     drafts = InMemoryDraftStore()
-    dedup = Dedup()
-    service = DraftService(ledger, rates, drafts, dedup)
-    return service, ledger, trip, dedup
+    service = DraftService(ledger, rates, drafts)
+    return service, ledger, trip
 
 
 def _parsed(amount_minor: int = 1200, currency: str = "JPY") -> ParsedExpense:
@@ -82,7 +76,7 @@ async def _start(service, trip, *, message_id: int = 1, parsed=None, initiator_i
 
 
 async def test_detected_to_justme_to_preview_to_confirm_exact_card_texts() -> None:
-    service, ledger, trip, dedup = await _setup()
+    service, ledger, trip = await _setup()
 
     draft = await _start(service, trip)
     assert draft.state == "detected"
@@ -119,7 +113,6 @@ async def test_detected_to_justme_to_preview_to_confirm_exact_card_texts() -> No
     saved_text, saved_markup = render_draft(committed, trip)
     assert saved_text == "Saved ✅ Ramen ¥1,200 (S$9.72) · Ada paid · just Ada"
     assert saved_markup is None
-    assert dedup.seen(-100, 1) is True
 
     saved = await ledger.list_expenses(trip)
     assert len(saved) == 1
@@ -129,7 +122,7 @@ async def test_detected_to_justme_to_preview_to_confirm_exact_card_texts() -> No
 
 
 async def test_payer_username_and_split_username_filled_from_joined_user() -> None:
-    service, ledger, trip, dedup = await _setup()
+    service, ledger, trip = await _setup()
     draft = await _start(service, trip)
     await service.choose_just_me(draft.draft_id, presser_id=42)
     await service.confirm(draft.draft_id, presser_id=42)
@@ -139,7 +132,7 @@ async def test_payer_username_and_split_username_filled_from_joined_user() -> No
 
 
 async def test_non_initiator_raises_not_initiator() -> None:
-    service, ledger, trip, dedup = await _setup()
+    service, ledger, trip = await _setup()
     draft = await _start(service, trip)
 
     with pytest.raises(NotInitiator):
@@ -147,13 +140,13 @@ async def test_non_initiator_raises_not_initiator() -> None:
 
 
 async def test_expired_draft_raises_draft_expired() -> None:
-    service, ledger, trip, dedup = await _setup()
+    service, ledger, trip = await _setup()
     with pytest.raises(DraftExpired):
         await service.choose_just_me("01UNKNOWNDRAFTID0000000000", presser_id=1)
 
 
 async def test_committed_draft_raises_already_saved() -> None:
-    service, ledger, trip, dedup = await _setup()
+    service, ledger, trip = await _setup()
     draft = await _start(service, trip)
     await service.choose_just_me(draft.draft_id, presser_id=42)
     await service.confirm(draft.draft_id, presser_id=42)
@@ -163,7 +156,7 @@ async def test_committed_draft_raises_already_saved() -> None:
 
 
 async def test_cancelled_draft_raises_already_cancelled() -> None:
-    service, ledger, trip, dedup = await _setup()
+    service, ledger, trip = await _setup()
     draft = await _start(service, trip)
     await service.cancel(draft.draft_id, presser_id=42)
 
@@ -172,7 +165,7 @@ async def test_cancelled_draft_raises_already_cancelled() -> None:
 
 
 async def test_cancel_writes_nothing() -> None:
-    service, ledger, trip, dedup = await _setup()
+    service, ledger, trip = await _setup()
     draft = await _start(service, trip)
     cancelled = await service.cancel(draft.draft_id, presser_id=42)
     text, markup = render_draft(cancelled, trip)
@@ -182,7 +175,7 @@ async def test_cancel_writes_nothing() -> None:
 
 
 async def test_rate_failure_gives_rate_failed_card_and_retry_recovers() -> None:
-    service, ledger, trip, dedup = await _setup(provider=_FailingProvider())
+    service, ledger, trip = await _setup(provider=_FailingProvider())
 
     draft = await _start(service, trip)
     assert draft.state == "rate_failed"
@@ -206,7 +199,7 @@ async def test_home_currency_original_needs_no_conversion_for_trip_share() -> No
     change, a home-currency expense is rendered in the home currency only, so the
     stored trip amount never reaches the card.
     """
-    service, ledger, trip, dedup = await _setup()
+    service, ledger, trip = await _setup()
     draft = await _start(service, trip, parsed=_parsed(amount_minor=1200, currency="SGD"))
     assert draft.home_amount_minor == 1200
     assert draft.trip_amount_minor > 0  # still derived and stored
@@ -216,23 +209,25 @@ async def test_home_currency_original_needs_no_conversion_for_trip_share() -> No
     assert "S$12.00" in text
 
 
-async def test_dedup_blocks_second_commit_of_same_chat_and_message() -> None:
-    service, ledger, trip, dedup = await _setup()
-    draft = await _start(service, trip)
-    await service.choose_just_me(draft.draft_id, presser_id=42)
-    await service.confirm(draft.draft_id, presser_id=42)
+async def test_second_draft_from_same_message_still_leaves_one_row() -> None:
+    """There is no in-memory dedup any more (spec §18): a second draft can be
+    started from the same (chat_id, message_id), but the store's own unique
+    constraint means confirming it leaves exactly one row -- the store's insert is
+    the idempotency check, not a pre-check in `start`/`confirm`.
+    """
+    service, ledger, trip = await _setup()
+    first = await _start(service, trip)
+    await service.choose_just_me(first.draft_id, presser_id=42)
+    await service.confirm(first.draft_id, presser_id=42)
 
-    assert dedup.seen(-100, 1) is True
+    second = await _start(service, trip)  # same message_id=1 as before
+    await service.choose_just_me(second.draft_id, presser_id=42)
+    committed = await service.confirm(second.draft_id, presser_id=42)
+    assert committed.state == "committed"  # confirm still succeeds from the draft's view
 
-
-async def test_second_start_for_same_chat_and_message_raises_duplicate_message() -> None:
-    service, ledger, trip, dedup = await _setup()
-    draft = await _start(service, trip)
-    await service.choose_just_me(draft.draft_id, presser_id=42)
-    await service.confirm(draft.draft_id, presser_id=42)
-
-    with pytest.raises(DuplicateMessage):
-        await _start(service, trip)  # same message_id=1 as before
+    saved = await ledger.list_expenses(trip)
+    assert len(saved) == 1
+    assert saved[0].expense_id == first.draft_id
 
 
 class _AppendOnceThenFailLedger(InMemoryLedgerStore):
@@ -254,7 +249,7 @@ class _AppendOnceThenFailLedger(InMemoryLedgerStore):
 
 async def test_confirm_retry_after_lost_ack_does_not_double_append() -> None:
     ledger = _AppendOnceThenFailLedger()
-    service, ledger, trip, dedup = await _setup(ledger=ledger)
+    service, ledger, trip = await _setup(ledger=ledger)
     draft = await _start(service, trip)
     await service.choose_just_me(draft.draft_id, presser_id=42)
 
@@ -268,56 +263,15 @@ async def test_confirm_retry_after_lost_ack_does_not_double_append() -> None:
     assert committed.state == "committed"
 
     saved = await ledger.list_expenses(trip)
-    assert len(saved) == 1  # not double-appended
-    # confirm() checks expense_exists before appending, so the retry never calls
-    # append_expense again at all -- it just marks the draft committed.
-    assert ledger._append_calls == 1
-
-
-class _FailExistsOnceLedger(InMemoryLedgerStore):
-    """Simulates expense_exists itself being unreachable on the first confirm
-    attempt (e.g. a transport timeout before append_expense is ever called).
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._exists_calls = 0
-
-    async def expense_exists(self, trip, expense_id) -> bool:
-        self._exists_calls += 1
-        if self._exists_calls == 1:
-            raise LedgerUnavailable("boom")
-        return await super().expense_exists(trip, expense_id)
-
-
-async def test_confirm_recovers_to_preview_when_expense_exists_check_fails() -> None:
-    """The expense_exists read must run inside the same try/except as
-    append_expense: a LedgerUnavailable from it must restore `preview`, not
-    strand the draft in `committing` forever.
-    """
-    ledger = _FailExistsOnceLedger()
-    service, ledger, trip, dedup = await _setup(ledger=ledger)
-    draft = await _start(service, trip)
-    await service.choose_just_me(draft.draft_id, presser_id=42)
-
-    with pytest.raises(LedgerUnavailable):
-        await service.confirm(draft.draft_id, presser_id=42)
-
-    stuck = await service._drafts.get(draft.draft_id)  # type: ignore[attr-defined]
-    assert stuck.state == "preview"  # not stranded in "committing"
-
-    committed = await service.confirm(draft.draft_id, presser_id=42)
-    assert committed.state == "committed"
-
-    saved = await ledger.list_expenses(trip)
-    assert len(saved) == 1
+    assert len(saved) == 1  # not double-appended: the store's own insert is idempotent
+    assert ledger._append_calls == 2  # confirm calls append_expense again; the store no-ops
 
 
 async def test_home_currency_card_texts_show_home_only() -> None:
     """2026-10-01 change: an expense entered in the home currency shows the home
     amount only throughout the draft flow -- detected, preview, and Saved ✅.
     """
-    service, ledger, trip, dedup = await _setup()
+    service, ledger, trip = await _setup()
     draft = await _start(service, trip, parsed=_parsed(amount_minor=1200, currency="SGD"))
 
     detected_text, _ = render_draft(draft, trip)
@@ -340,7 +294,7 @@ async def test_home_currency_card_texts_show_home_only() -> None:
 
 async def test_trip_currency_card_texts_unchanged_pair_form() -> None:
     """A trip-currency expense keeps the existing "¥X (S$Y)" pair everywhere."""
-    service, ledger, trip, dedup = await _setup()
+    service, ledger, trip = await _setup()
     draft = await _start(service, trip)  # JPY, the default in _parsed()
 
     preview = await service.choose_just_me(draft.draft_id, presser_id=42)

@@ -31,15 +31,13 @@ async def _bound_ledger() -> tuple[InMemoryLedgerStore, Trip]:
     ledger = InMemoryLedgerStore()
     trip = Trip(
         chat_id=CHAT_ID,
-        sheet_id="sheet-id-1234567890",
         name="Japan Trip",
         trip_currency="JPY",
         home_currency="SGD",
         timezone="Asia/Tokyo",
         created_at=datetime.now(UTC),
     )
-    await ledger.save_binding(trip)
-    await ledger.initialise_trip_sheet(trip)
+    trip = await ledger.save_binding(trip)
     return ledger, trip
 
 
@@ -136,7 +134,12 @@ async def test_unreadable_receipt_shows_two_buttons() -> None:
     assert labels == ["Try again", "Enter amount manually"]
 
 
-async def test_same_photo_sent_twice_only_one_draft() -> None:
+async def test_same_photo_sent_twice_still_leaves_one_saved_expense() -> None:
+    """There is no in-memory dedup any more (spec §18): a second send of the same
+    photo message starts a second draft and gets its own card, but the store's own
+    unique constraint on (chat_id, message_id) means confirming it leaves exactly
+    one expense row.
+    """
     ledger, trip = await _bound_ledger()
     reader = FakeReceiptReader(extraction=_confident_extraction())
     deps = make_deps(ledger, receipt_reader=reader)
@@ -145,17 +148,28 @@ async def test_same_photo_sent_twice_only_one_draft() -> None:
     first = _update(message_id=7, update_id=1)
     await photo_expense_handler(first, context)
     first.effective_message.reply_text.assert_awaited_once()
-    draft_id = (
+    first_draft_id = (
         first.effective_message.reply_text.call_args.kwargs["reply_markup"]
         .inline_keyboard[0][0]
         .callback_data.split(":")[0]
     )
-    await deps.draft_service.choose_just_me(draft_id, presser_id=1)
-    await deps.draft_service.confirm(draft_id, presser_id=1)
+    await deps.draft_service.choose_just_me(first_draft_id, presser_id=1)
+    await deps.draft_service.confirm(first_draft_id, presser_id=1)
 
     second = _update(message_id=7, update_id=2)
     await photo_expense_handler(second, context)
-    second.effective_message.reply_text.assert_not_awaited()
+    second.effective_message.reply_text.assert_awaited_once()
+    second_draft_id = (
+        second.effective_message.reply_text.call_args.kwargs["reply_markup"]
+        .inline_keyboard[0][0]
+        .callback_data.split(":")[0]
+    )
+    await deps.draft_service.choose_just_me(second_draft_id, presser_id=1)
+    await deps.draft_service.confirm(second_draft_id, presser_id=1)
+
+    saved = await ledger.list_expenses(trip)
+    assert len(saved) == 1
+    assert saved[0].expense_id == first_draft_id
 
 
 def _callback_update(data: str, *, user_id: int = 1) -> MagicMock:

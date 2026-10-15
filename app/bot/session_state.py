@@ -8,7 +8,6 @@ handlers get instances of them off `Deps`.
 from __future__ import annotations
 
 from collections import OrderedDict
-from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
@@ -25,7 +24,6 @@ class SettripSession:
     chat_id: int
     initiator_id: int
     initiator_name: str
-    sheet_id: str
     trip_name: str
     step: str  # "rebind" | "trip_ccy" | "home_ccy" | "tz" | "confirm"
     trip_currency: str | None = None
@@ -121,26 +119,3 @@ class RecentUpdates:
         self._seen[update_id] = None
         if len(self._seen) > self._max_size:
             self._seen.popitem(last=False)
-
-
-class Dedup:
-    """Per-chat `(chat_id, message_id)` dedup set, lazily loaded from the ledger's
-    Expenses tab on first use per chat (spec §10).
-    """
-
-    def __init__(self) -> None:
-        self._seen: dict[int, set[int]] = {}
-        self._loaded_chats: set[int] = set()
-
-    def is_loaded(self, chat_id: int) -> bool:
-        return chat_id in self._loaded_chats
-
-    def load_many(self, chat_id: int, message_ids: Iterable[int]) -> None:
-        self._seen.setdefault(chat_id, set()).update(message_ids)
-        self._loaded_chats.add(chat_id)
-
-    def seen(self, chat_id: int, message_id: int) -> bool:
-        return message_id in self._seen.get(chat_id, set())
-
-    def add(self, chat_id: int, message_id: int) -> None:
-        self._seen.setdefault(chat_id, set()).add(message_id)

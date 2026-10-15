@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
@@ -28,16 +29,17 @@ async def _bound_ledger() -> tuple[InMemoryLedgerStore, Trip]:
     ledger = InMemoryLedgerStore()
     trip = Trip(
         chat_id=CHAT_ID,
-        sheet_id="sheet-id-1234567890",
         name="Japan Trip",
         trip_currency="JPY",
         home_currency="SGD",
         timezone="Asia/Tokyo",
         created_at=datetime.now(UTC),
     )
-    await ledger.save_binding(trip)
-    await ledger.initialise_trip_sheet(trip)
+    trip = await ledger.save_binding(trip)
     return ledger, trip
+
+
+_message_ids = itertools.count(1)
 
 
 def _expense(
@@ -50,6 +52,7 @@ def _expense(
     home_amount_minor: int = 10,
     original_currency: str = "JPY",
     created_at: datetime | None = None,
+    message_id: int | None = None,
 ) -> Expense:
     original_amount_minor = home_amount_minor if original_currency == "SGD" else trip_amount_minor
     return Expense(
@@ -57,7 +60,9 @@ def _expense(
         created_at=created_at or datetime.now(UTC),
         transaction_date=transaction_date,
         chat_id=CHAT_ID,
-        message_id=1,
+        # Each expense gets its own message_id (the store's unique constraint is on
+        # (chat_id, message_id), spec §18) unless a test passes one explicitly.
+        message_id=message_id if message_id is not None else next(_message_ids),
         created_by_user_id=created_by,
         payer_user_id=created_by,
         payer_username="ada",
