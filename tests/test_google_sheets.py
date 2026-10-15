@@ -698,9 +698,7 @@ class _AppendThenRetryableErrorSpreadsheet(FakeSpreadsheet):
 async def test_append_expense_does_not_duplicate_on_retried_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "app.services.google_sheets.asyncio.sleep", AsyncMock(return_value=None)
-    )
+    monkeypatch.setattr("app.services.google_sheets.asyncio.sleep", AsyncMock(return_value=None))
     store = _store()
     expenses_ws, splits_ws = _expenses_and_splits_worksheets()
     spreadsheet = _AppendThenRetryableErrorSpreadsheet([expenses_ws, splits_ws])

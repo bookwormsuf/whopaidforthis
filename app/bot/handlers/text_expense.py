@@ -327,9 +327,7 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             if retry_draft is not None and retry_draft.state == "preview":
                 text, keyboard = render_draft(retry_draft, trip, save_error=True)
                 try:
-                    await query.edit_message_text(
-                        text, parse_mode="HTML", reply_markup=keyboard
-                    )
+                    await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
                 except Exception:  # noqa: BLE001 - message may already be gone/changed
                     logger.debug("draft %s: could not edit after save error", draft_id)
         return
