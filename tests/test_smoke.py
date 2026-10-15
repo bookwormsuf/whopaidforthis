@@ -390,6 +390,23 @@ def test_stop_signals_includes_sigterm() -> None:
     assert signal.SIGTERM in STOP_SIGNALS
 
 
+async def test_post_shutdown_closes_the_ledger_store(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Shutdown must release the store's pool, not just log a line (sprint 9
+    review item 7).
+    """
+    deps = _fake_deps()
+    deps.ledger.close = AsyncMock()
+    application = build_application("123456:fake-token", deps)
+
+    with caplog.at_level(logging.INFO, logger="app.bot.app"):
+        await application.post_shutdown(application)
+
+    deps.ledger.close.assert_awaited_once()
+    assert any(record.message == "whopaid stopped" for record in caplog.records)
+
+
 async def test_post_init_startup_error_never_leaks_the_password(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -398,9 +415,7 @@ async def test_post_init_startup_error_never_leaks_the_password(
     """
     deps = _fake_deps()
     deps.ledger.connect = AsyncMock(
-        side_effect=RuntimeError(
-            "could not connect to postgresql://user:hunter2@fake-host/db"
-        )
+        side_effect=RuntimeError("could not connect to postgresql://user:hunter2@fake-host/db")
     )
     application = build_application("123456:fake-token", deps)
 

@@ -32,6 +32,7 @@ def _host_and_port() -> str:
     parts = urlsplit(TEST_DATABASE_URL)
     return f"{parts.hostname}:{parts.port}"
 
+
 _TABLES = (
     "line_items",
     "splits",

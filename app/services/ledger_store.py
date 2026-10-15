@@ -37,6 +37,10 @@ LEDGER_UNAVAILABLE_TEXT = "Couldn't reach the database, please try again."
 class LedgerStore(Protocol):
     """Persistence for trips, trip users, expenses and exchange rates."""
 
+    async def connect(self) -> None: ...
+
+    async def close(self) -> None: ...
+
     async def get_binding(self, chat_id: int) -> Trip | None: ...
 
     async def save_binding(self, trip: Trip) -> Trip: ...
@@ -127,6 +131,12 @@ class InMemoryLedgerStore:
         self._line_items: dict[str, list[ReceiptLineItem]] = {}
         self._assignments: dict[str, dict[int, tuple[list[int], str]]] = {}
         self.get_binding_calls = 0
+
+    async def connect(self) -> None:
+        """No-op: there is no pool or migration for an in-memory store."""
+
+    async def close(self) -> None:
+        """No-op: nothing to release."""
 
     async def get_binding(self, chat_id: int) -> Trip | None:
         self.get_binding_calls += 1

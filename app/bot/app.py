@@ -113,17 +113,14 @@ async def _post_init(application: Application) -> None:
     `bot_username` and `version`. Nothing else about config goes in this line.
     """
     deps: Deps = application.bot_data["deps"]
-    ledger = deps.ledger
-    connect = getattr(ledger, "connect", None)
-    if connect is not None:
-        try:
-            await connect()
-        except Exception as exc:  # noqa: BLE001 - this is the fail-fast boundary
-            print(
-                f"Could not reach the database ({type(exc).__name__}). Check DATABASE_URL.",
-                file=sys.stderr,
-            )
-            raise SystemExit(1) from exc
+    try:
+        await deps.ledger.connect()
+    except Exception as exc:  # noqa: BLE001 - this is the fail-fast boundary
+        print(
+            f"Could not reach the database ({type(exc).__name__}). Check DATABASE_URL.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1) from exc
     logger.info(
         "whopaid started",
         extra={"bot_username": application.bot.username, "version": deps.bot_version},
@@ -131,7 +128,12 @@ async def _post_init(application: Application) -> None:
 
 
 async def _post_shutdown(application: Application) -> None:
-    """Log the one shutdown line once polling has stopped (sprint 3 pin)."""
+    """Close the ledger store (releases the Postgres pool), then log the one
+    shutdown line once polling has stopped (sprint 3 pin; store lifecycle: sprint
+    9 review item 7).
+    """
+    deps: Deps = application.bot_data["deps"]
+    await deps.ledger.close()
     logger.info("whopaid stopped")
 
 

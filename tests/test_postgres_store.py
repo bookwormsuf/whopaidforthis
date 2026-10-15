@@ -13,6 +13,7 @@ from decimal import Decimal
 import asyncpg
 import pytest
 
+import tests.conftest
 from app.models.category import Category
 from app.models.exchange_rate import ExchangeRate
 from app.models.expense import Expense, ExpenseSplit
@@ -372,6 +373,22 @@ async def test_find_and_save_rate_roundtrip(postgres_store: PostgresLedgerStore)
     assert found is not None
     assert found.rate == Decimal("0.0092")
     assert await postgres_store.find_rate(trip, "JPY", "SGD", date(2026, 9, 1)) is None
+
+
+async def test_connect_then_close_releases_the_pool() -> None:
+    """Lifecycle round-trip against a real Postgres: connect() creates its own
+    pool (and migrates it), close() releases it (sprint 9 review item 7). Uses
+    its own pool, not the session-scoped `postgres_store` fixture's, so closing
+    it never affects other tests.
+    """
+    store = PostgresLedgerStore(tests.conftest.TEST_DATABASE_URL)
+    await store.connect()
+    assert store.pool is not None
+
+    await store.close()
+    with pytest.raises(asyncpg.InterfaceError):
+        async with store.pool.acquire():
+            pass
 
 
 async def test_connection_error_becomes_ledger_unavailable(

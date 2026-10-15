@@ -69,6 +69,15 @@ class PostgresLedgerStore:
         self._pool = await create_pool(self._database_url)
         await migrate(self._pool)
 
+    async def close(self) -> None:
+        """Close the pool. A store built via `from_pool` (tests) owns a pool it
+        didn't create, but shutdown still owns closing it -- the caller is the
+        application's own lifecycle, not the test fixture that built the pool
+        (the fixture closes it again at session end regardless).
+        """
+        if self._pool is not None:
+            await self._pool.close()
+
     @property
     def pool(self) -> asyncpg.Pool:
         assert self._pool is not None, "PostgresLedgerStore.connect() was never called"
