@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from openpyxl import load_workbook
 
-from app.bot.handlers.export import export_command
+from app.bot.handlers.export import export_command, run_export
 from app.bot.handlers.join import UNBOUND_TEXT
 from app.models.category import Category
 from app.models.expense import Expense, ExpenseSplit
@@ -176,3 +176,26 @@ async def test_export_gives_up_after_second_timeout() -> None:
     update.effective_message.reply_text.assert_awaited_with(
         export_mod.UPLOAD_FAILED_TEXT, parse_mode="HTML"
     )
+
+
+async def test_run_export_sends_the_workbook_via_fake_send_and_send_document() -> None:
+    ledger = InMemoryLedgerStore()
+    trip = await ledger.save_binding(Trip(**_trip_kwargs()))
+    await ledger.append_expense(trip, _expense("e1", message_id=1))
+    deps = make_deps(ledger)
+    sent_text: list[str] = []
+    sent_docs: list[dict] = []
+
+    async def send(text: str, *, reply_markup=None):
+        sent_text.append(text)
+        return SimpleNamespace(message_id=1)
+
+    async def send_document(document, **kwargs):
+        sent_docs.append({"document": document, **kwargs})
+        return SimpleNamespace(message_id=2)
+
+    await run_export(deps, SimpleNamespace(id=CHAT_ID), SimpleNamespace(id=1), send, send_document)
+
+    assert not sent_text
+    assert len(sent_docs) == 1
+    assert sent_docs[0]["caption"] == "Japan Trip · 1 expense"

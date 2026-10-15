@@ -26,6 +26,21 @@ command whose reply is a file, not text, so `send` alone isn't enough (sprint 10
 pin)."""
 
 
+def build_send_document(message: Any) -> SendDocumentFn:
+    """`run_export`'s sibling to `build_send`: a `send_document` that calls
+    `message.reply_document`, forwarding only the kwargs actually given, so a call
+    with (say) no `caption` is byte-identical to what `export_command` sent before
+    this refactor.
+    """
+
+    async def send_document(document: Any, *, caption: str | None = None, **kwargs: Any) -> Message:
+        if caption is not None:
+            kwargs["caption"] = caption
+        return await message.reply_document(document=document, **kwargs)
+
+    return send_document
+
+
 def build_send(message: Any) -> SendFn:
     """The thin-wrapper adapter every typed `<name>_command` uses: a `send` that
     calls `message.reply_text`, parse mode HTML always. Omits `reply_markup`
