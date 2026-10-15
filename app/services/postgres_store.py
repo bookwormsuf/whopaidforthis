@@ -25,7 +25,7 @@ from app.db import create_pool, migrate
 from app.models.category import Category
 from app.models.exchange_rate import ExchangeRate
 from app.models.expense import Expense, ExpenseRecord, SplitRecord
-from app.models.receipt import ReceiptLineItem
+from app.models.receipt import LineItemRecord, ReceiptLineItem
 from app.models.trip import Trip
 from app.models.user import TripUser
 from app.services.conversion import both_amounts
@@ -359,6 +359,37 @@ class PostgresLedgerStore:
                     share_trip_minor=row["share_trip_minor"],
                     share_home_minor=row["share_home_minor"],
                     split_method=row["split_method"],
+                )
+                for row in rows
+            ]
+
+        return await self._run(_do)
+
+    async def list_line_items(self, trip: Trip) -> list[LineItemRecord]:
+        assert trip.id is not None
+
+        async def _do() -> list[LineItemRecord]:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    select li.*
+                    from line_items li
+                    join expenses e on e.id = li.expense_id
+                    where e.trip_id = $1
+                    order by li.expense_id, li.position
+                    """,
+                    trip.id,
+                )
+            return [
+                LineItemRecord(
+                    expense_id=row["expense_id"],
+                    position=row["position"],
+                    description=row["description"],
+                    quantity=row["quantity"],
+                    amount_trip_minor=row["amount_trip_minor"],
+                    kind=row["kind"],
+                    allocation_method=row["allocation_method"],
+                    assigned_user_ids=list(row["assigned_user_ids"]),
                 )
                 for row in rows
             ]

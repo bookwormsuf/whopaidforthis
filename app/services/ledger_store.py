@@ -11,7 +11,7 @@ from typing import Protocol
 
 from app.models.exchange_rate import ExchangeRate
 from app.models.expense import Expense, ExpenseRecord, SplitRecord
-from app.models.receipt import ReceiptLineItem
+from app.models.receipt import LineItemRecord, ReceiptLineItem
 from app.models.trip import Trip
 from app.models.user import TripUser
 
@@ -62,6 +62,8 @@ class LedgerStore(Protocol):
     async def list_expenses(self, trip: Trip) -> list[ExpenseRecord]: ...
 
     async def list_splits(self, trip: Trip) -> list[SplitRecord]: ...
+
+    async def list_line_items(self, trip: Trip) -> list[LineItemRecord]: ...
 
     async def cancel_expense(
         self, trip: Trip, expense_id: str, cancelled_at: datetime, note_suffix: str
@@ -249,6 +251,29 @@ class InMemoryLedgerStore:
             for expense_id in order
             for split in expenses[expense_id].splits
         ]
+
+    async def list_line_items(self, trip: Trip) -> list[LineItemRecord]:
+        assert trip.id is not None
+        order = self._expense_order.get(trip.id, [])
+        records: list[LineItemRecord] = []
+        for expense_id in order:
+            items = self._line_items.get(expense_id, [])
+            assignments = self._assignments.get(expense_id, {})
+            for position, item in enumerate(items):
+                assigned, method = assignments.get(position, ([], "unassigned"))
+                records.append(
+                    LineItemRecord(
+                        expense_id=expense_id,
+                        position=position,
+                        description=item.description,
+                        quantity=item.quantity,
+                        amount_trip_minor=item.amount_minor,
+                        kind=item.kind,
+                        allocation_method=method,
+                        assigned_user_ids=list(assigned),
+                    )
+                )
+        return records
 
     async def cancel_expense(
         self, trip: Trip, expense_id: str, cancelled_at: datetime, note_suffix: str

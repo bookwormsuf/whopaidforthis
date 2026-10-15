@@ -16,6 +16,7 @@ import pytest
 from app.models.category import Category
 from app.models.exchange_rate import ExchangeRate
 from app.models.expense import Expense, ExpenseSplit
+from app.models.receipt import ReceiptLineItem
 from app.models.trip import Trip
 from app.models.user import TripUser
 from app.services.ledger_store import LedgerUnavailable
@@ -144,6 +145,29 @@ async def test_append_expense_roundtrip(postgres_store: PostgresLedgerStore) -> 
     splits = await postgres_store.list_splits(trip)
     assert len(splits) == 1
     assert splits[0].share_home_minor == 1100
+
+
+async def test_append_expense_with_line_items_roundtrip(
+    postgres_store: PostgresLedgerStore,
+) -> None:
+    trip = await postgres_store.save_binding(_trip())
+    expense = _expense(trip, "01EXPENSE00000000000LINE")
+    line_items = [
+        ReceiptLineItem(description="Ramen", quantity=1, amount_minor=1000, kind="item"),
+        ReceiptLineItem(description="Tax", quantity=1, amount_minor=200, kind="tax"),
+    ]
+    await postgres_store.append_expense(
+        trip, expense, line_items=line_items, assignments={0: ([1], "claimed")}
+    )
+
+    records = await postgres_store.list_line_items(trip)
+
+    assert [r.description for r in records] == ["Ramen", "Tax"]
+    assert records[0].position == 0
+    assert records[0].assigned_user_ids == [1]
+    assert records[0].allocation_method == "claimed"
+    assert records[1].allocation_method == "unassigned"
+    assert records[1].assigned_user_ids == []
 
 
 async def test_append_expense_same_message_id_leaves_one_row(

@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 
+from app.models.category import Category
+from app.models.expense import Expense, ExpenseSplit
+from app.models.receipt import ReceiptLineItem
 from app.models.trip import Trip
 from app.models.user import TripUser
 from app.services.ledger_store import InMemoryLedgerStore, merge_user
@@ -125,3 +129,61 @@ async def test_in_memory_ledger_store_delete_trips_removes_everything() -> None:
 
     assert await store.get_binding(trip.chat_id) is None
     assert await store.list_trips(trip.chat_id) == []
+
+
+async def test_in_memory_ledger_store_list_line_items() -> None:
+    store = InMemoryLedgerStore()
+    trip = await store.save_binding(_trip())
+    expense = Expense(
+        expense_id="e1",
+        created_at=datetime.now(UTC),
+        transaction_date=date(2026, 10, 1),
+        chat_id=trip.chat_id,
+        message_id=1,
+        created_by_user_id=1,
+        payer_user_id=1,
+        payer_username="ada",
+        payer_display_name="Ada",
+        description="Dinner",
+        merchant=None,
+        category=Category.FOOD,
+        original_amount_minor=1200,
+        original_currency="JPY",
+        trip_currency="JPY",
+        home_currency="SGD",
+        trip_amount_minor=1200,
+        home_amount_minor=1000,
+        rate=Decimal("0.0081"),
+        rate_date=date(2026, 9, 30),
+        source_type="receipt",
+        split_method="items",
+        status="confirmed",
+        cancelled_at=None,
+        notes=None,
+        splits=[
+            ExpenseSplit(
+                user_id=1,
+                username="ada",
+                display_name="Ada",
+                share_trip_minor=1200,
+                share_home_minor=1000,
+                split_method="items",
+            )
+        ],
+    )
+    line_items = [
+        ReceiptLineItem(description="Ramen", quantity=1, amount_minor=1000, kind="item"),
+        ReceiptLineItem(description="Tax", quantity=1, amount_minor=200, kind="tax"),
+    ]
+    await store.append_expense(
+        trip, expense, line_items=line_items, assignments={0: ([1], "claimed")}
+    )
+
+    records = await store.list_line_items(trip)
+
+    assert [r.description for r in records] == ["Ramen", "Tax"]
+    assert records[0].position == 0
+    assert records[0].assigned_user_ids == [1]
+    assert records[0].allocation_method == "claimed"
+    assert records[1].allocation_method == "unassigned"  # no entry for position 1
+    assert records[1].assigned_user_ids == []
