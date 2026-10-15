@@ -182,7 +182,7 @@ async def test_paging_edits_markup_not_text() -> None:
     update.callback_query.answer.assert_awaited_once_with()
     update.callback_query.edit_message_reply_markup.assert_awaited_once()
     _, kwargs = update.callback_query.edit_message_reply_markup.call_args
-    assert _labels(kwargs["reply_markup"])[0] == ["Mine", "Undo last"]
+    assert _labels(kwargs["reply_markup"])[0] == ["Settle", "Export"]
     assert not bot.sent_messages
 
 
@@ -226,7 +226,7 @@ async def test_back_returns_to_page_1() -> None:
     await menu_callback(update, context)
 
     _, kwargs = update.callback_query.edit_message_reply_markup.call_args
-    assert _labels(kwargs["reply_markup"])[0] == ["Join"]
+    assert _labels(kwargs["reply_markup"])[0] == ["Mine", "Balances"]
 
 
 # --- menu_callback: one dispatch test per action, same text as the command -
