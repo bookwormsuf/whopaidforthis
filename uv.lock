@@ -1066,6 +1066,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "python-telegram-bot" },
     { name = "python-ulid" },
+    { name = "requests" },
 ]
 
 [package.dev-dependencies]
@@ -1086,6 +1087,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2" },
     { name = "python-telegram-bot", specifier = ">=21,<22" },
     { name = "python-ulid" },
+    { name = "requests" },
 ]
 
 [package.metadata.requires-dev]

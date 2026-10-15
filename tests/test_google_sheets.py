@@ -195,6 +195,46 @@ async def test_with_retries_does_not_retry_on_403(monkeypatch: pytest.MonkeyPatc
     assert exc_info.value.status == 403
 
 
+async def test_with_retries_maps_connection_error_to_ledger_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A raw transport failure (DNS/connection refused, no HTTP status at all)
+    must not escape as a bare requests exception -- it has to come out as
+    LedgerUnavailable like every other failure mode, so callers never need to
+    know gspread uses requests under the hood.
+    """
+    import requests
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "app.services.google_sheets.asyncio.sleep", AsyncMock(side_effect=sleeps.append)
+    )
+    func = MagicMock(side_effect=requests.exceptions.ConnectionError("boom"))
+
+    with pytest.raises(LedgerUnavailable):
+        await _with_retries(func)
+
+
+async def test_with_retries_retries_on_timeout_then_raises_ledger_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import requests
+
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr("app.services.google_sheets.asyncio.sleep", fake_sleep)
+    func = MagicMock(side_effect=requests.exceptions.Timeout("boom"))
+
+    with pytest.raises(LedgerUnavailable):
+        await _with_retries(func)
+
+    assert func.call_count == 4  # 1 initial attempt + 3 retries, same as 429/5xx
+    assert sleeps == [1.0, 2.0, 4.0]
+
+
 def _store() -> SheetsLedgerStore:
     return SheetsLedgerStore(
         service_account_info={"client_email": "bot@example.iam.gserviceaccount.com"},
@@ -635,6 +675,44 @@ def _expenses_and_splits_worksheets() -> tuple[FakeWorksheet, FakeWorksheet]:
         FakeWorksheet("Expenses", rows=[headers["Expenses"]]),
         FakeWorksheet("Splits", rows=[headers["Splits"]]),
     )
+
+
+class _AppendThenRetryableErrorSpreadsheet(FakeSpreadsheet):
+    """Simulates Google actually applying appendCells (so a subsequent read finds
+    the row) but the response coming back as a retryable 429/5xx -- the real
+    failure mode behind the duplicate-write bug: appendCells is not idempotent,
+    so blindly retrying the whole batch_update would append the expense twice.
+    """
+
+    def __init__(self, worksheets: list[FakeWorksheet]) -> None:
+        super().__init__(worksheets)
+        self._calls = 0
+
+    def batch_update(self, body: dict) -> None:
+        self._calls += 1
+        super().batch_update(body)  # the write actually lands server-side
+        if self._calls == 1:
+            raise _api_error(500)
+
+
+async def test_append_expense_does_not_duplicate_on_retried_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.services.google_sheets.asyncio.sleep", AsyncMock(return_value=None))
+    store = _store()
+    expenses_ws, splits_ws = _expenses_and_splits_worksheets()
+    spreadsheet = _AppendThenRetryableErrorSpreadsheet([expenses_ws, splits_ws])
+    store._open = AsyncMock(return_value=spreadsheet)  # type: ignore[method-assign]
+
+    trip = _trip_jpy_sgd()
+    expense = _expense()
+    await store.append_expense(trip, expense)
+
+    # The write already landed on the one failed attempt; the fix must notice via
+    # expense_exists and never call batch_update again.
+    assert spreadsheet._calls == 1
+    assert len(expenses_ws.rows) == 2  # header + exactly one expense row, not two
+    assert len(splits_ws.rows) == 2  # header + exactly one split row, not two
 
 
 async def test_append_expense_writes_splits_then_expenses_with_correct_sheet_ids() -> None:

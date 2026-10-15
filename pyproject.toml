@@ -9,6 +9,7 @@ dependencies = [
     "pydantic-settings>=2",
     "httpx",
     "gspread>=6,<7",
+    "requests",
     "python-ulid",
     "anthropic",
     "pillow",

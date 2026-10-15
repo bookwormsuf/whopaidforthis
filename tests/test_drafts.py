@@ -274,6 +274,45 @@ async def test_confirm_retry_after_lost_ack_does_not_double_append() -> None:
     assert ledger._append_calls == 1
 
 
+class _FailExistsOnceLedger(InMemoryLedgerStore):
+    """Simulates expense_exists itself being unreachable on the first confirm
+    attempt (e.g. a transport timeout before append_expense is ever called).
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._exists_calls = 0
+
+    async def expense_exists(self, trip, expense_id) -> bool:
+        self._exists_calls += 1
+        if self._exists_calls == 1:
+            raise LedgerUnavailable("boom")
+        return await super().expense_exists(trip, expense_id)
+
+
+async def test_confirm_recovers_to_preview_when_expense_exists_check_fails() -> None:
+    """The expense_exists read must run inside the same try/except as
+    append_expense: a LedgerUnavailable from it must restore `preview`, not
+    strand the draft in `committing` forever.
+    """
+    ledger = _FailExistsOnceLedger()
+    service, ledger, trip, dedup = await _setup(ledger=ledger)
+    draft = await _start(service, trip)
+    await service.choose_just_me(draft.draft_id, presser_id=42)
+
+    with pytest.raises(LedgerUnavailable):
+        await service.confirm(draft.draft_id, presser_id=42)
+
+    stuck = await service._drafts.get(draft.draft_id)  # type: ignore[attr-defined]
+    assert stuck.state == "preview"  # not stranded in "committing"
+
+    committed = await service.confirm(draft.draft_id, presser_id=42)
+    assert committed.state == "committed"
+
+    saved = await ledger.list_expenses(trip)
+    assert len(saved) == 1
+
+
 async def test_home_currency_card_texts_show_home_only() -> None:
     """2026-10-01 change: an expense entered in the home currency shows the home
     amount only throughout the draft flow -- detected, preview, and Saved ✅.

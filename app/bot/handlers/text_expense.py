@@ -320,6 +320,16 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     except LedgerUnavailable:
         logger.exception("draft %s: ledger unavailable", draft_id)
         await answer(LEDGER_UNAVAILABLE_TEXT)
+        if action == "confirm":
+            # Spec §10/§14: stays in preview with a Retry save button and an
+            # error line, the message edited with its keyboard intact.
+            retry_draft = await deps.draft_service.get(draft_id)
+            if retry_draft is not None and retry_draft.state == "preview":
+                text, keyboard = render_draft(retry_draft, trip, save_error=True)
+                try:
+                    await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+                except Exception:  # noqa: BLE001 - message may already be gone/changed
+                    logger.debug("draft %s: could not edit after save error", draft_id)
         return
     except DraftError:
         logger.exception("draft %s: draft error", draft_id)
