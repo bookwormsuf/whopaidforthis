@@ -1,8 +1,10 @@
 """Tests for the /settrip conversation.
 
-Sprint 9 (spec §18): no Sheet link, no access check, no rebind confirmation.
-`/settrip` in a group goes straight to the currency buttons; a second `/settrip`
-just starts a new trip (`save_binding` closes the old one).
+Sprint 9 (spec §18): no Sheet link, no access check. `/settrip` in a group with no
+open trip goes straight to the currency buttons. A group with an open trip is asked
+"Close the current trip and start a new one?" first (sprint 9 item 1); `Start new
+trip` moves on to the currency buttons and `save_binding` closes the old trip,
+`Keep current` ends the conversation with one line.
 """
 
 from __future__ import annotations
@@ -114,29 +116,98 @@ async def test_settrip_happy_path_creates_trip() -> None:
     assert trip.closed_at is None
 
 
-async def test_settrip_again_closes_the_old_open_trip() -> None:
-    """Re-running /settrip on a group with an open trip starts a new one; the old
-    one is closed, not deleted (spec §18 -- the "close and start a new one?"
-    confirm step is Phase 2).
-    """
+async def _complete_settrip(deps: Deps, context: MagicMock, *, skip_rebind: bool = False) -> None:
+    update = _command_update()
+    await settrip.settrip_command(update, context)
+    session_id = _only_session_id(deps)
+    if not skip_rebind:
+        await settrip.settrip_callback(_callback_update(session_id, "rebind", "yes"), context)
+    await settrip.settrip_callback(_callback_update(session_id, "trip_ccy", "JPY"), context)
+    await settrip.settrip_callback(_callback_update(session_id, "home_ccy", "SGD"), context)
+    await settrip.settrip_callback(_callback_update(session_id, "tz", "Asia/Tokyo"), context)
+    await settrip.settrip_callback(_callback_update(session_id, "confirm", "yes"), context)
+
+
+async def test_settrip_again_asks_to_close_the_current_trip_first() -> None:
+    """A group with an open trip that runs /settrip again is asked to confirm
+    before anything happens to the trip (sprint 9 item 1)."""
     ledger = InMemoryLedgerStore()
     deps = _deps(ledger)
     context = _context(deps)
 
-    async def _complete_settrip() -> None:
-        update = _command_update()
-        await settrip.settrip_command(update, context)
-        session_id = _only_session_id(deps)
-        await settrip.settrip_callback(_callback_update(session_id, "trip_ccy", "JPY"), context)
-        await settrip.settrip_callback(_callback_update(session_id, "home_ccy", "SGD"), context)
-        await settrip.settrip_callback(_callback_update(session_id, "tz", "Asia/Tokyo"), context)
-        await settrip.settrip_callback(_callback_update(session_id, "confirm", "yes"), context)
-
-    await _complete_settrip()
+    await _complete_settrip(deps, context, skip_rebind=True)
     first_trip = await ledger.get_binding(-100)
     assert first_trip is not None
 
-    await _complete_settrip()
+    update = _command_update()
+    await settrip.settrip_command(update, context)
+
+    update.effective_message.reply_text.assert_awaited_once()
+    (text,), kwargs = update.effective_message.reply_text.call_args
+    assert text == "Close the current trip and start a new one?"
+    buttons = [b.text for row in kwargs["reply_markup"].inline_keyboard for b in row]
+    assert buttons == ["Start new trip", "Keep current"]
+
+    # The old trip is untouched until a choice is made.
+    still_open = await ledger.get_binding(-100)
+    assert still_open is not None and still_open.id == first_trip.id
+
+
+async def test_settrip_keep_current_ends_without_closing_the_trip() -> None:
+    ledger = InMemoryLedgerStore()
+    deps = _deps(ledger)
+    context = _context(deps)
+    await _complete_settrip(deps, context, skip_rebind=True)
+    first_trip = await ledger.get_binding(-100)
+    assert first_trip is not None
+
+    update = _command_update()
+    await settrip.settrip_command(update, context)
+    session_id = _only_session_id(deps)
+    keep_update = _callback_update(session_id, "rebind", "no")
+
+    await settrip.settrip_callback(keep_update, context)
+
+    keep_update.callback_query.edit_message_text.assert_awaited_once_with(
+        "Keeping the current trip.", parse_mode="HTML"
+    )
+    still_open = await ledger.get_binding(-100)
+    assert still_open is not None and still_open.id == first_trip.id
+    assert deps.settrip_sessions.get(session_id) is None
+
+
+async def test_settrip_start_new_trip_moves_on_to_currency_buttons() -> None:
+    ledger = InMemoryLedgerStore()
+    deps = _deps(ledger)
+    context = _context(deps)
+    await _complete_settrip(deps, context, skip_rebind=True)
+
+    update = _command_update()
+    await settrip.settrip_command(update, context)
+    session_id = _only_session_id(deps)
+    start_new_update = _callback_update(session_id, "rebind", "yes")
+
+    await settrip.settrip_callback(start_new_update, context)
+
+    start_new_update.callback_query.edit_message_text.assert_awaited_once()
+    (text,), kwargs = start_new_update.callback_query.edit_message_text.call_args
+    assert text == "Trip currency?"
+    buttons = [b.text for row in kwargs["reply_markup"].inline_keyboard for b in row]
+    assert buttons == ["SGD", "MYR", "JPY", "CNY", "Other…"]
+
+
+async def test_settrip_again_closes_the_old_open_trip() -> None:
+    """Confirming `Start new trip` starts a new trip; the old one is closed, not
+    deleted (spec §18)."""
+    ledger = InMemoryLedgerStore()
+    deps = _deps(ledger)
+    context = _context(deps)
+
+    await _complete_settrip(deps, context, skip_rebind=True)
+    first_trip = await ledger.get_binding(-100)
+    assert first_trip is not None
+
+    await _complete_settrip(deps, context)
     second_trip = await ledger.get_binding(-100)
     assert second_trip is not None
     assert second_trip.id != first_trip.id

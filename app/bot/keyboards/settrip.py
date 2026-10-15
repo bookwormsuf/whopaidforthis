@@ -62,7 +62,7 @@ def confirm_keyboard(session_id: str) -> InlineKeyboardMarkup:
         [
             [
                 InlineKeyboardButton(
-                    "Create Sheet", callback_data=_callback(session_id, "confirm", "yes")
+                    "Start trip", callback_data=_callback(session_id, "confirm", "yes")
                 ),
                 InlineKeyboardButton(
                     "Cancel", callback_data=_callback(session_id, "confirm", "cancel")
@@ -73,11 +73,15 @@ def confirm_keyboard(session_id: str) -> InlineKeyboardMarkup:
 
 
 def rebind_keyboard(session_id: str) -> InlineKeyboardMarkup:
+    """Asked when `/settrip` runs again on a group with an open trip (sprint 9
+    item 1): `Start new trip` closes the old trip and moves on to the currency
+    buttons; `Keep current` ends the conversation with one line.
+    """
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    "Switch Sheet", callback_data=_callback(session_id, "rebind", "yes")
+                    "Start new trip", callback_data=_callback(session_id, "rebind", "yes")
                 ),
                 InlineKeyboardButton(
                     "Keep current", callback_data=_callback(session_id, "rebind", "no")

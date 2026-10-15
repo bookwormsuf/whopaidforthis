@@ -4,11 +4,12 @@ Spec references: pinned-decisions §2, §18; docs/sprints/09-neon-store-and-expo
 Not a PTB ConversationHandler: state lives in a `SettripSessionStore` (on
 `Deps.settrip_sessions`), edited in place through one message per session.
 
-No Sheet link, no access check, no rebind confirmation (Sprint 9 pin): `/settrip` in
-a group goes straight to the currency buttons. A group with an open trip that runs
-it again gets a new trip -- `save_binding` closes the old one in the same
-transaction (spec §18); the "Close the current trip and start a new one?" confirm
-step is Phase 2.
+No Sheet link, no access check (Sprint 9 pin): `/settrip` in a group with no open
+trip goes straight to the currency buttons. A group that already has an open trip
+is asked "Close the current trip and start a new one?" first (sprint 9 item 1);
+`Start new trip` moves on to the currency buttons (`save_binding` closes the old
+trip in the same transaction once a new one is confirmed), `Keep current` ends the
+conversation with one line.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from app.bot.keyboards.settrip import (
     confirm_keyboard,
     home_currency_keyboard,
     joined_keyboard,
+    rebind_keyboard,
     timezone_keyboard,
     trip_currency_keyboard,
 )
@@ -40,6 +42,8 @@ logger = logging.getLogger(__name__)
 
 PRIVATE_TEXT = "Run /settrip inside your trip group."
 UNAVAILABLE_TEXT = LEDGER_UNAVAILABLE_TEXT
+REBIND_PROMPT = "Close the current trip and start a new one?"
+KEEP_CURRENT_TEXT = "Keeping the current trip."
 
 
 async def settrip_private_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -57,16 +61,31 @@ async def settrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     deps = get_deps(context)
     trip_name = chat.title or "Trip"
 
+    try:
+        existing = await deps.ledger.get_binding(chat.id)
+    except LedgerUnavailable:
+        logger.exception("settrip: could not check for an existing open trip")
+        await message.reply_text(UNAVAILABLE_TEXT, parse_mode="HTML")
+        return
+
+    first_step = "rebind" if existing is not None else "trip_ccy"
     session = deps.settrip_sessions.create(
         chat_id=chat.id,
         initiator_id=user.id,
         initiator_name=display_name_for(user),
         trip_name=trip_name,
-        step="trip_ccy",
+        step=first_step,
     )
-    sent = await message.reply_text(
-        "Trip currency?", reply_markup=trip_currency_keyboard(session.session_id), parse_mode="HTML"
-    )
+    if existing is not None:
+        sent = await message.reply_text(
+            REBIND_PROMPT, reply_markup=rebind_keyboard(session.session_id), parse_mode="HTML"
+        )
+    else:
+        sent = await message.reply_text(
+            "Trip currency?",
+            reply_markup=trip_currency_keyboard(session.session_id),
+            parse_mode="HTML",
+        )
     deps.settrip_sessions.update(session.session_id, message_id=sent.message_id)
 
 
@@ -208,6 +227,22 @@ async def settrip_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.answer(f"Only {session.initiator_name} can do this")
         return
     await query.answer()
+
+    if step == "rebind":
+        if value == "no":
+            deps.settrip_sessions.delete(session_id)
+            await query.edit_message_text(KEEP_CURRENT_TEXT, parse_mode="HTML")
+            return
+        if value == "yes":
+            next_session = deps.settrip_sessions.update(
+                session_id, step="trip_ccy", awaiting_text_for=None
+            )
+            if next_session is None:
+                return
+            text, markup = _render_for_step(next_session)
+            await query.edit_message_text(text, reply_markup=markup, parse_mode="HTML")
+            return
+        return
 
     if step in ("trip_ccy", "home_ccy", "tz"):
         if value == "other":
