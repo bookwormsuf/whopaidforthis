@@ -1,38 +1,20 @@
-"""Tests for the /settrip conversation."""
+"""Tests for the /settrip conversation.
+
+Sprint 9 (spec §18): no Sheet link, no access check, no rebind confirmation.
+`/settrip` in a group goes straight to the currency buttons; a second `/settrip`
+just starts a new trip (`save_binding` closes the old one).
+"""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from app.bot.conversations import settrip
 from app.bot.deps import Deps
-from app.models.trip import Trip
 from app.services.currencies import StaticCurrencyCatalog
 from app.services.ledger_store import InMemoryLedgerStore, LedgerUnavailable
 from tests.helpers import make_deps
-
-SHEET_ID = "1AbCdEfGhIjKlMnOpQrStUvWxYz1234567890"
-
-
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        (f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/edit#gid=0", SHEET_ID),
-        (f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/", SHEET_ID),
-        (SHEET_ID, SHEET_ID),
-    ],
-)
-def test_extract_sheet_id_accepts_three_shapes(raw: str, expected: str) -> None:
-    assert settrip.extract_sheet_id(raw) == expected
-
-
-def test_extract_sheet_id_rejects_garbage() -> None:
-    assert settrip.extract_sheet_id("not a sheet id") is None
-    assert settrip.extract_sheet_id("short") is None
 
 
 def _deps(ledger: InMemoryLedgerStore | None = None) -> Deps:
@@ -61,107 +43,34 @@ def _only_session_id(deps: Deps) -> str:
     return next(iter(deps.settrip_sessions._sessions))
 
 
-async def test_settrip_no_arg_shows_usage() -> None:
+def _callback_update(session_id: str, step: str, value: str, user_id: int = 1) -> MagicMock:
+    cb_update = MagicMock()
+    cb_update.callback_query.data = f"st:{session_id}:{step}:{value}"
+    cb_update.callback_query.from_user = SimpleNamespace(id=user_id)
+    cb_update.callback_query.answer = AsyncMock()
+    cb_update.callback_query.edit_message_text = AsyncMock()
+    return cb_update
+
+
+async def test_settrip_goes_straight_to_trip_currency_buttons() -> None:
     deps = _deps()
     context = _context(deps)
-    context.args = []
     update = _command_update()
 
     await settrip.settrip_command(update, context)
 
-    update.effective_message.reply_text.assert_awaited_once_with(
-        settrip.USAGE_TEXT, parse_mode="HTML"
-    )
-
-
-async def test_settrip_bad_arg_shows_usage() -> None:
-    deps = _deps()
-    context = _context(deps)
-    context.args = ["not-a-sheet-id"]
-    update = _command_update()
-
-    await settrip.settrip_command(update, context)
-
-    update.effective_message.reply_text.assert_awaited_once_with(
-        settrip.USAGE_TEXT, parse_mode="HTML"
-    )
-
-
-async def test_settrip_unshared_sheet_via_real_sheets_ledger_store_sends_exact_error() -> None:
-    """Handler-level: a real SheetsLedgerStore whose client denies access (403)."""
-    from app.services.google_sheets import SheetsLedgerStore
-
-    store = SheetsLedgerStore(
-        service_account_info={"client_email": "whopaid-bot@example.iam.gserviceaccount.com"},
-        control_sheet_id="control-sheet-id",
-        bot_version="test",
-    )
-    client = MagicMock()
-    client.open_by_key = MagicMock(side_effect=PermissionError())
-    store._get_client = AsyncMock(return_value=client)  # type: ignore[method-assign]
-
-    deps = make_deps(store)
-    context = _context(deps)
-    context.args = [SHEET_ID]
-    update = _command_update()
-
-    await settrip.settrip_command(update, context)
-
-    update.effective_message.reply_text.assert_awaited_once_with(
-        "I can't open that Sheet. Share it with "
-        "<code>whopaid-bot@example.iam.gserviceaccount.com</code> as Editor, then try again.",
-        parse_mode="HTML",
-    )
-
-
-async def test_settrip_unshared_sheet_sends_exact_error_with_email() -> None:
-    ledger = InMemoryLedgerStore(unopenable_sheet_ids=frozenset({SHEET_ID}))
-    deps = _deps(ledger)
-    context = _context(deps)
-    context.args = [SHEET_ID]
-    update = _command_update()
-
-    await settrip.settrip_command(update, context)
-
-    update.effective_message.reply_text.assert_awaited_once_with(
-        f"I can't open that Sheet. Share it with <code>{deps.service_account_email}</code> "
-        "as Editor, then try again.",
-        parse_mode="HTML",
-    )
-
-
-async def test_settrip_access_check_runs_before_rebind_prompt() -> None:
-    """A sheet that can't be opened is an error even for an already-bound chat."""
-    ledger = InMemoryLedgerStore(unopenable_sheet_ids=frozenset({SHEET_ID}))
-    old_trip = Trip(
-        chat_id=-100,
-        sheet_id="already-bound-sheet-id",
-        name="Old Trip",
-        trip_currency="JPY",
-        home_currency="SGD",
-        timezone="Asia/Tokyo",
-        created_at=datetime.now(UTC),
-    )
-    await ledger.save_binding(old_trip)
-    deps = _deps(ledger)
-    context = _context(deps)
-    context.args = [SHEET_ID]
-    update = _command_update()
-
-    await settrip.settrip_command(update, context)
-
-    update.effective_message.reply_text.assert_awaited_once_with(
-        f"I can't open that Sheet. Share it with <code>{deps.service_account_email}</code> "
-        "as Editor, then try again.",
-        parse_mode="HTML",
-    )
-    assert len(deps.settrip_sessions._sessions) == 0  # no session was started
+    update.effective_message.reply_text.assert_awaited_once()
+    (text,), kwargs = update.effective_message.reply_text.call_args
+    assert text == "Trip currency?"
+    buttons = [b.text for row in kwargs["reply_markup"].inline_keyboard for b in row]
+    # Spec §18 pin: SGD, MYR, JPY, CNY shown first, then Other….
+    assert buttons == ["SGD", "MYR", "JPY", "CNY", "Other…"]
+    assert len(deps.settrip_sessions._sessions) == 1
 
 
 async def test_settrip_private_chat_replies_and_creates_no_session() -> None:
     deps = _deps()
     context = _context(deps)
-    context.args = [SHEET_ID]
     update = _command_update(chat_id=555)
     update.effective_chat = SimpleNamespace(id=555, title=None, type="private")
 
@@ -173,29 +82,20 @@ async def test_settrip_private_chat_replies_and_creates_no_session() -> None:
     assert len(deps.settrip_sessions._sessions) == 0
 
 
-async def test_settrip_happy_path_binds_trip() -> None:
+async def test_settrip_happy_path_creates_trip() -> None:
     ledger = InMemoryLedgerStore()
     deps = _deps(ledger)
     context = _context(deps)
-    context.args = [SHEET_ID]
     update = _command_update()
 
     await settrip.settrip_command(update, context)
     session_id = _only_session_id(deps)
 
-    def callback_update(step: str, value: str) -> MagicMock:
-        cb_update = MagicMock()
-        cb_update.callback_query.data = f"st:{session_id}:{step}:{value}"
-        cb_update.callback_query.from_user = SimpleNamespace(id=1)
-        cb_update.callback_query.answer = AsyncMock()
-        cb_update.callback_query.edit_message_text = AsyncMock()
-        return cb_update
+    await settrip.settrip_callback(_callback_update(session_id, "trip_ccy", "JPY"), context)
+    await settrip.settrip_callback(_callback_update(session_id, "home_ccy", "SGD"), context)
+    await settrip.settrip_callback(_callback_update(session_id, "tz", "Asia/Tokyo"), context)
 
-    await settrip.settrip_callback(callback_update("trip_ccy", "JPY"), context)
-    await settrip.settrip_callback(callback_update("home_ccy", "SGD"), context)
-    await settrip.settrip_callback(callback_update("tz", "Asia/Tokyo"), context)
-
-    confirm_update = callback_update("confirm", "yes")
+    confirm_update = _callback_update(session_id, "confirm", "yes")
     await settrip.settrip_callback(confirm_update, context)
 
     confirm_update.callback_query.edit_message_text.assert_awaited_once()
@@ -207,34 +107,59 @@ async def test_settrip_happy_path_binds_trip() -> None:
 
     trip = await ledger.get_binding(-100)
     assert trip is not None
-    assert trip.sheet_id == SHEET_ID
+    assert trip.id is not None
     assert trip.trip_currency == "JPY"
     assert trip.home_currency == "SGD"
-    assert SHEET_ID in ledger.initialised_sheet_ids
+    assert trip.created_by == 1
+    assert trip.closed_at is None
+
+
+async def test_settrip_again_closes_the_old_open_trip() -> None:
+    """Re-running /settrip on a group with an open trip starts a new one; the old
+    one is closed, not deleted (spec §18 -- the "close and start a new one?"
+    confirm step is Phase 2).
+    """
+    ledger = InMemoryLedgerStore()
+    deps = _deps(ledger)
+    context = _context(deps)
+
+    async def _complete_settrip() -> None:
+        update = _command_update()
+        await settrip.settrip_command(update, context)
+        session_id = _only_session_id(deps)
+        await settrip.settrip_callback(_callback_update(session_id, "trip_ccy", "JPY"), context)
+        await settrip.settrip_callback(_callback_update(session_id, "home_ccy", "SGD"), context)
+        await settrip.settrip_callback(_callback_update(session_id, "tz", "Asia/Tokyo"), context)
+        await settrip.settrip_callback(_callback_update(session_id, "confirm", "yes"), context)
+
+    await _complete_settrip()
+    first_trip = await ledger.get_binding(-100)
+    assert first_trip is not None
+
+    await _complete_settrip()
+    second_trip = await ledger.get_binding(-100)
+    assert second_trip is not None
+    assert second_trip.id != first_trip.id
+
+    trips = await ledger.list_trips(-100)
+    by_id = {t.id: t for t in trips}
+    assert by_id[first_trip.id].closed_at is not None
+    assert by_id[second_trip.id].closed_at is None
 
 
 async def test_settrip_confirm_ledger_unavailable_shows_retry_button() -> None:
     ledger = InMemoryLedgerStore()
-    ledger.initialise_trip_sheet = AsyncMock(side_effect=LedgerUnavailable("boom"))  # type: ignore[method-assign]
+    ledger.save_binding = AsyncMock(side_effect=LedgerUnavailable("boom"))  # type: ignore[method-assign]
     deps = _deps(ledger)
     context = _context(deps)
-    context.args = [SHEET_ID]
     update = _command_update()
     await settrip.settrip_command(update, context)
     session_id = _only_session_id(deps)
 
-    def callback_update(step: str, value: str) -> MagicMock:
-        cb_update = MagicMock()
-        cb_update.callback_query.data = f"st:{session_id}:{step}:{value}"
-        cb_update.callback_query.from_user = SimpleNamespace(id=1)
-        cb_update.callback_query.answer = AsyncMock()
-        cb_update.callback_query.edit_message_text = AsyncMock()
-        return cb_update
-
-    await settrip.settrip_callback(callback_update("trip_ccy", "JPY"), context)
-    await settrip.settrip_callback(callback_update("home_ccy", "SGD"), context)
-    await settrip.settrip_callback(callback_update("tz", "Asia/Tokyo"), context)
-    confirm_update = callback_update("confirm", "yes")
+    await settrip.settrip_callback(_callback_update(session_id, "trip_ccy", "JPY"), context)
+    await settrip.settrip_callback(_callback_update(session_id, "home_ccy", "SGD"), context)
+    await settrip.settrip_callback(_callback_update(session_id, "tz", "Asia/Tokyo"), context)
+    confirm_update = _callback_update(session_id, "confirm", "yes")
 
     await settrip.settrip_callback(confirm_update, context)
 
@@ -250,15 +175,11 @@ async def test_settrip_only_initiator_can_press_buttons() -> None:
     ledger = InMemoryLedgerStore()
     deps = _deps(ledger)
     context = _context(deps)
-    context.args = [SHEET_ID]
     update = _command_update()
     await settrip.settrip_command(update, context)
     session_id = _only_session_id(deps)
 
-    cb_update = MagicMock()
-    cb_update.callback_query.data = f"st:{session_id}:trip_ccy:JPY"
-    cb_update.callback_query.from_user = SimpleNamespace(id=999)  # not the initiator
-    cb_update.callback_query.answer = AsyncMock()
+    cb_update = _callback_update(session_id, "trip_ccy", "JPY", user_id=999)  # not the initiator
 
     await settrip.settrip_callback(cb_update, context)
 
@@ -282,45 +203,15 @@ async def test_settrip_unknown_session_reports_expired() -> None:
     )
 
 
-async def test_settrip_rebind_prompt_when_already_bound_and_accessible() -> None:
-    ledger = InMemoryLedgerStore()
-    deps = _deps(ledger)
-    await ledger.save_binding(
-        Trip(
-            chat_id=-100,
-            sheet_id="already-bound-sheet-id",
-            name="Old Trip",
-            trip_currency="JPY",
-            home_currency="SGD",
-            timezone="Asia/Tokyo",
-            created_at=datetime.now(UTC),
-        )
-    )
-    context = _context(deps)
-    context.args = [SHEET_ID]
-    update = _command_update()
-
-    await settrip.settrip_command(update, context)
-
-    update.effective_message.reply_text.assert_awaited_once()
-    (text,), kwargs = update.effective_message.reply_text.call_args
-    assert text == "This group already has a Sheet. Switch to the new one?"
-
-
 async def test_settrip_other_currency_waits_for_text_then_validates() -> None:
     ledger = InMemoryLedgerStore()
     deps = _deps(ledger)
     context = _context(deps)
-    context.args = [SHEET_ID]
     update = _command_update()
     await settrip.settrip_command(update, context)
     session_id = _only_session_id(deps)
 
-    other_update = MagicMock()
-    other_update.callback_query.data = f"st:{session_id}:trip_ccy:other"
-    other_update.callback_query.from_user = SimpleNamespace(id=1)
-    other_update.callback_query.answer = AsyncMock()
-    other_update.callback_query.edit_message_text = AsyncMock()
+    other_update = _callback_update(session_id, "trip_ccy", "other")
     await settrip.settrip_callback(other_update, context)
 
     text_update = MagicMock()
@@ -346,7 +237,6 @@ def test_awaiting_settrip_text_filter_true_only_when_session_awaits_text() -> No
         chat_id=-100,
         initiator_id=1,
         initiator_name="Ada",
-        sheet_id=SHEET_ID,
         trip_name="Trip",
         step="trip_ccy",
     )
@@ -362,34 +252,3 @@ def test_awaiting_settrip_text_filter_true_only_when_session_awaits_text() -> No
         chat=SimpleNamespace(id=-100), from_user=SimpleNamespace(id=2)
     )
     assert filt.filter(other_user_message) is False
-
-
-async def test_settrip_prompts_switch_when_current_sheet_is_inaccessible() -> None:
-    """The chat has a binding, but its current Sheet 403s: /settrip still runs the
-    access check on the NEW sheet first, then shows the Switch prompt with the
-    "can't be opened any more" wording (live-run fix, 2026-09-29).
-    """
-    ledger = InMemoryLedgerStore(inaccessible_sheet_ids=frozenset({"old-inaccessible-sheet-id"}))
-    await ledger.save_binding(
-        Trip(
-            chat_id=-100,
-            sheet_id="old-inaccessible-sheet-id",
-            name="Old Trip",
-            trip_currency="JPY",
-            home_currency="SGD",
-            timezone="Asia/Tokyo",
-            created_at=datetime.now(UTC),
-        )
-    )
-    deps = _deps(ledger)
-    context = _context(deps)
-    context.args = [SHEET_ID]
-    update = _command_update()
-
-    await settrip.settrip_command(update, context)
-
-    update.effective_message.reply_text.assert_awaited_once()
-    (text,), kwargs = update.effective_message.reply_text.call_args
-    assert text == "This group's current Sheet can't be opened any more. Switch to the new one?"
-    assert kwargs["reply_markup"] is not None
-    assert len(deps.settrip_sessions._sessions) == 1

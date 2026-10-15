@@ -8,10 +8,13 @@ from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-TRIP_CCY_CHOICES: list[str] = ["JPY", "KRW", "THB", "EUR", "GBP", "USD", "MYR", "IDR"]
-HOME_CCY_CHOICES: list[str] = ["SGD", "JPY", "KRW", "THB", "EUR", "GBP", "USD", "MYR", "IDR"]
+# Sprint 9 pin (spec §18): SGD, MYR, JPY, CNY shown first, then "Other…" (a 3-letter
+# code by reply). Same order for both the trip- and home-currency keyboards.
+_CCY_CHOICES: list[str] = ["SGD", "MYR", "JPY", "CNY"]
+TRIP_CCY_CHOICES: list[str] = _CCY_CHOICES
+HOME_CCY_CHOICES: list[str] = _CCY_CHOICES
 
-_OTHER = "Other"
+_OTHER = "Other…"
 _ROW_WIDTH = 3
 
 

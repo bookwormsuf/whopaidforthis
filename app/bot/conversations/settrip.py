@@ -1,14 +1,19 @@
-"""The `/settrip` flow: bind a group to a Google Sheet and lay out its tabs.
+"""The `/settrip` flow: start a trip for this group with buttons only.
 
-Spec references: pinned-decisions §2, §10; sprint 1 pins. Not a PTB ConversationHandler:
-state lives in a `SettripSessionStore` (on `Deps.settrip_sessions`), edited in place
-through one message per session.
+Spec references: pinned-decisions §2, §18; docs/sprints/09-neon-store-and-export.md.
+Not a PTB ConversationHandler: state lives in a `SettripSessionStore` (on
+`Deps.settrip_sessions`), edited in place through one message per session.
+
+No Sheet link, no access check, no rebind confirmation (Sprint 9 pin): `/settrip` in
+a group goes straight to the currency buttons. A group with an open trip that runs
+it again gets a new trip -- `save_binding` closes the old one in the same
+transaction (spec §18); the "Close the current trip and start a new one?" confirm
+step is Phase 2.
 """
 
 from __future__ import annotations
 
 import logging
-import re
 from datetime import UTC, datetime
 from html import escape
 from zoneinfo import available_timezones
@@ -22,7 +27,6 @@ from app.bot.keyboards.settrip import (
     confirm_keyboard,
     home_currency_keyboard,
     joined_keyboard,
-    rebind_keyboard,
     timezone_keyboard,
     trip_currency_keyboard,
 )
@@ -30,38 +34,12 @@ from app.bot.session_state import SettripSession, SettripSessionStore
 from app.models.trip import Trip
 from app.models.user import display_name_for
 from app.services.currencies import default_timezone_for
-from app.services.ledger_store import (
-    LEDGER_UNAVAILABLE_TEXT,
-    LedgerUnavailable,
-    TripSheetInaccessible,
-)
+from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
 
 logger = logging.getLogger(__name__)
 
-_SHEET_URL_RE = re.compile(r"/d/([a-zA-Z0-9_-]+)")
-_BARE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{20,}$")
-
-USAGE_TEXT = "Usage: /settrip &lt;Sheet ID or URL&gt;"
 PRIVATE_TEXT = "Run /settrip inside your trip group."
-UNAVAILABLE_TEXT = "Couldn't reach Google Sheets. "
-
-
-def extract_sheet_id(arg: str) -> str | None:
-    """Extract a Sheet ID from a full URL (`/d/<id>/...`) or a bare ID."""
-    candidate = arg.strip()
-    match = _SHEET_URL_RE.search(candidate)
-    if match:
-        return match.group(1)
-    if _BARE_ID_RE.match(candidate):
-        return candidate
-    return None
-
-
-def _not_shared_text(email: str) -> str:
-    return (
-        f"I can't open that Sheet. Share it with <code>{escape(email)}</code> as "
-        "Editor, then try again."
-    )
+UNAVAILABLE_TEXT = LEDGER_UNAVAILABLE_TEXT
 
 
 async def settrip_private_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -76,61 +54,13 @@ async def settrip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user = update.effective_user
     assert message is not None and chat is not None and user is not None
 
-    if not context.args:
-        await message.reply_text(USAGE_TEXT, parse_mode="HTML")
-        return
-    sheet_id = extract_sheet_id(" ".join(context.args))
-    if sheet_id is None:
-        await message.reply_text(USAGE_TEXT, parse_mode="HTML")
-        return
-
     deps = get_deps(context)
-
-    # Access check first, regardless of whether this chat is already bound: a sheet
-    # that can't be opened is an error even when we're about to ask for a rebind.
-    if not await deps.ledger.can_open(sheet_id):
-        await message.reply_text(_not_shared_text(deps.service_account_email), parse_mode="HTML")
-        return
-
     trip_name = chat.title or "Trip"
-    rebind_prompt: str | None = None
-    try:
-        existing_trip = await deps.ledger.get_binding(chat.id)
-        if existing_trip is not None:
-            rebind_prompt = "This group already has a Sheet. Switch to the new one?"
-    except TripSheetInaccessible:
-        # Bound, but the current Sheet can no longer be opened: same rebind flow,
-        # different prompt (spec: live-run fix, 2026-09-29).
-        rebind_prompt = (
-            "This group's current Sheet can't be opened any more. Switch to the new one?"
-        )
-    except LedgerUnavailable:
-        logger.exception("settrip: could not read the current binding")
-        await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
-        return
-
-    if rebind_prompt is not None:
-        session = deps.settrip_sessions.create(
-            chat_id=chat.id,
-            initiator_id=user.id,
-            initiator_name=display_name_for(user),
-            sheet_id=sheet_id,
-            trip_name=trip_name,
-            step="rebind",
-        )
-        sent = await message.reply_text(
-            rebind_prompt,
-            reply_markup=rebind_keyboard(session.session_id),
-            parse_mode="HTML",
-        )
-        deps.settrip_sessions.update(session.session_id, message_id=sent.message_id)
-        return
 
     session = deps.settrip_sessions.create(
         chat_id=chat.id,
         initiator_id=user.id,
         initiator_name=display_name_for(user),
-        sheet_id=sheet_id,
         trip_name=trip_name,
         step="trip_ccy",
     )
@@ -212,20 +142,19 @@ async def _create_trip(
     assert session.trip_currency and session.home_currency and session.timezone
     trip = Trip(
         chat_id=session.chat_id,
-        sheet_id=session.sheet_id,
         name=session.trip_name,
         trip_currency=session.trip_currency,
         home_currency=session.home_currency,
         timezone=session.timezone,
+        created_by=session.initiator_id,
         created_at=datetime.now(UTC),
     )
     query = update.callback_query
     assert query is not None
     try:
-        await deps.ledger.initialise_trip_sheet(trip)
-        await deps.ledger.save_binding(trip)
+        trip = await deps.ledger.save_binding(trip)
     except LedgerUnavailable:
-        logger.exception("settrip: could not create trip sheet")
+        logger.exception("settrip: could not save the new trip")
         await query.edit_message_text(
             UNAVAILABLE_TEXT,
             reply_markup=_retry_keyboard(session.session_id),
@@ -279,23 +208,6 @@ async def settrip_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.answer(f"Only {session.initiator_name} can do this")
         return
     await query.answer()
-
-    if step == "rebind":
-        if value == "no":
-            deps.settrip_sessions.delete(session_id)
-            await query.edit_message_text("Keeping the current Sheet.", parse_mode="HTML")
-            return
-        if not await deps.ledger.can_open(session.sheet_id):
-            deps.settrip_sessions.delete(session_id)
-            await query.edit_message_text(
-                _not_shared_text(deps.service_account_email), parse_mode="HTML"
-            )
-            return
-        next_session = deps.settrip_sessions.update(session_id, step="trip_ccy")
-        assert next_session is not None
-        text, markup = _render_for_step(next_session)
-        await query.edit_message_text(text, reply_markup=markup, parse_mode="HTML")
-        return
 
     if step in ("trip_ccy", "home_ccy", "tz"):
         if value == "other":
