@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-10-15 (sprint 9 signed off; live on Neon)
+Updated: 2026-10-15 (sprint 10 signed off; button menu live)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -19,7 +19,8 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 6 Item claiming | written (+ §7 amendment) | done | green (404) | 2026-10-01, findings fixed | 2026-10-02, single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 6 closed. Next: run sprint 7 / agent |
 | 7 Hardening and go-live | written | done | green (429) | 2026-10-02, findings fixed (screenshots after the trip) | 2026-10-03, live in the real trip group | 2026-10-03 | Live. After the trip: `/settle`, then `fly scale count 0` / Sufyan |
 | 8 Clearer messages | written (+ §9 amendment) | done | green (432) | 2026-10-03, findings fixed | 2026-10-04, in the real trip group | 2026-10-04 | Sprint 8 closed. After the trip: `/settle`, then `fly scale count 0` / Sufyan |
-| 9 Neon store and export | written 2026-10-15 (+ amendments) | done | green (446, 21 against Postgres) | 2026-10-15, findings fixed | 2026-10-15, steps 1-4 and 7; 5 and 6 deferred | 2026-10-15 | Sprint 9 closed. Steps 5 and 6 later / Sufyan. Next: sprint 10 spec / agent |
+| 9 Neon store and export | written 2026-10-15 (+ amendments) | done | green (446, 21 against Postgres) | 2026-10-15, findings fixed | 2026-10-15, steps 1-4 and 7; 5 and 6 deferred | 2026-10-15 | Sprint 9 closed. Steps 5 and 6 later / Sufyan. |
+| 10 `/start` menu with buttons | written 2026-10-15 (+ three amendments) | done | green (478) | 2026-10-15, findings fixed | 2026-10-15, steps 1 and 3 seen; others on Sufyan's word | 2026-10-15 | Sprint 10 closed. Next: sprint 11 if still wanted / Sufyan decides |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -861,3 +862,59 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Disposition: Sufyan said "sign off sprint 9" with steps 5 and 6 deferred (see above). Sprint 9
   closed. The bot is live on Neon for any group that adds it.
 - Next action / owner: steps 5 and 6 of the Sprint 9 checklist, record the result here / Sufyan.
+
+### 2026-10-15 — Sprint 10 grilled and pinned
+
+- Performed by: Claude with Sufyan (two grilling rounds), recorded by Claude.
+- Scope: a group that has never seen the bot runs a whole trip by tapping. Pins in
+  `docs/sprints/10-start-menu.md` and spec §19: buttons under messages only (no Telegram command
+  menu, no persistent keyboard); welcome posted when the bot is added, on `/start`, with the
+  bot trying to pin it and suggesting the group pin it when it lacks the right; state-aware
+  two-page menu; a press is the typed command by the presser; old menus never edited; `/start`
+  no longer joins; private `/start` gets an `Add me to a group` button; typed commands stay.
+- PR #28 merged by Sufyan.
+
+### 2026-10-15 — Sprint 10 build and review
+
+- Performed by: two build agents in sequence, four review agents, fix agent; orchestrated and
+  spot-checked by Claude. PR #29, 17 commits.
+- Phase 1 refactored every command into a shared `run_<name>(deps, chat, user, send)` coroutine
+  (export also takes `send_document`) so typed commands and button presses share one body.
+  Phase 2 added `app/bot/handlers/menu.py`, rewired `/start` and `/help`, the group-added
+  handler, the pin fallback and tests.
+- Review (four axes on Opus; correctness findings verified by targeted reads): the sprint doc
+  contradicted itself on `/help` in a group (resolved: help text with the menu under it, spec
+  amended); the `startgroup` link would have posted two welcomes (`/start` with arguments is
+  now ignored in a group); an unexpected error inside a button press left the presser with
+  nothing (now posts the generic error line); duplicated trip gate and split send helpers
+  merged; stale docstrings and the glossary fixed; a missing private-`/start` test added. Seven
+  findings dropped below threshold. One import hidden in an error branch moved to a plain
+  import by Claude.
+- Checks: `uv run pytest -m "not postgres"` 477 passed; ruff clean. CI does not run on PRs here.
+- Reviewed by / disposition: agent review, then Sufyan merged PR #29. Deployed on `4493be2`.
+
+### 2026-10-15 — Sprint 10 live run and three amendments
+
+- Performed by: Sufyan (Telegram), Claude (fixes). Each fix carries a test that fails on the
+  old code; each was merged by Sufyan and seen running in Fly logs.
+- Step 1 found no welcome when a group is created with the bot already in it: Telegram sends a
+  "group created" notice, not "new member". PR #30 listens for both.
+- Step 3 found no buttons after a trip starts, since the pre-trip welcome only offers
+  `Start a trip` and old menus are never edited. PR #31 posted the full menu on "Connected";
+  Sufyan found that competed with the `I'm in too` / `Everyone's in` buttons, so PR #32 moved
+  it to `Everyone's in`. Pins and spec amended both times.
+- Menu order reworked by frequency with Sufyan (PR #33): page 1 `Mine` `Balances` / `Recent`
+  `Today` `Summary` / `Join`; page 2 `Settle` `Export` / `How to add an expense` `Undo last` /
+  `Delete trip`. Process note: the first push of that PR went out with two tests red because the
+  command chain took its exit code from `tail`; caught and fixed on the same PR before merge.
+- Checks: 478 tests green; bot running on `46dfd15`. Seen in this session via screenshots:
+  welcome with `Start a trip` and the pin line, `/settrip` by buttons, an expense saved, the
+  full menu after `Everyone's in`. Not seen: steps 2 (admin pin), 4 to 9.
+
+### 2026-10-15 — Sprint 10 sign-off
+
+- Performed by: Sufyan, recorded by Claude.
+- Disposition: Sufyan said "sign off sprint 10". Steps 1 and 3 were observed; the remaining
+  checklist steps were not reported to Claude and stand on Sufyan's sign-off. Sprint 10 closed.
+- Next action / owner: Sprint 9 steps 5 and 6 still pending / Sufyan. Sprint 11 (Google Sheet
+  export, persistent drafts, pick an older trip for `/export`) only if Sufyan asks / Sufyan.
