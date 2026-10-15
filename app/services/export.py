@@ -93,7 +93,7 @@ def _build_expenses_sheet(wb: Workbook, trip: Trip, expenses: list[ExpenseRecord
             "Expense ID",
             "Created At",
             "Transaction Date",
-            "Payer Name",
+            "Payer Display Name",
             "Description",
             "Merchant",
             "Category",
@@ -108,6 +108,11 @@ def _build_expenses_sheet(wb: Workbook, trip: Trip, expenses: list[ExpenseRecord
             "Status",
             "Cancelled At",
             "Notes",
+            # ID columns last (spec §10) so the readable columns stay first.
+            "Chat ID",
+            "Message ID",
+            "Created By User ID",
+            "Payer User ID",
         ],
     )
     trip_fmt = _number_format(trip_currency)
@@ -133,6 +138,10 @@ def _build_expenses_sheet(wb: Workbook, trip: Trip, expenses: list[ExpenseRecord
             expense.status,
             expense.cancelled_at.replace(tzinfo=None) if expense.cancelled_at else None,
             expense.notes,
+            expense.chat_id,
+            expense.message_id,
+            expense.created_by_user_id,
+            expense.payer_user_id,
         ]
         sheet.append(row)
         last = sheet.max_row
@@ -142,7 +151,10 @@ def _build_expenses_sheet(wb: Workbook, trip: Trip, expenses: list[ExpenseRecord
         sheet.cell(row=last, column=11).number_format = home_fmt
         sheet.cell(row=last, column=12).number_format = "0.00000000"
         sheet.cell(row=last, column=13).number_format = "yyyy-mm-dd"
-    _autosize(sheet, [26, 20, 16, 16, 24, 16, 12, 14, 10, 14, 14, 14, 12, 10, 12, 10, 20, 24])
+    _autosize(
+        sheet,
+        [26, 20, 16, 16, 24, 16, 12, 14, 10, 14, 14, 14, 12, 10, 12, 10, 20, 24, 14, 14, 18, 16],
+    )
 
 
 def _build_shares_sheet(wb: Workbook, trip: Trip, splits: list[SplitRecord]) -> None:
@@ -156,6 +168,7 @@ def _build_shares_sheet(wb: Workbook, trip: Trip, splits: list[SplitRecord]) -> 
             f"Share {trip_currency}",
             f"Share {home_currency}",
             "Split Method",
+            "Participant User ID",
         ],
     )
     trip_fmt = _number_format(trip_currency)
@@ -168,12 +181,13 @@ def _build_shares_sheet(wb: Workbook, trip: Trip, splits: list[SplitRecord]) -> 
                 _major(split.share_trip_minor, trip_currency),
                 _major(split.share_home_minor, home_currency),
                 split.split_method,
+                split.user_id,
             ]
         )
         last = sheet.max_row
         sheet.cell(row=last, column=3).number_format = trip_fmt
         sheet.cell(row=last, column=4).number_format = home_fmt
-    _autosize(sheet, [26, 20, 14, 14, 12])
+    _autosize(sheet, [26, 20, 14, 14, 12, 16])
 
 
 def _build_line_items_sheet(wb: Workbook, trip: Trip, line_items: list[LineItemRecord]) -> None:
@@ -189,6 +203,7 @@ def _build_line_items_sheet(wb: Workbook, trip: Trip, line_items: list[LineItemR
             "Assigned User IDs",
             "Allocation Method",
             "Kind",
+            "Item ID",
         ],
     )
     trip_fmt = _number_format(trip_currency)
@@ -202,10 +217,11 @@ def _build_line_items_sheet(wb: Workbook, trip: Trip, line_items: list[LineItemR
                 ",".join(str(uid) for uid in item.assigned_user_ids),
                 item.allocation_method,
                 item.kind,
+                f"{item.expense_id}-{item.position:02d}",
             ]
         )
         sheet.cell(row=sheet.max_row, column=4).number_format = trip_fmt
-    _autosize(sheet, [26, 24, 10, 14, 24, 16, 12])
+    _autosize(sheet, [26, 24, 10, 14, 24, 16, 12, 26])
 
 
 def _build_people_sheet(wb: Workbook, users: list[TripUser]) -> None:

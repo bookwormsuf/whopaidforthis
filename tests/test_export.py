@@ -146,7 +146,7 @@ def test_expenses_sheet_headers_and_cancelled_row() -> None:
         "Expense ID",
         "Created At",
         "Transaction Date",
-        "Payer Name",
+        "Payer Display Name",
         "Description",
         "Merchant",
         "Category",
@@ -161,6 +161,10 @@ def test_expenses_sheet_headers_and_cancelled_row() -> None:
         "Status",
         "Cancelled At",
         "Notes",
+        "Chat ID",
+        "Message ID",
+        "Created By User ID",
+        "Payer User ID",
     ]
     assert sheet[1][0].font.bold is True
     assert sheet.freeze_panes == "A2"
@@ -172,6 +176,11 @@ def test_expenses_sheet_headers_and_cancelled_row() -> None:
     assert rows["e1"][9].number_format == "#,##0"
     assert rows["e1"][10].value == 10.0  # SGD: 1000 minor -> 10.00 major
     assert rows["e1"][10].number_format == "#,##0.00"
+    # ID columns at the end (spec §10, sprint 9 review item 10).
+    assert rows["e1"][18].value == CHAT_ID
+    assert rows["e1"][19].value == 1  # message_id
+    assert rows["e1"][20].value == 1  # created_by_user_id
+    assert rows["e1"][21].value == 1  # payer_user_id
 
 
 def test_shares_sheet_matches_splits() -> None:
@@ -184,8 +193,11 @@ def test_shares_sheet_matches_splits() -> None:
         "Share JPY",
         "Share SGD",
         "Split Method",
+        "Participant User ID",
     ]
     assert sheet.max_row == 5  # header + 4 split rows
+    first_split_row = next(sheet.iter_rows(min_row=2, values_only=True))
+    assert first_split_row[5] == 1  # Participant User ID, last column
 
 
 def test_line_items_sheet() -> None:
@@ -200,9 +212,10 @@ def test_line_items_sheet() -> None:
         "Assigned User IDs",
         "Allocation Method",
         "Kind",
+        "Item ID",
     ]
     row = next(sheet.iter_rows(min_row=2, values_only=True))
-    assert row == ("e1", "Ramen bowl", 2, 1200, "1,2", "everyone", "item")
+    assert row == ("e1", "Ramen bowl", 2, 1200, "1,2", "everyone", "item", "e1-00")
 
 
 def test_people_sheet() -> None:
