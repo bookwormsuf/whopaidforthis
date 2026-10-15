@@ -607,15 +607,15 @@ class DraftService:
         expense = self._build_expense(draft, trip)
 
         await self._drafts.put(replace(draft, state="committing"))
-        if not await self._ledger.expense_exists(trip, expense.expense_id):
-            try:
+        try:
+            if not await self._ledger.expense_exists(trip, expense.expense_id):
                 await self._ledger.append_expense(
                     trip, expense, draft.line_items, self._assignments(draft, trip)
                 )
-            except LedgerUnavailable:
-                logger.exception("draft %s: could not append expense", draft.draft_id)
-                await self._drafts.put(replace(draft, state="preview"))
-                raise
+        except LedgerUnavailable:
+            logger.exception("draft %s: could not append expense", draft.draft_id)
+            await self._drafts.put(replace(draft, state="preview"))
+            raise
 
         self._dedup.add(draft.chat_id, draft.message_id)
         committed = replace(draft, state="committed")

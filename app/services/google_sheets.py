@@ -16,6 +16,7 @@ from decimal import Decimal
 from typing import Any
 
 import gspread
+import requests
 from gspread.exceptions import APIError, SpreadsheetNotFound
 from gspread.utils import ValueInputOption, ValueRenderOption, rowcol_to_a1
 from gspread.worksheet import Worksheet
@@ -60,11 +61,13 @@ def _is_retryable_status(status: int) -> bool:
 async def _with_retries(func: Any, *args: Any, **kwargs: Any) -> Any:
     """Run a blocking gspread call in a thread.
 
-    Retries on 429/5xx APIError: 1 initial attempt plus 3 retries, backing off 1s,
-    2s, then 4s. Any escaping SpreadsheetNotFound, PermissionError, or APIError (a
-    non-retryable one immediately, a retryable one once retries are exhausted) is
-    translated to `LedgerUnavailable` so nothing gspread-specific leaks past the
-    store boundary.
+    Retries on 429/5xx APIError, and on any requests-level transport failure
+    (timeout, connection refused/reset, DNS failure -- no HTTP status at all):
+    1 initial attempt plus 3 retries, backing off 1s, 2s, then 4s. Any escaping
+    SpreadsheetNotFound, PermissionError, APIError (a non-retryable one
+    immediately, a retryable one once retries are exhausted), or
+    requests.exceptions.RequestException is translated to `LedgerUnavailable` so
+    nothing gspread- or requests-specific leaks past the store boundary.
     """
     last_status: int | None = None
     for attempt in range(len(_RETRY_DELAYS) + 1):
@@ -79,6 +82,11 @@ async def _with_retries(func: Any, *args: Any, **kwargs: Any) -> Any:
                 await asyncio.sleep(_RETRY_DELAYS[attempt])
                 continue
             raise LedgerUnavailable("Could not reach Google Sheets", status=status) from exc
+        except requests.exceptions.RequestException as exc:
+            if attempt < len(_RETRY_DELAYS):
+                await asyncio.sleep(_RETRY_DELAYS[attempt])
+                continue
+            raise LedgerUnavailable("Could not reach Google Sheets") from exc
     raise LedgerUnavailable("Could not reach Google Sheets", status=last_status)
 
 

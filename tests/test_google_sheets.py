@@ -195,6 +195,46 @@ async def test_with_retries_does_not_retry_on_403(monkeypatch: pytest.MonkeyPatc
     assert exc_info.value.status == 403
 
 
+async def test_with_retries_maps_connection_error_to_ledger_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A raw transport failure (DNS/connection refused, no HTTP status at all)
+    must not escape as a bare requests exception -- it has to come out as
+    LedgerUnavailable like every other failure mode, so callers never need to
+    know gspread uses requests under the hood.
+    """
+    import requests
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "app.services.google_sheets.asyncio.sleep", AsyncMock(side_effect=sleeps.append)
+    )
+    func = MagicMock(side_effect=requests.exceptions.ConnectionError("boom"))
+
+    with pytest.raises(LedgerUnavailable):
+        await _with_retries(func)
+
+
+async def test_with_retries_retries_on_timeout_then_raises_ledger_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import requests
+
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr("app.services.google_sheets.asyncio.sleep", fake_sleep)
+    func = MagicMock(side_effect=requests.exceptions.Timeout("boom"))
+
+    with pytest.raises(LedgerUnavailable):
+        await _with_retries(func)
+
+    assert func.call_count == 4  # 1 initial attempt + 3 retries, same as 429/5xx
+    assert sleeps == [1.0, 2.0, 4.0]
+
+
 def _store() -> SheetsLedgerStore:
     return SheetsLedgerStore(
         service_account_info={"client_email": "bot@example.iam.gserviceaccount.com"},
