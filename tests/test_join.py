@@ -14,6 +14,7 @@ from app.bot.handlers.join import (
     UNBOUND_TEXT,
     join_command,
     require_trip,
+    run_join,
 )
 from app.models.trip import Trip
 from app.models.user import TripUser
@@ -460,3 +461,33 @@ async def test_tap_after_closed_answers_closed_toast_and_does_not_join() -> None
     update.callback_query.edit_message_text.assert_not_awaited()
     users = await ledger.list_users(trip, joined_only=True)
     assert len(users) == 0
+
+
+async def test_run_join_joins_the_given_user_with_a_fake_send() -> None:
+    """`run_join` is what both the typed command and a future menu press call;
+    this drives it directly with a fake `send`, the way a button press would."""
+    ledger = InMemoryLedgerStore()
+    trip = Trip(
+        chat_id=-100,
+        name="Trip",
+        trip_currency="JPY",
+        home_currency="SGD",
+        timezone="Asia/Tokyo",
+        created_at=datetime.now(UTC),
+    )
+    trip = await ledger.save_binding(trip)
+    deps = _deps(ledger)
+    chat = SimpleNamespace(id=-100)
+    user = SimpleNamespace(id=7, first_name="Dee", last_name=None, username="dee")
+    sent: list[tuple[str, dict]] = []
+
+    async def fake_send(text: str, *, reply_markup=None):
+        sent.append((text, {"reply_markup": reply_markup}))
+        return SimpleNamespace(message_id=1)
+
+    await run_join(deps, chat, user, fake_send)
+
+    users = await ledger.list_users(trip, joined_only=True)
+    assert len(users) == 1
+    assert users[0].user_id == 7
+    assert sent[0][0] == "Joined ✅ Dee"

@@ -16,11 +16,12 @@ import logging
 from datetime import UTC, datetime
 from html import escape
 
-from telegram import Update
+from telegram import Chat, Update, User
 from telegram.ext import ContextTypes
 
 from app.bot.deps import Deps, get_deps
 from app.bot.keyboards.settrip import joined_keyboard
+from app.bot.send import SendFn, build_send
 from app.models.trip import Trip
 from app.models.user import TripUser
 from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
@@ -45,6 +46,25 @@ async def resolve_trip_status(deps: Deps, chat_id: int) -> tuple[Trip | None, bo
     if trip.closed_at is None:
         return trip, False
     return None, True
+
+
+async def require_trip_send(deps: Deps, chat_id: int, send: SendFn) -> Trip | None:
+    """Like `require_trip`, but for a `run_<name>` coroutine (sprint 10): sends the
+    same gate texts through `send` instead of `update.effective_message.reply_text`,
+    so it works the same whether `send` is wired to a typed command or a future
+    menu button press. Returns the open trip, or `None` after sending (or on a
+    `LedgerUnavailable`).
+    """
+    try:
+        trip, latest_is_closed = await resolve_trip_status(deps, chat_id)
+    except LedgerUnavailable:
+        logger.exception("require_trip_send: could not read the current binding")
+        await send(LEDGER_UNAVAILABLE_TEXT)
+        return None
+    if trip is None:
+        await send(CLOSED_TRIP_TEXT if latest_is_closed else UNBOUND_TEXT)
+        return None
+    return trip
 
 
 async def require_trip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Trip | None:
@@ -96,32 +116,41 @@ async def require_trip_for_expense(
     return trip
 
 
+async def run_join(deps: Deps, chat: Chat, user: User, send: SendFn) -> None:
+    """Joins `user` to this chat's open trip. `join_command` resolves who `user`
+    is before calling this: the replied-to user when `/join` was sent as a reply
+    to them, else the sender themself (spec §3, "joining others") -- a future menu
+    press has no message to reply to, so it always passes the presser.
+    """
+    trip = await require_trip_send(deps, chat.id, send)
+    if trip is None:
+        return
+    tg_user = TripUser.from_telegram_user(user, datetime.now(UTC))
+    try:
+        joined_user = await deps.ledger.upsert_user(trip, tg_user, joined=True)
+    except LedgerUnavailable:
+        logger.exception("join: could not upsert user")
+        await send(UNAVAILABLE_TEXT)
+        return
+    await send(
+        f"Joined ✅ {escape(joined_user.display_name)}",
+        reply_markup=joined_keyboard(trip.chat_id),
+    )
+
+
 async def join_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """`/join`. Sent as a reply to another (non-bot) user's message, joins that user
     instead of the sender (spec §3, "joining others").
     """
-    trip = await require_trip(update, context)
-    if trip is None:
-        return
     deps = get_deps(context)
+    chat = update.effective_chat
     user = update.effective_user
     message = update.effective_message
-    assert user is not None and message is not None
+    assert chat is not None and user is not None and message is not None
 
     target = user
     reply_to = message.reply_to_message
     if reply_to is not None and reply_to.from_user is not None and not reply_to.from_user.is_bot:
         target = reply_to.from_user
 
-    tg_user = TripUser.from_telegram_user(target, datetime.now(UTC))
-    try:
-        joined_user = await deps.ledger.upsert_user(trip, tg_user, joined=True)
-    except LedgerUnavailable:
-        logger.exception("join: could not upsert user")
-        await message.reply_text(UNAVAILABLE_TEXT, parse_mode="HTML")
-        return
-    await message.reply_text(
-        f"Joined ✅ {escape(joined_user.display_name)}",
-        parse_mode="HTML",
-        reply_markup=joined_keyboard(trip.chat_id),
-    )
+    await run_join(deps, chat, target, build_send(message))
