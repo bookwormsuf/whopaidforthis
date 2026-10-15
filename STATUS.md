@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-10-03 (sprint 7 signed off; live)
+Updated: 2026-10-15 (sprint 9 signed off; live on Neon)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -19,7 +19,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 6 Item claiming | written (+ §7 amendment) | done | green (404) | 2026-10-01, findings fixed | 2026-10-02, single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 6 closed. Next: run sprint 7 / agent |
 | 7 Hardening and go-live | written | done | green (429) | 2026-10-02, findings fixed (screenshots after the trip) | 2026-10-03, live in the real trip group | 2026-10-03 | Live. After the trip: `/settle`, then `fly scale count 0` / Sufyan |
 | 8 Clearer messages | written (+ §9 amendment) | done | green (432) | 2026-10-03, findings fixed | 2026-10-04, in the real trip group | 2026-10-04 | Sprint 8 closed. After the trip: `/settle`, then `fly scale count 0` / Sufyan |
-| 9 Neon store and export | written 2026-10-15 (+ closed-trip amendment) | done | green (444, 21 against Postgres) | 2026-10-15, findings fixed | - | - | merge PR, deploy, checklist in a fresh test group / Sufyan; then "sign off sprint 9" |
+| 9 Neon store and export | written 2026-10-15 (+ amendments) | done | green (446, 21 against Postgres) | 2026-10-15, findings fixed | 2026-10-15, fresh test group | 2026-10-15 | Sprint 9 closed. Next: write sprint 10 spec (`/start` menu) / agent |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -833,3 +833,28 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Reviewed by / disposition: agent review only; awaiting Sufyan's checklist and sign-off.
 - Next action / owner: push, PR, merge (deploys; the old Google secrets can be unset after),
   then the seven-step checklist in the sprint doc / Sufyan; then "sign off sprint 9".
+
+### 2026-10-15 — Sprint 9 live run, export hotfix, Google retired
+
+- Performed by: Sufyan (Telegram, Fly, Neon, Google Cloud), Claude (hotfix and records).
+- PR #25 merged and deployed; Fly logs show migration 001 applied against Neon and the bot
+  started on `f72e743`. First live `/export` in the test group hit a Telegram upload timeout
+  and fell to the generic error line; the second worked. Hotfix PR #26 (60 s upload timeout,
+  one retry, one-line failure message; two tests that fail on the old handler) merged and
+  deployed (`da9c346`).
+- Checklist correction: step 4 had `/settrip` before `/export`; `/export` prefers the open
+  trip, so the export must come first. Sprint doc fixed in this entry's commit.
+- Google retired: `GOOGLE_SERVICE_ACCOUNT_JSON` and `WHOPAID_CONTROL_SHEET_ID` unset on Fly
+  (three secrets remain), removed from the local `.env` by Sufyan, the key file under
+  `~/.config/whopaid/` deleted, the service account deleted in Google Cloud. The old Sheets
+  stay as archives.
+- Checks: `/export` producing the five-sheet file and `/balances` in the test group were seen
+  in this session. The remaining steps are on Sufyan's word with his sign-off below.
+- Next action / owner: write the sprint 10 spec (`/start` menu with buttons) / agent, when
+  Sufyan asks.
+
+### 2026-10-15 — Sprint 9 sign-off
+
+- Performed by: Sufyan, recorded by Claude.
+- Disposition: Sufyan said "sign off sprint 9". Sprint 9 closed. The bot is live on Neon for
+  any group that adds it.
