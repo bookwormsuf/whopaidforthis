@@ -103,7 +103,10 @@ async def test_join_twice_is_idempotent_one_row_joined_true() -> None:
     assert users[0].joined is True
 
 
-async def test_start_in_group_behaves_as_join() -> None:
+async def test_start_in_group_no_longer_joins() -> None:
+    """Sprint 10 pin: /start in a group posts the welcome menu instead of
+    joining the sender (superseding spec §12's "/start in group = /join").
+    """
     ledger = InMemoryLedgerStore()
     trip = Trip(
         chat_id=-100,
@@ -116,15 +119,19 @@ async def test_start_in_group_behaves_as_join() -> None:
     trip = await ledger.save_binding(trip)
     deps = _deps(ledger)
     context = _context(deps)
+    context.bot = MagicMock()
+    context.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=1))
+    context.bot.pin_chat_message = AsyncMock()
     update = _update()
 
     await start_command(update, context)
 
     users = await ledger.list_users(trip, joined_only=True)
-    assert len(users) == 1
-    update.effective_message.reply_text.assert_awaited_once()
-    (text,) = update.effective_message.reply_text.call_args.args
-    assert text.startswith("Joined ✅")
+    assert len(users) == 0
+    update.effective_message.reply_text.assert_not_called()
+    context.bot.send_message.assert_awaited_once()
+    (_, text), _kwargs = context.bot.send_message.call_args
+    assert "Trip: Trip (JPY → SGD)" in text
 
 
 async def test_join_reports_ledger_unavailable() -> None:

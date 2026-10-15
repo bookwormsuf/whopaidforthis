@@ -293,15 +293,19 @@ def test_json_formatter_redacts_secret_in_an_allowed_extra_field() -> None:
 
 async def test_help_command_replies_with_html_and_mentions_balances() -> None:
     update = MagicMock()
+    update.effective_chat = SimpleNamespace(id=-1, type="private")
     update.message.reply_text = AsyncMock()
     context = MagicMock()
     context.application.bot_data = {"deps": _fake_deps()}
+    context.bot.username = "whopaidbot"
 
     await help_command(update, context)
 
     reply_text = update.message.reply_text.await_args.args[0]
     assert reply_text.startswith(HELP_TEXT)
-    assert update.message.reply_text.await_args.kwargs == {"parse_mode": "HTML"}
+    kwargs = update.message.reply_text.await_args.kwargs
+    assert kwargs["parse_mode"] == "HTML"
+    assert kwargs["reply_markup"].inline_keyboard[0][0].text == "Add me to a group"
     assert "/balances" in HELP_TEXT
 
 
