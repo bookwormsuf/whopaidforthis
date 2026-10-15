@@ -17,7 +17,7 @@ sprint and points at the master spec sections it implements.
 | 8 | [Clearer messages](08-clearer-messages.md) | Spent, paid and owed read at a glance; item card in three kinds | Yes, ~5 min |
 | 9 | [Neon store and export](09-neon-store-and-export.md) | `/settrip` with buttons only, no Google; `/export` opens on your phone; `/deletetrip` | Yes, ~5 min (delete refusal) |
 | 10 | [`/start` menu with buttons](10-start-menu.md) | Add the bot to a group, run a trip by tapping | Yes, ~2 min (delete refusal) |
-| 11 | Google Sheet export, persistent drafts (spec to be written, if still wanted) | | No |
+| 11 | Dropped 2026-10-15: Google Sheet export, persistent drafts and older-trip export were judged not core. Revisit only on request. | | |
 
 ## How a sprint runs
 
