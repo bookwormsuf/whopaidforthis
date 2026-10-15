@@ -296,7 +296,7 @@ async def test_draft_callback_confirm_failure_shows_retry_save_with_error_line()
     confirm_update.callback_query.answer.assert_awaited_once()
     confirm_update.callback_query.edit_message_text.assert_awaited_once()
     (text,), kwargs = confirm_update.callback_query.edit_message_text.call_args
-    assert "Couldn't reach Google Sheets" in text
+    assert "Couldn't save" in text
     assert "Retry save" in text or any(
         button.text == "Retry save"
         for row in kwargs["reply_markup"].inline_keyboard

@@ -71,7 +71,9 @@ async def require_trip(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Tr
     return trip
 
 
-async def require_trip_for_expense(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Trip | None:
+async def require_trip_for_expense(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> Trip | None:
     """Like `require_trip`, but for a text/photo expense message rather than a
     command: an unbound chat (no trip ever) stays silent, matching today's
     behaviour for plain text (spec §13); a closed trip still gets the one-line

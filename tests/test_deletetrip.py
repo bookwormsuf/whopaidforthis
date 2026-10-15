@@ -159,7 +159,5 @@ async def test_keep_leaves_the_trip_in_place() -> None:
 
     await deletetrip_callback(update, context)
 
-    update.callback_query.edit_message_text.assert_awaited_once_with(
-        KEPT_TEXT, parse_mode="HTML"
-    )
+    update.callback_query.edit_message_text.assert_awaited_once_with(KEPT_TEXT, parse_mode="HTML")
     assert len(await ledger.list_trips(CHAT_ID)) == 1

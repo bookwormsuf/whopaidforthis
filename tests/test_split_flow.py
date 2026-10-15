@@ -462,7 +462,7 @@ async def test_home_currency_custom_split_with_bare_numbers() -> None:
     assert card.buttons == ["Confirm", "Cancel"]
 
 
-async def test_settle_warns_when_sheet_shares_do_not_add_up() -> None:
+async def test_settle_warns_when_recorded_shares_do_not_add_up() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await group.send(ADA, "6000 yen dinner split everyone")
     await group.press(ADA, card, "Equally")
@@ -477,7 +477,7 @@ async def test_settle_warns_when_sheet_shares_do_not_add_up() -> None:
 
     group.ledger.list_splits = edited
     settle = await group.command(ADA, settle_command)
-    assert settle.startswith("⚠️ The Sheet's shares don't add up") and "S$24.30" in settle
+    assert settle.startswith("⚠️ The recorded shares don't add up") and "S$24.30" in settle
     balances = await group.command(ADA, balances_command)
     assert "⚠️" in balances
 

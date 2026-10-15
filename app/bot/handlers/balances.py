@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 NO_BALANCES_TEXT = "No expenses yet."
 ALL_SQUARE_TEXT = "All square 🎉"
 UNBALANCED_TEXT = (
-    "⚠️ The Sheet's shares don't add up to its expenses (off by {amount}). "
-    "Was a Splits or Expenses row edited by hand? Fix it, or /undo and re-send the expense."
+    "⚠️ The recorded shares don't add up to the expenses (off by {amount}). "
+    "Was a row edited by hand? Fix it, or /undo and re-send the expense."
 )
 SETTLE_HINT = "Settle up with /settle"
 
@@ -204,14 +204,10 @@ async def settle_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         f"<b>{fmt_money(t.amount_minor, trip.home_currency)}</b>"
         for t in transfers
     ]
-    await message.reply_text(
-        "\n".join(lines), parse_mode="HTML", reply_markup=close_markup
-    )
+    await message.reply_text("\n".join(lines), parse_mode="HTML", reply_markup=close_markup)
 
 
-CLOSE_TRIP_NOT_ALLOWED_TOAST = (
-    "Only the person who started the trip or ran /settle can close it"
-)
+CLOSE_TRIP_NOT_ALLOWED_TOAST = "Only the person who started the trip or ran /settle can close it"
 TRIP_CLOSED_SUFFIX = "\n\nTrip closed. Run /settrip to start a new one."
 
 
