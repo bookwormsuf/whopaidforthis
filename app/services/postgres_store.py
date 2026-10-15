@@ -362,17 +362,18 @@ class PostgresLedgerStore:
         except _ASYNCPG_ERRORS as exc:
             raise LedgerUnavailable("Could not reach the database") from exc
 
-    async def list_expenses(self, trip: Trip) -> list[ExpenseRecord]:
+    async def list_expenses(self, trip: Trip, confirmed_only: bool = False) -> list[ExpenseRecord]:
         assert trip.id is not None
+        status_filter = "and e.status = 'confirmed'" if confirmed_only else ""
 
         async def _do() -> list[ExpenseRecord]:
             async with self.pool.acquire() as conn:
                 rows = await conn.fetch(
-                    """
+                    f"""
                     select e.*, tu.username as payer_username, tu.display_name as payer_display_name
                     from expenses e
                     left join trip_users tu on tu.trip_id = e.trip_id and tu.user_id = e.payer_id
-                    where e.trip_id = $1
+                    where e.trip_id = $1 {status_filter}
                     order by e.transaction_date, e.created_at
                     """,
                     trip.id,
@@ -381,18 +382,21 @@ class PostgresLedgerStore:
 
         return await self._run(_do)
 
-    async def list_splits(self, trip: Trip) -> list[SplitRecord]:
+    async def list_splits(self, trip: Trip, confirmed_only: bool = False) -> list[SplitRecord]:
         assert trip.id is not None
+        # Splits have no status of their own; "confirmed" means their expense is
+        # (sprint 9 review item 8).
+        status_filter = "and e.status = 'confirmed'" if confirmed_only else ""
 
         async def _do() -> list[SplitRecord]:
             async with self.pool.acquire() as conn:
                 rows = await conn.fetch(
-                    """
+                    f"""
                     select s.*, tu.username, tu.display_name
                     from splits s
                     join expenses e on e.id = s.expense_id
                     left join trip_users tu on tu.trip_id = e.trip_id and tu.user_id = s.user_id
-                    where e.trip_id = $1
+                    where e.trip_id = $1 {status_filter}
                     """,
                     trip.id,
                 )
@@ -445,32 +449,27 @@ class PostgresLedgerStore:
     async def cancel_expense(
         self, trip: Trip, expense_id: str, cancelled_at: datetime, note_suffix: str
     ) -> bool:
+        assert trip.id is not None
+
         async def _do() -> bool:
             async with self.pool.acquire() as conn:
                 row = await conn.fetchrow(
                     """
                     update expenses
                     set status = 'cancelled',
-                        cancelled_at = $2,
+                        cancelled_at = $3,
                         notes = case
-                            when notes is not null and notes <> '' then notes || ' ' || $3
-                            else $3
+                            when notes is not null and notes <> '' then notes || ' ' || $4
+                            else $4
                         end
-                    where id = $1
+                    where id = $1 and trip_id = $2
                     returning id
                     """,
                     expense_id,
+                    trip.id,
                     cancelled_at,
                     note_suffix,
                 )
-            return row is not None
-
-        return await self._run(_do)
-
-    async def expense_exists(self, trip: Trip, expense_id: str) -> bool:
-        async def _do() -> bool:
-            async with self.pool.acquire() as conn:
-                row = await conn.fetchrow("select 1 from expenses where id = $1", expense_id)
             return row is not None
 
         return await self._run(_do)

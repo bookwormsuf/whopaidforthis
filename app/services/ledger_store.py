@@ -67,17 +67,17 @@ class LedgerStore(Protocol):
         assignments: Mapping[int, tuple[list[int], str]] | None = None,
     ) -> None: ...
 
-    async def list_expenses(self, trip: Trip) -> list[ExpenseRecord]: ...
+    async def list_expenses(
+        self, trip: Trip, confirmed_only: bool = False
+    ) -> list[ExpenseRecord]: ...
 
-    async def list_splits(self, trip: Trip) -> list[SplitRecord]: ...
+    async def list_splits(self, trip: Trip, confirmed_only: bool = False) -> list[SplitRecord]: ...
 
     async def list_line_items(self, trip: Trip) -> list[LineItemRecord]: ...
 
     async def cancel_expense(
         self, trip: Trip, expense_id: str, cancelled_at: datetime, note_suffix: str
     ) -> bool: ...
-
-    async def expense_exists(self, trip: Trip, expense_id: str) -> bool: ...
 
     async def find_rate(
         self, trip: Trip, base: str, quote: str, requested_date: date
@@ -257,13 +257,17 @@ class InMemoryLedgerStore:
                 return expenses[expense_id]
         return None
 
-    async def list_expenses(self, trip: Trip) -> list[ExpenseRecord]:
+    async def list_expenses(self, trip: Trip, confirmed_only: bool = False) -> list[ExpenseRecord]:
         assert trip.id is not None
         expenses = self._expenses.get(trip.id, {})
         order = self._expense_order.get(trip.id, [])
-        return [_expense_to_record(expenses[expense_id]) for expense_id in order]
+        return [
+            _expense_to_record(expenses[expense_id])
+            for expense_id in order
+            if not confirmed_only or expenses[expense_id].status == "confirmed"
+        ]
 
-    async def list_splits(self, trip: Trip) -> list[SplitRecord]:
+    async def list_splits(self, trip: Trip, confirmed_only: bool = False) -> list[SplitRecord]:
         assert trip.id is not None
         expenses = self._expenses.get(trip.id, {})
         order = self._expense_order.get(trip.id, [])
@@ -278,6 +282,7 @@ class InMemoryLedgerStore:
                 split_method=split.split_method,
             )
             for expense_id in order
+            if not confirmed_only or expenses[expense_id].status == "confirmed"
             for split in expenses[expense_id].splits
         ]
 
@@ -317,10 +322,6 @@ class InMemoryLedgerStore:
             update={"status": "cancelled", "cancelled_at": cancelled_at, "notes": notes}
         )
         return True
-
-    async def expense_exists(self, trip: Trip, expense_id: str) -> bool:
-        assert trip.id is not None
-        return expense_id in self._expenses.get(trip.id, {})
 
     async def find_rate(
         self, trip: Trip, base: str, quote: str, requested_date: date

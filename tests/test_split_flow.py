@@ -472,8 +472,8 @@ async def test_settle_warns_when_recorded_shares_do_not_add_up() -> None:
     bo_split = next(s for s in expense.splits if s.user_id == BO.id)
     real = group.ledger.list_splits
 
-    async def edited(trip):
-        return [s for s in await real(trip) if s.user_id != bo_split.user_id]
+    async def edited(trip, confirmed_only: bool = False):
+        return [s for s in await real(trip, confirmed_only) if s.user_id != bo_split.user_id]
 
     group.ledger.list_splits = edited
     settle = await group.command(ADA, settle_command)

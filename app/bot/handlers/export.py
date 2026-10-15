@@ -50,13 +50,12 @@ async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     try:
+        # No `chat_id` filter: a trip belongs to exactly one chat, so every row
+        # a trip id scopes to is already this chat's (sprint 9 review item 8).
         users = await deps.ledger.list_users(trip)
-        expenses = [e for e in await deps.ledger.list_expenses(trip) if e.chat_id == chat.id]
-        expense_ids = {e.expense_id for e in expenses}
-        splits = [s for s in await deps.ledger.list_splits(trip) if s.expense_id in expense_ids]
-        line_items = [
-            li for li in await deps.ledger.list_line_items(trip) if li.expense_id in expense_ids
-        ]
+        expenses = await deps.ledger.list_expenses(trip)
+        splits = await deps.ledger.list_splits(trip)
+        line_items = await deps.ledger.list_line_items(trip)
     except LedgerUnavailable:
         logger.exception("export: could not read the ledger")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")

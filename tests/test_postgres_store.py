@@ -80,6 +80,10 @@ def _expense(trip: Trip, expense_id: str, message_id: int = 1, payer_id: int = 1
     )
 
 
+async def _expense_ids(store: PostgresLedgerStore, trip: Trip) -> set[str]:
+    return {record.expense_id for record in await store.list_expenses(trip)}
+
+
 async def test_save_and_get_binding_roundtrip(postgres_store: PostgresLedgerStore) -> None:
     trip = _trip()
     saved = await postgres_store.save_binding(trip)
@@ -137,7 +141,7 @@ async def test_append_expense_roundtrip(postgres_store: PostgresLedgerStore) -> 
     expense = _expense(trip, "01EXPENSE000000000000001")
     await postgres_store.append_expense(trip, expense)
 
-    assert await postgres_store.expense_exists(trip, expense.expense_id)
+    assert expense.expense_id in await _expense_ids(postgres_store, trip)
     records = await postgres_store.list_expenses(trip)
     assert len(records) == 1
     assert records[0].expense_id == expense.expense_id
@@ -257,7 +261,7 @@ async def test_append_expense_failing_split_leaves_no_expense_row(
     with pytest.raises(asyncpg.CheckViolationError):
         await _do()
 
-    assert not await postgres_store.expense_exists(trip, broken.expense_id)
+    assert broken.expense_id not in await _expense_ids(postgres_store, trip)
 
 
 async def test_duplicate_split_user_id_raises_ledger_unavailable_not_already_saved(
@@ -284,7 +288,7 @@ async def test_duplicate_split_user_id_raises_ledger_unavailable_not_already_sav
     with pytest.raises(LedgerUnavailable):
         await postgres_store.append_expense(trip, broken)
 
-    assert not await postgres_store.expense_exists(trip, broken.expense_id)
+    assert broken.expense_id not in await _expense_ids(postgres_store, trip)
 
 
 async def test_delete_trips_removes_everything(postgres_store: PostgresLedgerStore) -> None:
@@ -309,7 +313,52 @@ async def test_delete_trips_removes_everything(postgres_store: PostgresLedgerSto
 
     assert await postgres_store.get_binding(trip.chat_id) is None
     assert await postgres_store.list_trips(trip.chat_id) == []
-    assert not await postgres_store.expense_exists(trip, expense.expense_id)
+    assert expense.expense_id not in await _expense_ids(postgres_store, trip)
+
+
+async def test_cancel_expense_roundtrip(postgres_store: PostgresLedgerStore) -> None:
+    """Postgres round-trip for cancel_expense (sprint 9 spec item 9c): marks the
+    row cancelled, appends to notes, and never touches a different trip's
+    expense with the same id's trip scope removed (item 8's `and trip_id = $N`).
+    """
+    trip = await postgres_store.save_binding(_trip())
+    expense = _expense(trip, "01EXPENSE000000CANCELROUND")
+    await postgres_store.append_expense(trip, expense)
+    cancelled_at = datetime.now(UTC)
+
+    ok = await postgres_store.cancel_expense(trip, expense.expense_id, cancelled_at, "Cancelled")
+    assert ok is True
+
+    records = await postgres_store.list_expenses(trip)
+    record = next(r for r in records if r.expense_id == expense.expense_id)
+    assert record.status == "cancelled"
+    assert record.cancelled_at is not None
+    assert record.notes == "Cancelled"
+
+    missing = await postgres_store.cancel_expense(trip, "not-a-real-id", cancelled_at, "x")
+    assert missing is False
+
+
+async def test_confirmed_only_filters_list_expenses_and_list_splits(
+    postgres_store: PostgresLedgerStore,
+) -> None:
+    """The store owns the confirmed filter (sprint 9 review item 8)."""
+    trip = await postgres_store.save_binding(_trip())
+    confirmed = _expense(trip, "01EXPENSE0000000CONFIRMED", message_id=10)
+    cancelled = _expense(trip, "01EXPENSE0000000CANCELLED", message_id=11)
+    cancelled = cancelled.model_copy(update={"status": "cancelled"})
+    await postgres_store.append_expense(trip, confirmed)
+    await postgres_store.append_expense(trip, cancelled)
+
+    all_expenses = await postgres_store.list_expenses(trip)
+    confirmed_expenses = await postgres_store.list_expenses(trip, confirmed_only=True)
+    assert {e.expense_id for e in all_expenses} == {confirmed.expense_id, cancelled.expense_id}
+    assert {e.expense_id for e in confirmed_expenses} == {confirmed.expense_id}
+
+    all_splits = await postgres_store.list_splits(trip)
+    confirmed_splits = await postgres_store.list_splits(trip, confirmed_only=True)
+    assert {s.expense_id for s in all_splits} == {confirmed.expense_id, cancelled.expense_id}
+    assert {s.expense_id for s in confirmed_splits} == {confirmed.expense_id}
 
 
 async def test_latest_trip_prefers_open_over_newer_closed(

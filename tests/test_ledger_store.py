@@ -189,6 +189,66 @@ async def test_in_memory_ledger_store_list_line_items() -> None:
     assert records[1].assigned_user_ids == []
 
 
+def _expense(expense_id: str, *, message_id: int, status: str = "confirmed") -> Expense:
+    return Expense(
+        expense_id=expense_id,
+        created_at=datetime.now(UTC),
+        transaction_date=date(2026, 10, 1),
+        chat_id=-1,
+        message_id=message_id,
+        created_by_user_id=1,
+        payer_user_id=1,
+        payer_username="ada",
+        payer_display_name="Ada",
+        description="Dinner",
+        merchant=None,
+        category=Category.FOOD,
+        original_amount_minor=1200,
+        original_currency="JPY",
+        trip_currency="JPY",
+        home_currency="SGD",
+        trip_amount_minor=1200,
+        home_amount_minor=1000,
+        rate=Decimal("0.0081"),
+        rate_date=date(2026, 9, 30),
+        source_type="text",
+        split_method="equal",
+        status=status,
+        cancelled_at=None,
+        notes=None,
+        splits=[
+            ExpenseSplit(
+                user_id=1,
+                username="ada",
+                display_name="Ada",
+                share_trip_minor=1200,
+                share_home_minor=1000,
+                split_method="equal",
+            )
+        ],
+    )
+
+
+async def test_confirmed_only_filters_list_expenses_and_list_splits() -> None:
+    """The store owns the confirmed filter (sprint 9 review item 8)."""
+    store = InMemoryLedgerStore()
+    trip = await store.save_binding(_trip())
+    confirmed = _expense("e1", message_id=1, status="confirmed")
+    cancelled = _expense("e2", message_id=2, status="cancelled")
+    await store.append_expense(trip, confirmed)
+    await store.append_expense(trip, cancelled)
+
+    all_expenses = await store.list_expenses(trip)
+    confirmed_expenses = await store.list_expenses(trip, confirmed_only=True)
+    assert {e.expense_id for e in all_expenses} == {"e1", "e2"}
+    assert {e.expense_id for e in confirmed_expenses} == {"e1"}
+
+    all_splits = await store.list_splits(trip)
+    confirmed_splits = await store.list_splits(trip, confirmed_only=True)
+    assert {s.expense_id for s in all_splits} == {"e1", "e2"}
+    assert {s.expense_id for s in confirmed_splits} == {"e1"}
+
+
 async def test_latest_trip_prefers_the_open_trip_over_a_newer_closed_one() -> None:
     """Ordering matches the spec: the open trip wins regardless of creation
     order (sprint 9 review item 6).

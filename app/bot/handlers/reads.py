@@ -29,27 +29,25 @@ NO_RECENT_EXPENSES_TEXT = "No expenses yet."
 NO_EXPENSES_TODAY_TEXT = "No expenses today."
 
 
-async def _confirmed_for_chat(
-    context: ContextTypes.DEFAULT_TYPE, trip: Trip, chat_id: int
-) -> list[ExpenseRecord]:
-    """Fetches Expenses once and filters by chat + confirmed. Raises
-    `LedgerUnavailable` straight through; every caller wraps its own call in a
-    try/except and replies `LEDGER_UNAVAILABLE_TEXT` on that.
+async def _confirmed(context: ContextTypes.DEFAULT_TYPE, trip: Trip) -> list[ExpenseRecord]:
+    """Fetches Expenses once, confirmed only. No `chat_id` filter: a trip
+    belongs to exactly one chat, so the store's `confirmed_only` already scopes
+    this correctly (sprint 9 review item 8). Raises `LedgerUnavailable` straight
+    through; every caller wraps its own call in a try/except and replies
+    `LEDGER_UNAVAILABLE_TEXT` on that.
     """
     deps = get_deps(context)
-    expenses = await deps.ledger.list_expenses(trip)
-    return [e for e in expenses if e.chat_id == chat_id and e.status == "confirmed"]
+    return await deps.ledger.list_expenses(trip, confirmed_only=True)
 
 
 async def recent_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     trip = await require_trip(update, context)
     if trip is None:
         return
-    chat = update.effective_chat
     message = update.effective_message
-    assert chat is not None and message is not None
+    assert message is not None
     try:
-        expenses = await _confirmed_for_chat(context, trip, chat.id)
+        expenses = await _confirmed(context, trip)
     except LedgerUnavailable:
         logger.exception("recent: could not read Expenses")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
@@ -68,11 +66,10 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     trip = await require_trip(update, context)
     if trip is None:
         return
-    chat = update.effective_chat
     message = update.effective_message
-    assert chat is not None and message is not None
+    assert message is not None
     try:
-        expenses = await _confirmed_for_chat(context, trip, chat.id)
+        expenses = await _confirmed(context, trip)
     except LedgerUnavailable:
         logger.exception("today: could not read Expenses")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
@@ -100,11 +97,10 @@ async def summary_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     trip = await require_trip(update, context)
     if trip is None:
         return
-    chat = update.effective_chat
     message = update.effective_message
-    assert chat is not None and message is not None
+    assert message is not None
     try:
-        expenses = await _confirmed_for_chat(context, trip, chat.id)
+        expenses = await _confirmed(context, trip)
     except LedgerUnavailable:
         logger.exception("summary: could not read Expenses")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
@@ -136,13 +132,12 @@ async def undo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     trip = await require_trip(update, context)
     if trip is None:
         return
-    chat = update.effective_chat
     user = update.effective_user
     message = update.effective_message
-    assert chat is not None and user is not None and message is not None
+    assert user is not None and message is not None
 
     try:
-        confirmed = await _confirmed_for_chat(context, trip, chat.id)
+        confirmed = await _confirmed(context, trip)
     except LedgerUnavailable:
         logger.exception("undo: could not read Expenses")
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")

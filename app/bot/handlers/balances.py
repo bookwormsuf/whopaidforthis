@@ -48,16 +48,15 @@ class _Ledger:
         return self.names.get(user_id, f"User {user_id}")
 
 
-async def _load(context: ContextTypes.DEFAULT_TYPE, trip: Trip, chat_id: int) -> _Ledger:
-    """Raises `LedgerUnavailable` straight through, like the other read commands."""
+async def _load(context: ContextTypes.DEFAULT_TYPE, trip: Trip) -> _Ledger:
+    """Raises `LedgerUnavailable` straight through, like the other read commands.
+
+    No `chat_id` filter: a trip belongs to exactly one chat, so the store's
+    `confirmed_only` already scopes this correctly (sprint 9 review item 8).
+    """
     deps = get_deps(context)
-    expenses = [
-        e
-        for e in await deps.ledger.list_expenses(trip)
-        if e.chat_id == chat_id and e.status == "confirmed"
-    ]
-    ids = {e.expense_id for e in expenses}
-    splits = [s for s in await deps.ledger.list_splits(trip) if s.expense_id in ids]
+    expenses = await deps.ledger.list_expenses(trip, confirmed_only=True)
+    splits = await deps.ledger.list_splits(trip, confirmed_only=True)
     # Names: the Splits and Expenses rows first, then the Users tab, which is the
     # freshest (a renamed user shows their current name).
     names: dict[int, str] = {}
@@ -92,11 +91,10 @@ async def _loaded(update: Update, context: ContextTypes.DEFAULT_TYPE, command: s
     trip = await require_trip(update, context)
     if trip is None:
         return None
-    chat = update.effective_chat
     message = update.effective_message
-    assert chat is not None and message is not None
+    assert message is not None
     try:
-        ledger = await _load(context, trip, chat.id)
+        ledger = await _load(context, trip)
     except LedgerUnavailable:
         logger.exception("%s: could not read the ledger", command)
         await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
