@@ -248,12 +248,16 @@ def build_application(token: str, deps: Deps) -> Application:
         MessageHandler(PHOTO_EXPENSE_FILTER, photo_expense_handler, block=False)
     )
 
-    # Bot added to a group (sprint 10 pin): posts the welcome, pinning it, only
-    # when the bot's own user is among the new members. A `new_chat_members`
-    # service update carries no text, so it never matches `filters.COMMAND`
+    # Bot added to a group (sprint 10 pin): posts the welcome, pinning it, when
+    # the bot's own user is among the new members or the group was created with
+    # the bot in it (`group_chat_created`, which Telegram sends instead). These
+    # service updates carry no text, so they never match `filters.COMMAND`
     # below and can't trip the unbound-gate catch-all.
     application.add_handler(
-        MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, bot_added_to_group)
+        MessageHandler(
+            filters.StatusUpdate.NEW_CHAT_MEMBERS | filters.StatusUpdate.CHAT_CREATED,
+            bot_added_to_group,
+        )
     )
 
     # Fallback gate for any other command in an unbound group (spec §13).

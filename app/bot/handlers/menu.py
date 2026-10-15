@@ -222,17 +222,25 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def bot_added_to_group(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Posts the welcome only when the bot itself is among the new members; other
-    joins are ignored. Posting failures (bot removed again, no send permission)
-    are logged and swallowed.
+    """Posts the welcome when the bot joins a group: either it is among the new
+    members of an existing group, or the group was created with the bot already
+    in it (Telegram then sends `group_chat_created` / `supergroup_chat_created`
+    instead of `new_chat_members`). Other joins are ignored. Posting failures
+    (bot removed again, no send permission) are logged and swallowed.
     """
     message = update.effective_message
     chat = update.effective_chat
-    if message is None or chat is None or not message.new_chat_members:
+    if message is None or chat is None:
         return
-    bot_id = context.bot.id
-    if not any(member.id == bot_id for member in message.new_chat_members):
-        return
+    created = bool(
+        getattr(message, "group_chat_created", False)
+        or getattr(message, "supergroup_chat_created", False)
+    )
+    if not created:
+        bot_id = context.bot.id
+        members = message.new_chat_members or []
+        if not any(member.id == bot_id for member in members):
+            return
 
     deps = get_deps(context)
     try:

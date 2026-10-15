@@ -426,7 +426,23 @@ def _new_members_update(members: list[SimpleNamespace], chat_id: int = CHAT_ID) 
     update = MagicMock()
     update.effective_chat = _chat(chat_id)
     update.effective_message.new_chat_members = members
+    update.effective_message.group_chat_created = False
+    update.effective_message.supergroup_chat_created = False
     return update
+
+
+async def test_group_created_with_bot_posts_welcome() -> None:
+    ledger = InMemoryLedgerStore()
+    bot = _Bot(bot_id=999)
+    context = _context(make_deps(ledger), bot)
+    update = _new_members_update([])
+    update.effective_message.new_chat_members = None
+    update.effective_message.group_chat_created = True
+
+    await bot_added_to_group(update, context)
+
+    assert len(bot.sent_messages) == 1
+    assert bot.sent_messages[0]["text"].endswith("No trip yet.")
 
 
 async def test_added_to_group_with_bot_in_members_posts_welcome() -> None:
