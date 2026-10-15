@@ -19,7 +19,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 6 Item claiming | written (+ §7 amendment) | done | green (404) | 2026-10-01, findings fixed | 2026-10-02, single-person steps pass; two-person steps automated, deferred to Sprint 7 | 2026-10-02 | Sprint 6 closed. Next: run sprint 7 / agent |
 | 7 Hardening and go-live | written | done | green (429) | 2026-10-02, findings fixed (screenshots after the trip) | 2026-10-03, live in the real trip group | 2026-10-03 | Live. After the trip: `/settle`, then `fly scale count 0` / Sufyan |
 | 8 Clearer messages | written (+ §9 amendment) | done | green (432) | 2026-10-03, findings fixed | 2026-10-04, in the real trip group | 2026-10-04 | Sprint 8 closed. After the trip: `/settle`, then `fly scale count 0` / Sufyan |
-| 9 Neon store and export | written 2026-10-15 (+ amendments) | done | green (446, 21 against Postgres) | 2026-10-15, findings fixed | 2026-10-15, fresh test group | 2026-10-15 | Sprint 9 closed. Next: write sprint 10 spec (`/start` menu) / agent |
+| 9 Neon store and export | written 2026-10-15 (+ amendments) | done | green (446, 21 against Postgres) | 2026-10-15, findings fixed | 2026-10-15, steps 1-4 and 7; 5 and 6 deferred | 2026-10-15 | Sprint 9 closed. Steps 5 and 6 later / Sufyan. Next: sprint 10 spec / agent |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -849,12 +849,15 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   `~/.config/whopaid/` deleted, the service account deleted in Google Cloud. The old Sheets
   stay as archives.
 - Checks: `/export` producing the five-sheet file and `/balances` in the test group were seen
-  in this session. The remaining steps are on Sufyan's word with his sign-off below.
+  in this session. Steps 1 to 4 and 7 pass on Sufyan's word. Deferred, to be done later by
+  Sufyan: step 5 (`/deletetrip` refused from a second account) and step 6 (expense saves after
+  20 idle minutes, proving Neon wakes itself).
 - Next action / owner: write the sprint 10 spec (`/start` menu with buttons) / agent, when
   Sufyan asks.
 
 ### 2026-10-15 — Sprint 9 sign-off
 
 - Performed by: Sufyan, recorded by Claude.
-- Disposition: Sufyan said "sign off sprint 9". Sprint 9 closed. The bot is live on Neon for
-  any group that adds it.
+- Disposition: Sufyan said "sign off sprint 9" with steps 5 and 6 deferred (see above). Sprint 9
+  closed. The bot is live on Neon for any group that adds it.
+- Next action / owner: steps 5 and 6 of the Sprint 9 checklist, record the result here / Sufyan.
