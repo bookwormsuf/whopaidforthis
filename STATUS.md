@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-10-15 (sprint 10 signed off; button menu live)
+Updated: 2026-10-16 (readied for public release; README screenshots)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -931,3 +931,16 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   group at 8 participants, lists interactive messages as unsupported in groups, and bills per
   message. Unofficial WhatsApp Web libraries risk bans. Verdict: stay on Telegram.
 - Next action / owner: Sprint 9 steps 5 and 6 / Sufyan. No sprint in flight.
+
+### 2026-10-16 — Readied for public release; README screenshots
+
+- Performed by: Claude with Sufyan.
+- Public-release audit (search agent, spot-checked by Claude): no secrets or connection strings in
+  the tree or history, no chat IDs, Sheet IDs or testers' names in tracked files, gitleaks in
+  pre-commit, MIT licence present, deploy workflow triggers only on push to main so fork PRs
+  cannot reach the Fly token. Only action left was visibility.
+- README (PR #36, merged by Sufyan): three screenshots from a test group in `docs/images/` with
+  the tester's name blacked out; data model section now lists the Postgres tables instead of
+  Sheet tabs; "Adding to a group" describes the Sprint 10 welcome and buttons. Docs only.
+- GitHub description set to a full sentence; homepage set to the bot's Telegram link.
+- Next action / owner: flip the repo to public / Sufyan. Sprint 9 steps 5 and 6 / Sufyan.
