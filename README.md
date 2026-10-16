@@ -6,6 +6,15 @@ whoever was there (equally, by custom amounts, or item by item off the receipt),
 who owes whom. One Telegram group has one open trip at a time. It runs on one small Fly.io
 machine.
 
+<p align="center">
+  <img src="docs/images/welcome.png" alt="The welcome message with a Start a trip button" width="560">
+</p>
+<p align="center">
+  <img src="docs/images/receipt.jpg" alt="A receipt photo saved as an expense, split by items" width="330">
+  &nbsp;&nbsp;
+  <img src="docs/images/settle.png" alt="/settle listing who pays whom" width="330">
+</p>
+
 Project status and sign-offs: `STATUS.md`. Settled design decisions: `docs/spec/pinned-decisions.md`.
 
 ## Architecture
@@ -27,23 +36,20 @@ flowchart LR
 
 ## Data model
 
-Each trip Sheet has these tabs (headers use the trip's currency codes, e.g. `JPY Amount`):
+Postgres tables, created by `app/db/migrations/001_initial.sql`:
 
-| Tab | One row is | Key columns |
+| Table | One row is | Key columns |
 |---|---|---|
-| Summary | formulas only | who owes whom, totals, by category / day / payer |
-| Expenses | one confirmed or cancelled expense | payer, description, original amount, trip and home amounts, rate, split method, status |
-| Splits | one person's share of one expense | share in trip and home currency |
-| Line Items | one line from a receipt | amount, who had it, `claimed` / `everyone` / `proportional` for a By items split (`unassigned` otherwise), kind |
-| Users | one trip user | Telegram user ID, name, joined |
-| Exchange Rates | one cached rate | requested date, rate date, rate |
-| Trip | the trip's settings | currencies, timezone |
-| Read Me | plain-English guide to the tabs | |
+| `trips` | one trip of one chat | currencies, timezone, who started it, `closed_at` (one open trip per chat) |
+| `trip_users` | one person in a trip | Telegram user ID, name, joined |
+| `expenses` | one confirmed or cancelled expense | payer, description, original amount, trip and home amounts, rate, split method, status |
+| `splits` | one person's share of one expense | share in trip and home currency |
+| `line_items` | one line from a receipt | amount, who had it, `claimed` / `everyone` / `proportional` for a By items split (`unassigned` otherwise), kind |
+| `exchange_rates` | one cached rate | currency pair, requested date, rate date, rate |
 
-Amounts are stored in major units (yen as whole numbers, SGD to 2 dp); the code works in minor
-units. Every expense's shares add up exactly to its amount in both currencies. Expenses are never
-deleted: `/undo` marks them `cancelled`. Hidden columns hold IDs; leave them, and don't edit rows
-by hand.
+Amounts are stored in minor units (yen as whole numbers, SGD in cents). Every expense's shares
+add up exactly to its amount in both currencies. Expenses are never deleted: `/undo` marks them
+`cancelled`. `/export` writes them to an `.xlsx` with sheets for expenses, shares, line items, people and balances.
 
 ## Splitting model
 
@@ -139,9 +145,10 @@ turns By items off for that receipt.
 ## Adding to a group
 
 Use a dedicated group for the trip's expenses. Add the bot to it like any member, after turning
-privacy mode off. Then start a trip (see "Starting a trip" below) and have everyone
-send `/join`. When someone sends `/join`, the reply has an **I'm in too** button the others can
-tap instead; **Everyone's in** removes the buttons.
+privacy mode off. It posts a welcome message with a **Start a trip** button and pins it (or asks
+you to). Starting a trip asks for the trip currency, home currency and timezone with buttons,
+then everyone taps **I'm in too**; **Everyone's in** closes joining and posts the full button
+menu. Typed commands (`/settrip`, `/join`, `/help`) do the same things.
 
 ## Privacy mode
 
@@ -350,7 +357,7 @@ bot:     Amir
             Ada paid · your share S$4.86
 ```
 
-Screenshots of these steps from a test group (no real names) belong in `docs/images/`.
+Screenshots are at the top of this README; the tester's name is blacked out.
 
 ## Settlement logic
 
