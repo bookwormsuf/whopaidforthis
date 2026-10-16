@@ -1466,17 +1466,25 @@ class DraftService:
         )
         return [*line_items, unlisted]
 
-    async def begin_retry(self, draft_id: str, presser_id: int) -> Draft:
+    async def check_retry(self, draft_id: str, presser_id: int) -> Draft:
         """Validates a `Try again` press (initiator, right state, no read already in
-        flight) and marks the read as in flight. The caller re-downloads
-        `photo_file_id` and finishes with `retry_receipt` or `retry_unreadable`,
-        both of which clear the mark.
+        flight) without mutating the draft. Lets a caller check whether `begin_retry`
+        would succeed before spending anything (such as a budgeted receipt read) on
+        the strength of it.
         """
         draft = await self._get_active(draft_id, presser_id)
         if draft.state != "manual_amount":
             raise DraftError(f"cannot retry from state {draft.state}")
         if draft.reading_receipt:
             raise DraftError("a receipt read is already in flight")
+        return draft
+
+    async def begin_retry(self, draft_id: str, presser_id: int) -> Draft:
+        """Validates a `Try again` press via `check_retry` and marks the read as in
+        flight. The caller re-downloads `photo_file_id` and finishes with
+        `retry_receipt` or `retry_unreadable`, both of which clear the mark.
+        """
+        draft = await self.check_retry(draft_id, presser_id)
         updated = replace(draft, reading_receipt=True, awaiting_manual_amount=False)
         await self._drafts.put(updated)
         return updated

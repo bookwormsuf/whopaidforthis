@@ -205,10 +205,13 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         elif action == "usetotal":
             draft = await deps.draft_service.use_total_anyway(draft_id, presser.id)
         elif action == "retry":
-            # Budget gate before anything else (spec §20): a refused retry must
-            # leave the card and its draft state untouched, so this runs before
-            # `begin_retry` too, not just before the download inside
-            # `read_receipt_photo`.
+            # Check first, take the budget second (spec §20): a press that
+            # `check_retry` would refuse (non-initiator, expired, wrong state, or a
+            # read already in flight) must not burn a read for a photo it was never
+            # going to download. Only once that check passes do we take the budget,
+            # then call `begin_retry` to mark the read in flight; a refused budget
+            # take must also leave the card and its draft state untouched.
+            await deps.draft_service.check_retry(draft_id, presser.id)
             refusal, warn_five_left = take_receipt_read(deps, chat.id, datetime.now(UTC))
             if refusal is not None:
                 await answer()
@@ -330,10 +333,14 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
                 except Exception:  # noqa: BLE001 - message may already be gone/changed
                     logger.debug("draft %s: could not edit after save error", draft_id)
+        if warn_five_left:
+            await query.message.reply_text(FIVE_LEFT_WARNING_TEXT)
         return
     except DraftError:
         logger.exception("draft %s: draft error", draft_id)
         await answer()
+        if warn_five_left:
+            await query.message.reply_text(FIVE_LEFT_WARNING_TEXT)
         return
 
     await answer()
