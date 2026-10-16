@@ -69,6 +69,7 @@ from app.services.drafts import DraftService, InMemoryDraftStore
 from app.services.exchange_rates import FrankfurterProvider, RateService
 from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
 from app.services.postgres_store import PostgresLedgerStore
+from app.services.receipt_budget import ReceiptReadBudget
 from app.services.receipt_parser import AnthropicReceiptReader
 
 logger = logging.getLogger(__name__)
@@ -286,6 +287,10 @@ def run(settings: Settings) -> None:
         bot_version=settings.bot_version,
         draft_service=DraftService(ledger, rates, InMemoryDraftStore()),
         receipt_reader=AnthropicReceiptReader(anthropic_client),
+        receipt_budget=ReceiptReadBudget(
+            chat_cap=settings.receipt_reads_per_chat_per_day,
+            global_cap=settings.receipt_reads_per_day,
+        ),
     )
     application = build_application(settings.telegram_bot_token.get_secret_value(), deps)
     application.run_polling(

@@ -188,7 +188,7 @@ Decided with Sufyan after the post-trip review. ADR 0003 records the why; `docs/
 - `/deletetrip` by the trip starter hard-deletes the chat's trips and rows after a confirm button.
 - `/export` sends one `.xlsx` (Expenses, Shares, Line items, People, Balances), built by code, no model call. A Google Sheet export may come later and reuses the same rows.
 - Hosting: one Fly machine always on. Store tests run against a real Postgres in Docker.
-- Roadmap after Sprint 9: Sprint 10 `/start` menu with buttons (shipped 2026-10-15). Sprint 11 (Google Sheet export, persistent drafts, older-trip export) dropped 2026-10-15 as not core; a WhatsApp version is being explored instead.
+- Roadmap after Sprint 9: Sprint 10 `/start` menu with buttons (shipped 2026-10-15). Sprint 11 (Google Sheet export, persistent drafts, older-trip export) dropped 2026-10-15 as not core; WhatsApp explored and parked. Sprint 12: receipt read budget before going public (2026-10-16).
 
 ## 19. `/start` welcome menu (added 2026-10-15, Sprint 10)
 - Buttons under messages only; no `setMyCommands`, no persistent reply keyboard.
@@ -198,3 +198,9 @@ Decided with Sufyan after the post-trip review. ADR 0003 records the why; `docs/
 - A press is the typed command by the presser: same coroutine, same gates, same permission checks. State is re-read at press time; old menus are never edited.
 - `/start` in a group no longer joins the sender. Private `/start` and `/help` carry an `Add me to a group` URL button (`?startgroup=true`).
 - Typed commands stay; `/help` keeps its list under the explanation paragraph.
+
+## 20. Receipt read budget (added 2026-10-16, Sprint 12)
+- Receipt reads are capped per calendar day in `Asia/Singapore`: 40 per chat, 400 across all chats, both settings with env overrides. Counters are in memory and reset on restart.
+- One read is one attempt (new photo or `Try again`); the reader's internal retry is not a second read. Allowed attempts count even if the read fails; refused attempts never count.
+- The check runs after the trip gate and before the photo is downloaded. Global cap is checked before the chat cap. Refusal texts, the once-a-day five-left warning and the log line are pinned verbatim in `docs/sprints/12-receipt-read-budget.md`.
+- Text expenses and every other command are never capped.

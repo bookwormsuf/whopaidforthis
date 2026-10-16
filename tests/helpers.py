@@ -13,6 +13,7 @@ from app.services.drafts import DraftService, InMemoryDraftStore
 from app.services.exchange_rates import RateService, StaticRateProvider
 from app.services.ledger_store import InMemoryLedgerStore, LedgerStore
 from app.services.llm_schemas import ReceiptExtraction
+from app.services.receipt_budget import ReceiptReadBudget
 from app.services.receipt_parser import ReceiptReader
 
 
@@ -43,6 +44,7 @@ def make_deps(
     rate: Decimal = Decimal("0.0081"),
     rate_date: date = date(2026, 9, 19),
     receipt_reader: ReceiptReader | None = None,
+    receipt_budget: ReceiptReadBudget | None = None,
 ) -> Deps:
     ledger = ledger or InMemoryLedgerStore()
     provider = StaticRateProvider(rate, rate_date)
@@ -54,4 +56,5 @@ def make_deps(
         bot_version=bot_version,
         draft_service=draft_service,
         receipt_reader=receipt_reader or FakeReceiptReader(),
+        receipt_budget=receipt_budget or ReceiptReadBudget(),
     )

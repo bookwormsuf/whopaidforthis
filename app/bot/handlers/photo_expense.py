@@ -28,6 +28,7 @@ from app.bot.deps import Deps, get_deps
 from app.bot.formatting import unsupported_currency_text
 from app.bot.handlers.join import require_trip_for_expense
 from app.bot.handlers.tags import join_tagged, tags_as_text
+from app.bot.receipt_gate import send_five_left_warning, take_receipt_read
 from app.bot.render.draft import render_draft
 from app.models.category import Category
 from app.models.receipt import Receipt
@@ -163,52 +164,61 @@ async def photo_expense_handler(update: Update, context: ContextTypes.DEFAULT_TY
         except LedgerUnavailable:
             logger.exception("photo_expense: could not join a tagged user")
 
-    outcome = await read_receipt_photo(deps, trip, context.bot, largest.file_id, message_time)
-    if outcome.status == "too_large":
-        await message.reply_text(PHOTO_TOO_LARGE_TEXT)
-        return
-    if outcome.status == "unsupported_currency":
-        await message.reply_text(
-            unsupported_currency_text(trip.trip_currency, trip.home_currency), parse_mode="HTML"
-        )
+    refusal, warn_five_left = take_receipt_read(deps, chat.id, now)
+    if refusal is not None:
+        await message.reply_text(refusal)
         return
 
-    common = dict(
-        chat_id=chat.id,
-        message_id=message.message_id,
-        photo_file_id=largest.file_id,
-        initiator_id=user.id,
-        initiator_name=joined_user.display_name,
-        initiator_username=joined_user.username,
-        trip=trip,
-        caption_override=caption_override,
-        participants_text=participants_text,
-        payer_text=payer_text,
-    )
     try:
-        if outcome.status == "unreadable":
-            draft = await deps.draft_service.start_unreadable(
-                transaction_date=message_time.astimezone(ZoneInfo(trip.timezone)).date(),
-                read_problem=outcome.problem,
-                **common,
+        outcome = await read_receipt_photo(deps, trip, context.bot, largest.file_id, message_time)
+        if outcome.status == "too_large":
+            await message.reply_text(PHOTO_TOO_LARGE_TEXT)
+            return
+        if outcome.status == "unsupported_currency":
+            await message.reply_text(
+                unsupported_currency_text(trip.trip_currency, trip.home_currency),
+                parse_mode="HTML",
             )
-        else:
-            assert outcome.receipt is not None and outcome.transaction_date is not None
-            assert outcome.date_source is not None
-            draft = await deps.draft_service.start_from_receipt(
-                receipt=outcome.receipt,
-                transaction_date=outcome.transaction_date,
-                date_source=outcome.date_source,
-                **common,
-            )
-    except LedgerUnavailable:
-        logger.exception("photo_expense: could not start draft")
-        await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
-        return
+            return
 
-    text, keyboard = render_draft(draft, trip)
-    sent = await message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
-    await deps.draft_service.set_bot_message_id(draft.draft_id, sent.message_id)
+        common = dict(
+            chat_id=chat.id,
+            message_id=message.message_id,
+            photo_file_id=largest.file_id,
+            initiator_id=user.id,
+            initiator_name=joined_user.display_name,
+            initiator_username=joined_user.username,
+            trip=trip,
+            caption_override=caption_override,
+            participants_text=participants_text,
+            payer_text=payer_text,
+        )
+        try:
+            if outcome.status == "unreadable":
+                draft = await deps.draft_service.start_unreadable(
+                    transaction_date=message_time.astimezone(ZoneInfo(trip.timezone)).date(),
+                    read_problem=outcome.problem,
+                    **common,
+                )
+            else:
+                assert outcome.receipt is not None and outcome.transaction_date is not None
+                assert outcome.date_source is not None
+                draft = await deps.draft_service.start_from_receipt(
+                    receipt=outcome.receipt,
+                    transaction_date=outcome.transaction_date,
+                    date_source=outcome.date_source,
+                    **common,
+                )
+        except LedgerUnavailable:
+            logger.exception("photo_expense: could not start draft")
+            await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
+            return
+
+        text, keyboard = render_draft(draft, trip)
+        sent = await message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
+        await deps.draft_service.set_bot_message_id(draft.draft_id, sent.message_id)
+    finally:
+        await send_five_left_warning(message.reply_text, warn_five_left)
 
 
 async def handle_manual_amount_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:

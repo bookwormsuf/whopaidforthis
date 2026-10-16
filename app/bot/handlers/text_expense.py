@@ -20,6 +20,7 @@ from app.bot.handlers.join import require_trip_for_expense
 from app.bot.handlers.photo_expense import handle_manual_amount_reply, read_receipt_photo
 from app.bot.handlers.split import handle_custom_split_reply, handle_item_reply
 from app.bot.handlers.tags import join_tagged, tags_as_text
+from app.bot.receipt_gate import send_five_left_warning, take_receipt_read
 from app.bot.render.draft import render_draft
 from app.models.user import TripUser
 from app.services.drafts import (
@@ -180,147 +181,167 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await answer()
         return
 
+    warn_five_left = False
     try:
-        if action == "justme":
-            draft = await deps.draft_service.choose_just_me(draft_id, presser.id)
-        elif action == "confirm":
-            draft = await deps.draft_service.confirm(draft_id, presser.id)
-        elif action == "cancel":
-            draft = await deps.draft_service.cancel(draft_id, presser.id)
-        elif action == "retry_rate":
-            draft = await deps.draft_service.retry_rate(draft_id, presser.id)
-        elif action == "total":
-            try:
-                index = int(_arg)
-            except ValueError:
-                await answer()
-                return
-            draft = await deps.draft_service.choose_total(draft_id, presser.id, index)
-        elif action == "usetotal":
-            draft = await deps.draft_service.use_total_anyway(draft_id, presser.id)
-        elif action == "retry":
-            pending = await deps.draft_service.begin_retry(draft_id, presser.id)
-            # Answer now: the read can take far longer than a callback query lives.
-            await answer("Reading the receipt again…")
-            outcome = await read_receipt_photo(
-                deps, trip, context.bot, pending.photo_file_id, datetime.now(UTC)
-            )
-            if outcome.status == "ok":
-                assert outcome.receipt is not None and outcome.transaction_date is not None
-                assert outcome.date_source is not None
-                draft = await deps.draft_service.retry_receipt(
-                    draft_id,
-                    presser.id,
-                    trip=trip,
-                    receipt=outcome.receipt,
-                    transaction_date=outcome.transaction_date,
-                    date_source=outcome.date_source,
+        try:
+            if action == "justme":
+                draft = await deps.draft_service.choose_just_me(draft_id, presser.id)
+            elif action == "confirm":
+                draft = await deps.draft_service.confirm(draft_id, presser.id)
+            elif action == "cancel":
+                draft = await deps.draft_service.cancel(draft_id, presser.id)
+            elif action == "retry_rate":
+                draft = await deps.draft_service.retry_rate(draft_id, presser.id)
+            elif action == "total":
+                try:
+                    index = int(_arg)
+                except ValueError:
+                    await answer()
+                    return
+                draft = await deps.draft_service.choose_total(draft_id, presser.id, index)
+            elif action == "usetotal":
+                draft = await deps.draft_service.use_total_anyway(draft_id, presser.id)
+            elif action == "retry":
+                # Check first, take the budget second (spec §20): a press that
+                # `check_retry` would refuse (non-initiator, expired, wrong state, or a
+                # read already in flight) must not burn a read for a photo it was never
+                # going to download. Only once that check passes do we take the budget,
+                # then call `begin_retry` to mark the read in flight; a refused budget
+                # take must also leave the card and its draft state untouched.
+                await deps.draft_service.check_retry(draft_id, presser.id)
+                refusal, warn_five_left = take_receipt_read(deps, chat.id, datetime.now(UTC))
+                if refusal is not None:
+                    await answer()
+                    await query.message.reply_text(refusal)
+                    return
+                pending = await deps.draft_service.begin_retry(draft_id, presser.id)
+                # Answer now: the read can take far longer than a callback query lives.
+                await answer("Reading the receipt again…")
+                outcome = await read_receipt_photo(
+                    deps, trip, context.bot, pending.photo_file_id, datetime.now(UTC)
                 )
-            else:
-                draft = await deps.draft_service.retry_unreadable(
-                    draft_id, presser.id, read_problem=outcome.problem
-                )
-        elif action == "manual":
-            draft = await deps.draft_service.request_manual_amount(draft_id, presser.id)
-        elif action == "everyone":
-            draft = await deps.draft_service.choose_everyone(draft_id, presser.id)
-        elif action == "choose":
-            draft = await deps.draft_service.choose_people(draft_id, presser.id)
-        elif action in ("toggle", "pick"):
-            try:
-                user_id = int(_arg)
-            except ValueError:
-                await answer()
-                return
-            if action == "toggle":
-                draft = await deps.draft_service.toggle_participant(draft_id, presser.id, user_id)
-            else:
-                draft = await deps.draft_service.pick_name(draft_id, presser.id, user_id)
-        elif action == "unsure":
-            draft = await deps.draft_service.name_unsure(draft_id, presser.id)
-        elif action == "next":
-            draft = await deps.draft_service.participants_next(draft_id, presser.id)
-        elif action == "equal":
-            draft = await deps.draft_service.choose_equal(draft_id, presser.id)
-        elif action == "custom":
-            draft = await deps.draft_service.choose_custom(draft_id, presser.id)
-        elif action == "customok":
-            draft = await deps.draft_service.finish_custom(draft_id, presser.id)
-        elif action == "edit":
-            draft = await deps.draft_service.edit(draft_id, presser.id)
-        elif action == "byitems":
-            draft = await deps.draft_service.choose_by_items(draft_id, presser.id)
-        elif action == "item":
-            try:
-                index = int(_arg)
-            except ValueError:
-                await answer()
-                return
-            draft = await deps.draft_service.toggle_item(draft_id, presser.id, index)
-        elif action == "payer":
-            try:
-                user_id = int(_arg)
-            except ValueError:
-                await answer()
-                return
-            draft = await deps.draft_service.set_payer(draft_id, presser.id, user_id)
-        elif action == "for":
-            if _arg == "next":
-                draft = await deps.draft_service.cycle_claiming_for(draft_id, presser.id)
-            else:
+                if outcome.status == "ok":
+                    assert outcome.receipt is not None and outcome.transaction_date is not None
+                    assert outcome.date_source is not None
+                    draft = await deps.draft_service.retry_receipt(
+                        draft_id,
+                        presser.id,
+                        trip=trip,
+                        receipt=outcome.receipt,
+                        transaction_date=outcome.transaction_date,
+                        date_source=outcome.date_source,
+                    )
+                else:
+                    draft = await deps.draft_service.retry_unreadable(
+                        draft_id, presser.id, read_problem=outcome.problem
+                    )
+            elif action == "manual":
+                draft = await deps.draft_service.request_manual_amount(draft_id, presser.id)
+            elif action == "everyone":
+                draft = await deps.draft_service.choose_everyone(draft_id, presser.id)
+            elif action == "choose":
+                draft = await deps.draft_service.choose_people(draft_id, presser.id)
+            elif action in ("toggle", "pick"):
                 try:
                     user_id = int(_arg)
                 except ValueError:
                     await answer()
                     return
-                draft = await deps.draft_service.set_claiming_for(draft_id, presser.id, user_id)
-        elif action == "rest":
-            draft = await deps.draft_service.rest_to_everyone(draft_id, presser.id)
-        elif action == "done":
-            draft = await deps.draft_service.items_done(draft_id, presser.id)
-        elif action == "fix":
-            draft = await deps.draft_service.fix_items(draft_id, presser.id)
-        else:
+                if action == "toggle":
+                    draft = await deps.draft_service.toggle_participant(
+                        draft_id, presser.id, user_id
+                    )
+                else:
+                    draft = await deps.draft_service.pick_name(draft_id, presser.id, user_id)
+            elif action == "unsure":
+                draft = await deps.draft_service.name_unsure(draft_id, presser.id)
+            elif action == "next":
+                draft = await deps.draft_service.participants_next(draft_id, presser.id)
+            elif action == "equal":
+                draft = await deps.draft_service.choose_equal(draft_id, presser.id)
+            elif action == "custom":
+                draft = await deps.draft_service.choose_custom(draft_id, presser.id)
+            elif action == "customok":
+                draft = await deps.draft_service.finish_custom(draft_id, presser.id)
+            elif action == "edit":
+                draft = await deps.draft_service.edit(draft_id, presser.id)
+            elif action == "byitems":
+                draft = await deps.draft_service.choose_by_items(draft_id, presser.id)
+            elif action == "item":
+                try:
+                    index = int(_arg)
+                except ValueError:
+                    await answer()
+                    return
+                draft = await deps.draft_service.toggle_item(draft_id, presser.id, index)
+            elif action == "payer":
+                try:
+                    user_id = int(_arg)
+                except ValueError:
+                    await answer()
+                    return
+                draft = await deps.draft_service.set_payer(draft_id, presser.id, user_id)
+            elif action == "for":
+                if _arg == "next":
+                    draft = await deps.draft_service.cycle_claiming_for(draft_id, presser.id)
+                else:
+                    try:
+                        user_id = int(_arg)
+                    except ValueError:
+                        await answer()
+                        return
+                    draft = await deps.draft_service.set_claiming_for(draft_id, presser.id, user_id)
+            elif action == "rest":
+                draft = await deps.draft_service.rest_to_everyone(draft_id, presser.id)
+            elif action == "done":
+                draft = await deps.draft_service.items_done(draft_id, presser.id)
+            elif action == "fix":
+                draft = await deps.draft_service.fix_items(draft_id, presser.id)
+            else:
+                await answer()
+                return
+        except DraftExpired:
+            await answer()
+            try:
+                await query.edit_message_text(EXPIRED_TEXT, parse_mode="HTML")
+            except Exception:  # noqa: BLE001 - editing an already-changed message is not fatal
+                logger.debug("draft %s: could not edit expired draft message", draft_id)
+            return
+        except NotInitiator as exc:
+            await answer(f"Only {exc.initiator_name} can edit this")
+            return
+        except AlreadySaved:
+            await answer(ALREADY_SAVED_TEXT)
+            return
+        except AlreadyCancelled:
+            await answer(ALREADY_CANCELLED_TEXT)
+            return
+        except DraftToast as exc:
+            await answer(exc.text)
+            return
+        except LedgerUnavailable:
+            logger.exception("draft %s: ledger unavailable", draft_id)
+            await answer(LEDGER_UNAVAILABLE_TEXT)
+            if action == "confirm":
+                # Spec §10/§14: stays in preview with a Retry save button and an
+                # error line, the message edited with its keyboard intact.
+                retry_draft = await deps.draft_service.get(draft_id)
+                if retry_draft is not None and retry_draft.state == "preview":
+                    text, keyboard = render_draft(retry_draft, trip, save_error=True)
+                    try:
+                        await query.edit_message_text(
+                            text, parse_mode="HTML", reply_markup=keyboard
+                        )
+                    except Exception:  # noqa: BLE001 - message may already be gone/changed
+                        logger.debug("draft %s: could not edit after save error", draft_id)
+            return
+        except DraftError:
+            logger.exception("draft %s: draft error", draft_id)
             await answer()
             return
-    except DraftExpired:
-        await answer()
-        try:
-            await query.edit_message_text(EXPIRED_TEXT, parse_mode="HTML")
-        except Exception:  # noqa: BLE001 - editing an already-changed message is not fatal
-            logger.debug("draft %s: could not edit expired draft message", draft_id)
-        return
-    except NotInitiator as exc:
-        await answer(f"Only {exc.initiator_name} can edit this")
-        return
-    except AlreadySaved:
-        await answer(ALREADY_SAVED_TEXT)
-        return
-    except AlreadyCancelled:
-        await answer(ALREADY_CANCELLED_TEXT)
-        return
-    except DraftToast as exc:
-        await answer(exc.text)
-        return
-    except LedgerUnavailable:
-        logger.exception("draft %s: ledger unavailable", draft_id)
-        await answer(LEDGER_UNAVAILABLE_TEXT)
-        if action == "confirm":
-            # Spec §10/§14: stays in preview with a Retry save button and an
-            # error line, the message edited with its keyboard intact.
-            retry_draft = await deps.draft_service.get(draft_id)
-            if retry_draft is not None and retry_draft.state == "preview":
-                text, keyboard = render_draft(retry_draft, trip, save_error=True)
-                try:
-                    await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
-                except Exception:  # noqa: BLE001 - message may already be gone/changed
-                    logger.debug("draft %s: could not edit after save error", draft_id)
-        return
-    except DraftError:
-        logger.exception("draft %s: draft error", draft_id)
-        await answer()
-        return
 
-    await answer()
-    text, keyboard = render_draft(draft, trip)
-    await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+        await answer()
+        text, keyboard = render_draft(draft, trip)
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+    finally:
+        await send_five_left_warning(query.message.reply_text, warn_five_left)

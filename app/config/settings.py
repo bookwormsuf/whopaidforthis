@@ -26,6 +26,20 @@ class Settings(BaseSettings):
         default="dev",
         description="Short git SHA baked into the image via the BOT_VERSION build arg.",
     )
+    receipt_reads_per_chat_per_day: int = Field(
+        default=40,
+        ge=0,
+        description=(
+            "Daily cap on receipt reads for one chat, Asia/Singapore day. 0 refuses every read."
+        ),
+    )
+    receipt_reads_per_day: int = Field(
+        default=400,
+        ge=0,
+        description=(
+            "Daily cap on receipt reads across all chats, Asia/Singapore day. 0 refuses every read."
+        ),
+    )
 
     @field_validator("log_level", mode="before")
     @classmethod

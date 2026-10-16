@@ -390,6 +390,8 @@ balance. It is near-minimal, not guaranteed minimal.
 - Receipt reading can be wrong; check the total on the card before confirming.
 - Names are matched against people who have sent `/join`; Telegram doesn't let bots see the
   member list.
+- Receipt reads are capped at 40 per chat and 400 across all chats per day (Singapore time);
+  text expenses are not capped.
 
 ## Stopping after the trip
 

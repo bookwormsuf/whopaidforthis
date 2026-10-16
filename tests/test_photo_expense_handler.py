@@ -12,9 +12,11 @@ from PIL import Image
 from app.bot.handlers.join import CLOSED_TRIP_TEXT
 from app.bot.handlers.photo_expense import photo_expense_handler
 from app.bot.handlers.text_expense import draft_callback, text_expense_handler
+from app.bot.receipt_gate import CHAT_CAPPED_TEXT, FIVE_LEFT_WARNING_TEXT, GLOBAL_CAPPED_TEXT
 from app.models.trip import Trip
 from app.services.ledger_store import InMemoryLedgerStore
 from app.services.llm_schemas import ReceiptExtraction
+from app.services.receipt_budget import ReceiptReadBudget
 from app.services.receipt_parser import ReceiptUnreadable
 from tests.helpers import FakeReceiptReader, make_deps
 
@@ -375,3 +377,145 @@ def _text_update(text: str, *, reply_to_message_id: int, update_id: int) -> Magi
     message.reply_text = AsyncMock(return_value=SimpleNamespace(message_id=6000))
     update.effective_message = message
     return update
+
+
+async def test_photo_refused_before_download_when_chat_capped() -> None:
+    ledger, trip = await _bound_ledger()
+    reader = FakeReceiptReader(extraction=_confident_extraction())
+    budget = ReceiptReadBudget(chat_cap=0, global_cap=400)
+    deps = make_deps(ledger, receipt_reader=reader, receipt_budget=budget)
+    context = _context(deps)
+    update = _update()
+
+    await photo_expense_handler(update, context)
+
+    update.effective_message.reply_text.assert_awaited_once_with(CHAT_CAPPED_TEXT)
+    context.bot.get_file.assert_not_awaited()
+    assert len(reader.calls) == 0
+
+
+async def test_photo_refused_before_download_when_global_capped() -> None:
+    ledger, trip = await _bound_ledger()
+    reader = FakeReceiptReader(extraction=_confident_extraction())
+    budget = ReceiptReadBudget(chat_cap=40, global_cap=0)
+    deps = make_deps(ledger, receipt_reader=reader, receipt_budget=budget)
+    context = _context(deps)
+    update = _update()
+
+    await photo_expense_handler(update, context)
+
+    update.effective_message.reply_text.assert_awaited_once_with(GLOBAL_CAPPED_TEXT)
+    context.bot.get_file.assert_not_awaited()
+
+
+async def test_retry_refused_leaves_card_unchanged() -> None:
+    ledger, trip = await _bound_ledger()
+    reader = FakeReceiptReader(error=ReceiptUnreadable())
+    budget = ReceiptReadBudget(chat_cap=40, global_cap=400)
+    deps = make_deps(ledger, receipt_reader=reader, receipt_budget=budget)
+    context = _context(deps)
+    photo = _update(message_id=20, update_id=20)
+    await photo_expense_handler(photo, context)
+    draft_id = _draft_id_from(photo)
+    assert context.bot.get_file.await_count == 1
+
+    budget.chat_cap = 0  # capped by the time the retry is pressed
+    callback = _callback_update(f"{draft_id}:retry:-")
+    callback.callback_query.message = SimpleNamespace(reply_text=AsyncMock())
+    await draft_callback(callback, context)
+
+    callback.callback_query.message.reply_text.assert_awaited_once_with(CHAT_CAPPED_TEXT)
+    callback.callback_query.edit_message_text.assert_not_awaited()
+    assert context.bot.get_file.await_count == 1  # retry never re-downloaded
+
+
+async def test_retry_non_initiator_leaves_budget_unchanged() -> None:
+    """A press `check_retry` would reject (wrong presser) must not burn a read."""
+    ledger, trip = await _bound_ledger()
+    reader = FakeReceiptReader(error=ReceiptUnreadable())
+    budget = ReceiptReadBudget(chat_cap=40, global_cap=400)
+    deps = make_deps(ledger, receipt_reader=reader, receipt_budget=budget)
+    context = _context(deps)
+    photo = _update(message_id=23, update_id=23)
+    await photo_expense_handler(photo, context)
+    draft_id = _draft_id_from(photo)
+    assert context.bot.get_file.await_count == 1
+    remaining_before = budget.remaining(CHAT_ID, datetime.now(UTC))
+
+    callback = _callback_update(f"{draft_id}:retry:-", user_id=999)
+    await draft_callback(callback, context)
+
+    callback.callback_query.answer.assert_awaited_once_with("Only Ada can edit this")
+    callback.callback_query.edit_message_text.assert_not_awaited()
+    assert context.bot.get_file.await_count == 1  # retry never re-downloaded
+    assert budget.remaining(CHAT_ID, datetime.now(UTC)) == remaining_before  # no read taken
+
+
+async def test_retry_five_left_warning_sent_after_card_edit() -> None:
+    ledger, trip = await _bound_ledger()
+    reader = FakeReceiptReader(error=ReceiptUnreadable())
+    budget = ReceiptReadBudget(chat_cap=7, global_cap=400)
+    deps = make_deps(ledger, receipt_reader=reader, receipt_budget=budget)
+    context = _context(deps)
+    photo = _update(message_id=24, update_id=24)
+    await photo_expense_handler(photo, context)
+    draft_id = _draft_id_from(photo)
+
+    reader._error = None
+    reader._extraction = _confident_extraction()
+    callback = _callback_update(f"{draft_id}:retry:-")
+    callback.callback_query.message = SimpleNamespace(reply_text=AsyncMock())
+    await draft_callback(callback, context)
+
+    callback.callback_query.edit_message_text.assert_awaited_once()
+    callback.callback_query.message.reply_text.assert_awaited_once_with(FIVE_LEFT_WARNING_TEXT)
+    (text,), _ = callback.callback_query.edit_message_text.call_args
+    assert "Lawson" in text  # the card was already showing the re-read receipt
+
+
+async def test_warning_sent_once_at_five_remaining_not_again() -> None:
+    ledger, trip = await _bound_ledger()
+    reader = FakeReceiptReader(extraction=_confident_extraction())
+    budget = ReceiptReadBudget(chat_cap=6, global_cap=400)
+    deps = make_deps(ledger, receipt_reader=reader, receipt_budget=budget)
+    context = _context(deps)
+
+    first = _update(message_id=21, update_id=21)
+    await photo_expense_handler(first, context)
+    calls = first.effective_message.reply_text.call_args_list
+    assert len(calls) == 2
+    assert calls[1].args[0] == FIVE_LEFT_WARNING_TEXT
+
+    second = _update(message_id=22, update_id=22)
+    await photo_expense_handler(second, context)
+    assert len(second.effective_message.reply_text.call_args_list) == 1
+
+
+async def test_no_warning_when_chat_cap_is_five_or_less() -> None:
+    ledger, trip = await _bound_ledger()
+    reader = FakeReceiptReader(extraction=_confident_extraction())
+    budget = ReceiptReadBudget(chat_cap=5, global_cap=400)
+    deps = make_deps(ledger, receipt_reader=reader, receipt_budget=budget)
+    context = _context(deps)
+    update = _update(message_id=23, update_id=23)
+
+    await photo_expense_handler(update, context)
+
+    assert len(update.effective_message.reply_text.call_args_list) == 1
+
+
+async def test_failed_read_still_counts_against_budget() -> None:
+    ledger, trip = await _bound_ledger()
+    reader = FakeReceiptReader(error=ReceiptUnreadable())
+    budget = ReceiptReadBudget(chat_cap=1, global_cap=400)
+    deps = make_deps(ledger, receipt_reader=reader, receipt_budget=budget)
+    context = _context(deps)
+
+    first = _update(message_id=24, update_id=24)
+    await photo_expense_handler(first, context)
+    (text,), _ = first.effective_message.reply_text.call_args
+    assert "Couldn't read that receipt" in text  # allowed, just unreadable
+
+    second = _update(message_id=25, update_id=25)
+    await photo_expense_handler(second, context)
+    second.effective_message.reply_text.assert_awaited_once_with(CHAT_CAPPED_TEXT)

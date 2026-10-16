@@ -18,6 +18,7 @@ sprint and points at the master spec sections it implements.
 | 9 | [Neon store and export](09-neon-store-and-export.md) | `/settrip` with buttons only, no Google; `/export` opens on your phone; `/deletetrip` | Yes, ~5 min (delete refusal) |
 | 10 | [`/start` menu with buttons](10-start-menu.md) | Add the bot to a group, run a trip by tapping | Yes, ~2 min (delete refusal) |
 | 11 | Dropped 2026-10-15: Google Sheet export, persistent drafts and older-trip export were judged not core. Revisit only on request. | | |
+| 12 | [Receipt read budget](12-receipt-read-budget.md) | Daily cap on receipt reads before going public | Yes, ~5 min (cap at 7 locally) |
 
 ## How a sprint runs
 
