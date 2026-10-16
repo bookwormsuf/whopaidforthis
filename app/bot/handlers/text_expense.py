@@ -17,7 +17,12 @@ from telegram.ext import ContextTypes, filters
 from app.bot.deps import get_deps
 from app.bot.formatting import unsupported_currency_text
 from app.bot.handlers.join import require_trip_for_expense
-from app.bot.handlers.photo_expense import handle_manual_amount_reply, read_receipt_photo
+from app.bot.handlers.photo_expense import (
+    FIVE_LEFT_WARNING_TEXT,
+    handle_manual_amount_reply,
+    read_receipt_photo,
+    take_receipt_read,
+)
 from app.bot.handlers.split import handle_custom_split_reply, handle_item_reply
 from app.bot.handlers.tags import join_tagged, tags_as_text
 from app.bot.render.draft import render_draft
@@ -180,6 +185,7 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await answer()
         return
 
+    warn_five_left = False
     try:
         if action == "justme":
             draft = await deps.draft_service.choose_just_me(draft_id, presser.id)
@@ -199,6 +205,15 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         elif action == "usetotal":
             draft = await deps.draft_service.use_total_anyway(draft_id, presser.id)
         elif action == "retry":
+            # Budget gate before anything else (spec §20): a refused retry must
+            # leave the card and its draft state untouched, so this runs before
+            # `begin_retry` too, not just before the download inside
+            # `read_receipt_photo`.
+            refusal, warn_five_left = take_receipt_read(deps, chat.id, datetime.now(UTC))
+            if refusal is not None:
+                await answer()
+                await query.message.reply_text(refusal)
+                return
             pending = await deps.draft_service.begin_retry(draft_id, presser.id)
             # Answer now: the read can take far longer than a callback query lives.
             await answer("Reading the receipt again…")
@@ -324,3 +339,5 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await answer()
     text, keyboard = render_draft(draft, trip)
     await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+    if warn_five_left:
+        await query.message.reply_text(FIVE_LEFT_WARNING_TEXT)
