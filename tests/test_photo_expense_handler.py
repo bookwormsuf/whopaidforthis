@@ -433,6 +433,50 @@ async def test_retry_refused_leaves_card_unchanged() -> None:
     assert context.bot.get_file.await_count == 1  # retry never re-downloaded
 
 
+async def test_retry_non_initiator_leaves_budget_unchanged() -> None:
+    """A press `check_retry` would reject (wrong presser) must not burn a read."""
+    ledger, trip = await _bound_ledger()
+    reader = FakeReceiptReader(error=ReceiptUnreadable())
+    budget = ReceiptReadBudget(chat_cap=40, global_cap=400)
+    deps = make_deps(ledger, receipt_reader=reader, receipt_budget=budget)
+    context = _context(deps)
+    photo = _update(message_id=23, update_id=23)
+    await photo_expense_handler(photo, context)
+    draft_id = _draft_id_from(photo)
+    assert context.bot.get_file.await_count == 1
+    remaining_before = budget.remaining(CHAT_ID, datetime.now(UTC))
+
+    callback = _callback_update(f"{draft_id}:retry:-", user_id=999)
+    await draft_callback(callback, context)
+
+    callback.callback_query.answer.assert_awaited_once_with("Only Ada can edit this")
+    callback.callback_query.edit_message_text.assert_not_awaited()
+    assert context.bot.get_file.await_count == 1  # retry never re-downloaded
+    assert budget.remaining(CHAT_ID, datetime.now(UTC)) == remaining_before  # no read taken
+
+
+async def test_retry_five_left_warning_sent_after_card_edit() -> None:
+    ledger, trip = await _bound_ledger()
+    reader = FakeReceiptReader(error=ReceiptUnreadable())
+    budget = ReceiptReadBudget(chat_cap=7, global_cap=400)
+    deps = make_deps(ledger, receipt_reader=reader, receipt_budget=budget)
+    context = _context(deps)
+    photo = _update(message_id=24, update_id=24)
+    await photo_expense_handler(photo, context)
+    draft_id = _draft_id_from(photo)
+
+    reader._error = None
+    reader._extraction = _confident_extraction()
+    callback = _callback_update(f"{draft_id}:retry:-")
+    callback.callback_query.message = SimpleNamespace(reply_text=AsyncMock())
+    await draft_callback(callback, context)
+
+    callback.callback_query.edit_message_text.assert_awaited_once()
+    callback.callback_query.message.reply_text.assert_awaited_once_with(FIVE_LEFT_WARNING_TEXT)
+    (text,), _ = callback.callback_query.edit_message_text.call_args
+    assert "Lawson" in text  # the card was already showing the re-read receipt
+
+
 async def test_warning_sent_once_at_five_remaining_not_again() -> None:
     ledger, trip = await _bound_ledger()
     reader = FakeReceiptReader(extraction=_confident_extraction())
