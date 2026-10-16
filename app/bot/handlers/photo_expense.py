@@ -28,6 +28,7 @@ from app.bot.deps import Deps, get_deps
 from app.bot.formatting import unsupported_currency_text
 from app.bot.handlers.join import require_trip_for_expense
 from app.bot.handlers.tags import join_tagged, tags_as_text
+from app.bot.receipt_gate import send_five_left_warning, take_receipt_read
 from app.bot.render.draft import render_draft
 from app.models.category import Category
 from app.models.receipt import Receipt
@@ -41,7 +42,6 @@ from app.services.expense_parser import (
 )
 from app.services.images import ImageTooLarge, prepare_image
 from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
-from app.services.receipt_budget import Allowed, ChatCapped, GlobalCapped
 from app.services.receipt_parser import (
     ReceiptServiceUnavailable,
     ReceiptUnreadable,
@@ -55,44 +55,7 @@ logger = logging.getLogger(__name__)
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
 PHOTO_TOO_LARGE_TEXT = "That photo's too large (over 10 MB), please send a smaller one."
 
-# Sprint 12 pins (docs/sprints/12-receipt-read-budget.md): verbatim refusal and
-# warning texts for the daily receipt-read budget.
-CHAT_CAPPED_TEXT = (
-    "This chat has hit today's limit for receipt photos. Type the amount instead, "
-    "like 1200 yen ramen."
-)
-GLOBAL_CAPPED_TEXT = (
-    "Today's limit for receipt photos across all groups has been reached. Type the "
-    "amount instead, like 1200 yen ramen."
-)
-FIVE_LEFT_WARNING_TEXT = (
-    "Heads up: 5 receipt photos left in this chat today. Text expenses are unlimited."
-)
-
 PHOTO_EXPENSE_FILTER = filters.ChatType.GROUPS & filters.PHOTO
-
-
-def take_receipt_read(deps: Deps, chat_id: int, now: datetime) -> tuple[str | None, bool]:
-    """Consumes one receipt read against the daily budget (spec §20, sprint 12),
-    for a caller that has already passed the trip gate and is about to download
-    the photo. Global cap is checked before the chat cap.
-
-    Returns `(refusal_text, warn_five_left)`. `refusal_text` is the verbatim reply
-    to send instead of reading the photo, or `None` when the read is allowed.
-    `warn_five_left` is `True` on the one allowed attempt per chat per day that
-    leaves exactly five reads remaining in that chat (never set alongside a
-    refusal, and never when the chat's cap is five or less, since `remaining`
-    then never equals five after a take).
-    """
-    result = deps.receipt_budget.try_take(chat_id, now)
-    if result is GlobalCapped:
-        logger.warning("receipt read refused: chat=%s cap=global", chat_id)
-        return GLOBAL_CAPPED_TEXT, False
-    if result is ChatCapped:
-        logger.warning("receipt read refused: chat=%s cap=chat", chat_id)
-        return CHAT_CAPPED_TEXT, False
-    assert result is Allowed
-    return None, deps.receipt_budget.remaining(chat_id, now) == 5
 
 
 @dataclass(frozen=True)
@@ -206,60 +169,56 @@ async def photo_expense_handler(update: Update, context: ContextTypes.DEFAULT_TY
         await message.reply_text(refusal)
         return
 
-    outcome = await read_receipt_photo(deps, trip, context.bot, largest.file_id, message_time)
-    if outcome.status == "too_large":
-        await message.reply_text(PHOTO_TOO_LARGE_TEXT)
-        if warn_five_left:
-            await message.reply_text(FIVE_LEFT_WARNING_TEXT)
-        return
-    if outcome.status == "unsupported_currency":
-        await message.reply_text(
-            unsupported_currency_text(trip.trip_currency, trip.home_currency), parse_mode="HTML"
-        )
-        if warn_five_left:
-            await message.reply_text(FIVE_LEFT_WARNING_TEXT)
-        return
-
-    common = dict(
-        chat_id=chat.id,
-        message_id=message.message_id,
-        photo_file_id=largest.file_id,
-        initiator_id=user.id,
-        initiator_name=joined_user.display_name,
-        initiator_username=joined_user.username,
-        trip=trip,
-        caption_override=caption_override,
-        participants_text=participants_text,
-        payer_text=payer_text,
-    )
     try:
-        if outcome.status == "unreadable":
-            draft = await deps.draft_service.start_unreadable(
-                transaction_date=message_time.astimezone(ZoneInfo(trip.timezone)).date(),
-                read_problem=outcome.problem,
-                **common,
+        outcome = await read_receipt_photo(deps, trip, context.bot, largest.file_id, message_time)
+        if outcome.status == "too_large":
+            await message.reply_text(PHOTO_TOO_LARGE_TEXT)
+            return
+        if outcome.status == "unsupported_currency":
+            await message.reply_text(
+                unsupported_currency_text(trip.trip_currency, trip.home_currency),
+                parse_mode="HTML",
             )
-        else:
-            assert outcome.receipt is not None and outcome.transaction_date is not None
-            assert outcome.date_source is not None
-            draft = await deps.draft_service.start_from_receipt(
-                receipt=outcome.receipt,
-                transaction_date=outcome.transaction_date,
-                date_source=outcome.date_source,
-                **common,
-            )
-    except LedgerUnavailable:
-        logger.exception("photo_expense: could not start draft")
-        await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
-        if warn_five_left:
-            await message.reply_text(FIVE_LEFT_WARNING_TEXT)
-        return
+            return
 
-    text, keyboard = render_draft(draft, trip)
-    sent = await message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
-    await deps.draft_service.set_bot_message_id(draft.draft_id, sent.message_id)
-    if warn_five_left:
-        await message.reply_text(FIVE_LEFT_WARNING_TEXT)
+        common = dict(
+            chat_id=chat.id,
+            message_id=message.message_id,
+            photo_file_id=largest.file_id,
+            initiator_id=user.id,
+            initiator_name=joined_user.display_name,
+            initiator_username=joined_user.username,
+            trip=trip,
+            caption_override=caption_override,
+            participants_text=participants_text,
+            payer_text=payer_text,
+        )
+        try:
+            if outcome.status == "unreadable":
+                draft = await deps.draft_service.start_unreadable(
+                    transaction_date=message_time.astimezone(ZoneInfo(trip.timezone)).date(),
+                    read_problem=outcome.problem,
+                    **common,
+                )
+            else:
+                assert outcome.receipt is not None and outcome.transaction_date is not None
+                assert outcome.date_source is not None
+                draft = await deps.draft_service.start_from_receipt(
+                    receipt=outcome.receipt,
+                    transaction_date=outcome.transaction_date,
+                    date_source=outcome.date_source,
+                    **common,
+                )
+        except LedgerUnavailable:
+            logger.exception("photo_expense: could not start draft")
+            await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
+            return
+
+        text, keyboard = render_draft(draft, trip)
+        sent = await message.reply_text(text, parse_mode="HTML", reply_markup=keyboard)
+        await deps.draft_service.set_bot_message_id(draft.draft_id, sent.message_id)
+    finally:
+        await send_five_left_warning(message.reply_text, warn_five_left)
 
 
 async def handle_manual_amount_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:

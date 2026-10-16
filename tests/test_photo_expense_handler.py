@@ -10,13 +10,9 @@ from unittest.mock import AsyncMock, MagicMock
 from PIL import Image
 
 from app.bot.handlers.join import CLOSED_TRIP_TEXT
-from app.bot.handlers.photo_expense import (
-    CHAT_CAPPED_TEXT,
-    FIVE_LEFT_WARNING_TEXT,
-    GLOBAL_CAPPED_TEXT,
-    photo_expense_handler,
-)
+from app.bot.handlers.photo_expense import photo_expense_handler
 from app.bot.handlers.text_expense import draft_callback, text_expense_handler
+from app.bot.receipt_gate import CHAT_CAPPED_TEXT, FIVE_LEFT_WARNING_TEXT, GLOBAL_CAPPED_TEXT
 from app.models.trip import Trip
 from app.services.ledger_store import InMemoryLedgerStore
 from app.services.llm_schemas import ReceiptExtraction

@@ -46,8 +46,9 @@ counter. Changing the reader's own internal retry.
   "This chat has hit today's limit for receipt photos. Type the amount instead, like 1200 yen ramen."
 - Global cap hit, on each refused attempt:
   "Today's limit for receipt photos across all groups has been reached. Type the amount instead, like 1200 yen ramen."
-- Warning, sent once per chat per day as its own message right after the draft card of the
-  attempt that leaves exactly five remaining:
+- Warning, sent once per chat per day as its own message right after the bot's reply to the
+  attempt that leaves exactly five remaining (the draft card, or the error reply if that
+  attempt failed):
   "Heads up: 5 receipt photos left in this chat today. Text expenses are unlimited."
   No warning for the global cap. Not sent when the per-chat cap is 5 or less.
 - A refused `Try again` posts the refusal as a new message and leaves the card and its buttons
