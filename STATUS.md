@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-10-16 (readied for public release; README screenshots)
+Updated: 2026-10-16 (sprint 12 signed off; repo public)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -20,7 +20,8 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 7 Hardening and go-live | written | done | green (429) | 2026-10-02, findings fixed (screenshots after the trip) | 2026-10-03, live in the real trip group | 2026-10-03 | Live. After the trip: `/settle`, then `fly scale count 0` / Sufyan |
 | 8 Clearer messages | written (+ §9 amendment) | done | green (432) | 2026-10-03, findings fixed | 2026-10-04, in the real trip group | 2026-10-04 | Sprint 8 closed. After the trip: `/settle`, then `fly scale count 0` / Sufyan |
 | 9 Neon store and export | written 2026-10-15 (+ amendments) | done | green (446, 21 against Postgres) | 2026-10-15, findings fixed | 2026-10-15, steps 1-4 and 7; 5 and 6 deferred | 2026-10-15 | Sprint 9 closed. Steps 5 and 6 later / Sufyan. |
-| 10 `/start` menu with buttons | written 2026-10-15 (+ three amendments) | done | green (478) | 2026-10-15, findings fixed | 2026-10-15, steps 1 and 3 seen; others on Sufyan's word | 2026-10-15 | Sprint 10 closed. Next: sprint 11 if still wanted / Sufyan decides |
+| 10 `/start` menu with buttons | written 2026-10-15 (+ three amendments) | done | green (478) | 2026-10-15, findings fixed | 2026-10-15, steps 1 and 3 seen; others on Sufyan's word | 2026-10-15 | Sprint 10 closed. Sprint 11 dropped |
+| 12 Receipt read budget | written 2026-10-16 (+ warning wording amended after review) | done | green (513) | 2026-10-16, findings fixed | 2026-10-16, on Sufyan's word; no step reported individually | 2026-10-16 | Sprint 12 closed. Repo public. Watch `fly logs` for refusals after the launch post / Sufyan |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -944,3 +945,25 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   Sheet tabs; "Adding to a group" describes the Sprint 10 welcome and buttons. Docs only.
 - GitHub description set to a full sentence; homepage set to the bot's Telegram link.
 - Next action / owner: flip the repo to public / Sufyan. Sprint 9 steps 5 and 6 / Sufyan.
+
+### 2026-10-16 — Sprint 12 grilled, built, reviewed and deployed
+
+- Performed by: Claude with Sufyan. Grilled in two rounds (18 questions) before the launch post;
+  pins in `docs/sprints/12-receipt-read-budget.md` and spec §20.
+- Build (PR #38, eight commits): `ReceiptReadBudget` pure class, two settings, gate in the photo
+  handler and `Try again` before download, verbatim refusal texts, once-a-day five-left warning.
+- Review (Opus, spec + correctness) found one real bug: the retry gate spent a read before the
+  draft service rejected non-initiators, so strangers tapping `Try again` could drain a chat's
+  budget. Fixed by a non-mutating `check_retry` before the take. A second pass flagged the warning
+  send duplicated at seven return points; collapsed to one `try/finally` per handler in
+  `app/bot/receipt_gate.py`, and the spec's "after the draft card" wording amended to "after the
+  bot's reply to that attempt". 513 tests, ruff clean.
+- Deployed as Fly release v41; startup log shows the merge commit.
+- Repo made public by Sufyan the same day (renamed `whopaidforthis`). Secret scanning, push
+  protection and Dependabot enabled; three stale `claude/` branches deleted.
+
+### 2026-10-16 — Sprint 12 sign-off
+
+- Sufyan: "sign off sprint 12". Checklist steps not reported individually; recorded on his word.
+- Next action / owner: after the launch post, check `fly logs` for "receipt read refused" lines
+  / Sufyan. Sprint 9 steps 5 and 6 still open / Sufyan.

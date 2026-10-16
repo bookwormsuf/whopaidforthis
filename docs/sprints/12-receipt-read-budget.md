@@ -78,6 +78,6 @@ warning when cap <= 5; a failed read still counts.
 3. On Fly with defaults, one photo reads normally and `fly logs` shows no warning.
 
 ## Exit criteria
-- [ ] Checklist passes
-- [ ] Tests, ruff green; `/review` findings addressed
-- [ ] `STATUS.md` entry with your sign-off
+- [x] Checklist passes (on Sufyan's word, 2026-10-16)
+- [x] Tests, ruff green; `/review` findings addressed (513 tests, 2026-10-16)
+- [x] `STATUS.md` entry with your sign-off (2026-10-16)
