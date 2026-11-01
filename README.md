@@ -70,6 +70,9 @@ With more than one participant the card asks how to split:
 - **Type amounts instead** — reply to the card with one line per person, e.g. `Amir 2000`. The card shows
   each person's amount and `Remaining: ¥0 ✅` once they add up exactly; **Confirm** only
   appears then. Anyone you don't mention gets nothing and is dropped.
+  Forgot to reply? The same lines sent on their own still fill your open card, as long as every
+  line names someone on it. If the card expired (30 minutes idle, or the bot was updated), a
+  reply to it says so instead of starting a new expense.
 
 The preview lists every share in both currencies, payer marked 💳, with **Confirm**, **Edit**
 (back to choosing people, amount kept) and **Cancel**. Only the person who sent the expense can

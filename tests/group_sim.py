@@ -26,6 +26,7 @@ from app.services.llm_schemas import ReceiptExtraction
 from tests.helpers import FakeReceiptReader, make_deps
 
 CHAT_ID = -100
+BOT_ID = 999
 
 
 def _jpeg_bytes() -> bytes:
@@ -155,6 +156,7 @@ class FakeGroup:
         context = MagicMock()
         context.application.bot_data = {"deps": self.deps}
         context.bot.username = "whopaidforthisbot"
+        context.bot.id = BOT_ID
 
         async def edit_message_text(*, chat_id, message_id, text, parse_mode, reply_markup):
             self.cards[message_id] = Card(message_id, text, reply_markup)
@@ -188,9 +190,16 @@ class FakeGroup:
         message.text = text
         message.message_id = self._new_id()
         message.date = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
-        message.reply_to_message = (
-            SimpleNamespace(message_id=reply_to) if reply_to is not None else None
-        )
+        if reply_to is None:
+            message.reply_to_message = None
+        elif reply_to in self.cards:  # one of the bot's cards, as it shows now
+            message.reply_to_message = SimpleNamespace(
+                message_id=reply_to,
+                from_user=SimpleNamespace(id=BOT_ID, is_bot=True),
+                reply_markup=self.cards[reply_to].markup,
+            )
+        else:
+            message.reply_to_message = SimpleNamespace(message_id=reply_to)
         message.reply_text = self._reply_recorder()
         update.effective_message = message
         update.message = message

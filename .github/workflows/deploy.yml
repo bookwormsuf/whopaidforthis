@@ -7,6 +7,11 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # A deploy restarts the bot, which clears every unfinished expense card (drafts
+    # live in memory). A docs-only merge has nothing to deploy, so it must not.
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
   workflow_dispatch:
 
 # One deploy at a time; a newer push waits rather than racing the running one.

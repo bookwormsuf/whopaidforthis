@@ -493,6 +493,8 @@ class DraftStore(Protocol):
 
     async def find_by_bot_message(self, chat_id: int, bot_message_id: int) -> Draft | None: ...
 
+    async def latest_for(self, chat_id: int, initiator_id: int, state: str) -> Draft | None: ...
+
 
 class InMemoryDraftStore:
     """In-memory `DraftStore`. A draft expires 30 minutes after it was last saved,
@@ -542,6 +544,22 @@ class InMemoryDraftStore:
             if draft.chat_id == chat_id and draft.bot_message_id == bot_message_id:
                 return await self.get(draft.draft_id)
         return None
+
+    async def latest_for(self, chat_id: int, initiator_id: int, state: str) -> Draft | None:
+        """The most recently started live draft of `initiator_id` in `chat_id` that is
+        in `state`, if any.
+        """
+        found = None
+        for draft in list(self._drafts.values()):
+            if (
+                draft.chat_id == chat_id
+                and draft.initiator_id == initiator_id
+                and draft.state == state
+                and await self.get(draft.draft_id) is not None
+                and (found is None or draft.created_at >= found.created_at)
+            ):
+                found = draft
+        return found
 
 
 class DraftService:
@@ -1018,6 +1036,28 @@ class DraftService:
         )
         await self._drafts.put(updated)
         return updated
+
+    async def open_custom_card(self, chat_id: int, user_id: int) -> Draft | None:
+        """The sender's most recent open custom card in this chat, if any."""
+        return await self._drafts.latest_for(chat_id, user_id, "custom")
+
+    @staticmethod
+    def custom_lines_fit(draft: Draft, trip: Trip, text: str) -> bool:
+        """Whether `text`, sent without replying, reads as lines for the custom card
+        `draft`: every line `<name> <amount>`, each name exactly one of the card's
+        people and each amount in its currency (fixed 2026-11-01: amounts sent
+        without a reply were saved as a new expense).
+        """
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            return False
+        for line in lines:
+            parsed = parse_custom_line(line, trip.trip_currency, trip.home_currency, draft.currency)
+            if parsed is None or parsed.currency != draft.currency:
+                return False
+            if resolve_name(parsed.name_text, draft.people, draft.initiator_id).status != "exact":
+                return False
+        return True
 
     async def finish_custom(self, draft_id: str, presser_id: int) -> Draft:
         """`Confirm` on the custom card: only when the amounts add up exactly. People
