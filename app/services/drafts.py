@@ -134,6 +134,7 @@ class DraftToast(DraftError):
 
 NOBODY_SELECTED_TEXT = "Pick at least one person"
 PICK_FIRST_TEXT = "Pick who had this first"
+KEEP_ONE_TEXT = "Keep at least one item, or Cancel"
 MAX_CLAIMABLE_ITEMS = 40
 MAX_UNITS_PER_LINE = 10
 # The adjustment line for a receipt total the lines don't reach (sprint 13 pin).
@@ -204,6 +205,9 @@ class Draft:
     # screen; `fixing_one` when it was opened from `Fix an item` on the preview.
     walk_index: int = 0
     fixing_one: bool = False
+    # Items marked `Not on this bill` (sprint 14), as indices into `line_items`:
+    # someone else paid for them. Only an itemised split leaves them out.
+    left_out: frozenset[int] = frozenset()
     rate: ExchangeRate | None = None
     trip_amount_minor: int = 0
     home_amount_minor: int = 0
@@ -328,11 +332,89 @@ def _one_button_per_unit(line_items: list[ReceiptLineItem]) -> list[ReceiptLineI
 
 
 def unclaimed_indices(draft: Draft) -> list[int]:
+    """Claimable items nobody has answered yet: no names, not `Everyone`, and not
+    `Not on this bill`.
+    """
     return [
         i
         for i in claimable_indices(draft)
-        if i not in draft.everyone_items and not draft.item_claims.get(i)
+        if i not in draft.everyone_items
+        and i not in draft.left_out
+        and not draft.item_claims.get(i)
     ]
+
+
+def answered(draft: Draft, index: int) -> bool:
+    """Someone is ticked for the item, or it is `Not on this bill`."""
+    return index in draft.left_out or bool(claimants_on_screen(draft, index))
+
+
+def _scaled(amount_minor: int, kept_minor: int, full_minor: int) -> int:
+    """`amount_minor * kept / full`, rounded half up."""
+    return (2 * amount_minor * kept_minor + full_minor) // (2 * full_minor)
+
+
+LEFT_OUT_WARNING_SHARE = Decimal("0.10")
+
+
+def left_out_still_charged(draft: Draft) -> int:
+    """With items left out, the part of the amount no kept line accounts for, when
+    it is 10% of the amount or more (sprint 14, agent's call): the amount is likely
+    the whole order's, so the left-out dishes are being charged to the kept ones
+    after all. Zero otherwise; Grab's own rounding of a "you paid" figure is far
+    smaller.
+    """
+    bill = billed(draft)
+    if bill is draft or not bill.line_items:
+        return 0
+    last = bill.line_items[-1]
+    if last.description != UNLISTED_DESCRIPTION or last.kind != "service_charge":
+        return 0
+    if last.amount_minor < draft.amount_minor * LEFT_OUT_WARNING_SHARE:
+        return 0
+    return last.amount_minor
+
+
+def billed(draft: Draft) -> Draft:
+    """The draft as it is billed (sprint 14 pin): with items left out of an
+    itemised split, only the kept items, each adjustment scaled to the kept items'
+    share of the item sum, and the `Unlisted / rounding` line worked out again
+    against the amount; claims renumbered to match. Anything else is returned as it
+    is, so with nothing left out the maths is exactly sprint 13's.
+    """
+    if not draft.left_out or not isinstance(draft.split, Items):
+        return draft
+    lines = draft.line_items
+    last = len(lines) - 1
+    unlisted_at = (
+        last
+        if lines and lines[last].kind != "item" and lines[last].description == UNLISTED_DESCRIPTION
+        else None
+    )
+    claimable = claimable_indices(draft)
+    full = sum(lines[i].amount_minor for i in claimable)
+    kept = sum(lines[i].amount_minor for i in claimable if i not in draft.left_out)
+    kept_lines: list[ReceiptLineItem] = []
+    renumbered: dict[int, int] = {}
+    for index, item in enumerate(lines):
+        if index == unlisted_at or index in draft.left_out:
+            continue
+        if item.kind != "item" or item.amount_minor < 0:
+            # Adjustments, and an order-wide minus line read as an item.
+            amount = _scaled(item.amount_minor, kept, full)
+            if amount == 0:
+                continue
+            item = item.model_copy(update={"amount_minor": amount, "unit_amount_minor": None})
+        renumbered[index] = len(kept_lines)
+        kept_lines.append(item)
+    view = replace(
+        draft,
+        line_items=with_unlisted_line(kept_lines, draft.amount_minor),
+        item_claims={renumbered[i]: c for i, c in draft.item_claims.items() if i in renumbered},
+        everyone_items=frozenset(renumbered[i] for i in draft.everyone_items if i in renumbered),
+        left_out=frozenset(),
+    )
+    return replace(view, split=items_spec(view))
 
 
 def claimants_on_screen(draft: Draft, index: int) -> tuple[int, ...]:
@@ -358,7 +440,13 @@ def items_spec(draft: Draft) -> Items:
 
 
 def draft_items_split(draft: Draft, trip: Trip) -> ItemsSplit:
+    """The itemised split of the billed draft. Its indices are into
+    `billed(draft).line_items`, not `draft.line_items`: a caller reading lines by
+    those indices must bill the draft first (the two are the same with nothing left
+    out).
+    """
     assert isinstance(draft.split, Items)
+    draft = billed(draft)
     return split_items(
         draft.line_items,
         draft.split,
@@ -372,6 +460,7 @@ def draft_shares(draft: Draft, trip: Trip) -> dict[int, tuple[int, int]]:
     """Each participant's `(share_trip, share_home)` for the draft's split, in
     participant order. Both columns sum exactly to the expense amounts (spec §4/§5).
     """
+    draft = billed(draft)
     spec = draft.split or Equal()
     shares = split_shares(
         spec,
@@ -627,11 +716,12 @@ class DraftService:
             raise DraftError(f"cannot confirm from state {draft.state}")
         trip = await self._trip_for(draft)
         expense = self._build_expense(draft, trip)
+        bill = billed(draft)  # only the kept lines are saved (sprint 14 pin)
 
         await self._drafts.put(replace(draft, state="committing"))
         try:
             await self._ledger.append_expense(
-                trip, expense, draft.line_items, self._assignments(draft, trip)
+                trip, expense, bill.line_items, self._assignments(bill, trip)
             )
         except LedgerUnavailable:
             logger.exception("draft %s: could not append expense", draft.draft_id)
@@ -1013,7 +1103,8 @@ class DraftService:
         self, draft_id: str, presser_id: int, position: int, user_id: int
     ) -> Draft:
         """A name on "Who had this?": ticks or unticks that person on this item.
-        Unticking someone on an `Everyone` item leaves everyone else ticked.
+        Unticking someone on an `Everyone` item leaves everyone else ticked; ticking
+        someone on an item `Not on this bill` puts it back on the bill.
         """
         draft = await self._on_screen(draft_id, presser_id, position)
         if user_id not in draft.participant_ids:
@@ -1022,7 +1113,12 @@ class DraftService:
         ticked = set(claimants_on_screen(draft, index)) ^ {user_id}
         claims = dict(draft.item_claims)
         claims[index] = tuple(pid for pid in draft.participant_ids if pid in ticked)
-        updated = replace(draft, item_claims=claims, everyone_items=draft.everyone_items - {index})
+        updated = replace(
+            draft,
+            item_claims=claims,
+            everyone_items=draft.everyone_items - {index},
+            left_out=draft.left_out - {index},
+        )
         await self._drafts.put(updated)
         return updated
 
@@ -1032,13 +1128,39 @@ class DraftService:
         index = claimable_indices(draft)[position]
         claims = dict(draft.item_claims)
         claims.pop(index, None)
-        draft = replace(draft, item_claims=claims, everyone_items=draft.everyone_items | {index})
+        draft = replace(
+            draft,
+            item_claims=claims,
+            everyone_items=draft.everyone_items | {index},
+            left_out=draft.left_out - {index},
+        )
+        return await self._walk_forward(draft)
+
+    async def walk_left_out(self, draft_id: str, presser_id: int, position: int) -> Draft:
+        """`Not on this bill` (sprint 14): someone else paid for this item. Its
+        names are cleared and the walk moves on, as with `Everyone`. Refused with a
+        toast when it would leave no item on the bill.
+        """
+        draft = await self._on_screen(draft_id, presser_id, position)
+        positions = claimable_indices(draft)
+        index = positions[position]
+        left_out = draft.left_out | {index}
+        if all(i in left_out for i in positions):
+            raise DraftToast(KEEP_ONE_TEXT)
+        claims = dict(draft.item_claims)
+        claims.pop(index, None)
+        draft = replace(
+            draft,
+            item_claims=claims,
+            everyone_items=draft.everyone_items - {index},
+            left_out=left_out,
+        )
         return await self._walk_forward(draft)
 
     async def walk_next(self, draft_id: str, presser_id: int, position: int) -> Draft:
-        """`Next`: refused with a toast while nobody is ticked."""
+        """`Next`: refused with a toast while the item is unanswered."""
         draft = await self._on_screen(draft_id, presser_id, position)
-        if not claimants_on_screen(draft, claimable_indices(draft)[position]):
+        if not answered(draft, claimable_indices(draft)[position]):
             raise DraftToast(PICK_FIRST_TEXT)
         return await self._walk_forward(draft)
 
@@ -1049,7 +1171,7 @@ class DraftService:
         """
         draft = await self._on_screen(draft_id, presser_id, position)
         if draft.fixing_one:
-            if not claimants_on_screen(draft, claimable_indices(draft)[position]):
+            if not answered(draft, claimable_indices(draft)[position]):
                 raise DraftToast(PICK_FIRST_TEXT)
             updated = replace(draft, state="fix_list", fixing_one=False)
         elif position == 0:

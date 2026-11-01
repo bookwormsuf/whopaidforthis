@@ -268,7 +268,7 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 draft = await deps.draft_service.edit(draft_id, presser.id)
             elif action == "walk":
                 draft = await deps.draft_service.start_walk(draft_id, presser.id)
-            elif action in ("wtoggle", "weveryone", "wnext", "wback", "fixpick"):
+            elif action in ("wtoggle", "weveryone", "wleftout", "wnext", "wback", "fixpick"):
                 numbers = _arg.split(",")
                 try:
                     position = int(numbers[0])
@@ -281,6 +281,8 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     draft = await service.walk_toggle(draft_id, presser.id, position, user_id)
                 elif action == "weveryone":
                     draft = await service.walk_everyone(draft_id, presser.id, position)
+                elif action == "wleftout":
+                    draft = await service.walk_left_out(draft_id, presser.id, position)
                 elif action == "wnext":
                     draft = await service.walk_next(draft_id, presser.id, position)
                 elif action == "wback":

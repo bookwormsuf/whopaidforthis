@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-11-01 (sprint 13 signed off)
+Updated: 2026-11-01 (sprint 13 signed off; sprint 14 built)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -23,6 +23,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 10 `/start` menu with buttons | written 2026-10-15 (+ three amendments) | done | green (478) | 2026-10-15, findings fixed | 2026-10-15, steps 1 and 3 seen; others on Sufyan's word | 2026-10-15 | Sprint 10 closed. Sprint 11 dropped |
 | 12 Receipt read budget | written 2026-10-16 (+ warning wording amended after review) | done | green (513) | 2026-10-16, findings fixed | 2026-10-16, on Sufyan's word; no step reported individually | 2026-10-16 | Sprint 12 closed. Repo public. Watch `fly logs` for refusals after the launch post / Sufyan |
 | 13 Guided item split | written 2026-11-01 (+ §7/§8/§9 amendments) | done | green (497) | 2026-11-01, findings fixed (one declined) | 2026-11-01, on Sufyan's word; no step reported individually | 2026-11-01 | Sprint 13 closed. Next: run sprint 14 / agent |
+| 14 Not on this bill | written 2026-11-01 (+ §7/§9 amendments) | done | green (528) | 2026-11-01, findings fixed (one noted) | — | — | Merge PR, deploy, run the seven-step checklist / Sufyan |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -1049,3 +1050,29 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   word.
   Tested in a real trip group, which surfaced the group-order case planned as Sprint 14.
 - Next action / owner: run sprint 14 / agent.
+
+### 2026-11-01 — Sprint 14 planned and built: Not on this bill
+
+- Performed by: Claude with Sufyan.
+- Trigger: a delivery group order where each person paid their own part. The receipt listed the
+  whole order and also what the sender paid; dishes others had paid for could not be left out,
+  so tester A typed amounts by hand.
+- Decided (three questions): a `🚫 Not on this bill` button on each "Who had this?" screen; the
+  "you paid" figure is the amount; built after the Sprint 13 sign-off.
+- Built: `left_out` on the draft; `billed(draft)` bills only the kept items, scales each
+  adjustment to the kept share of the item sum and works out `Unlisted / rounding` again
+  against the amount, and is what the shares, the summary and the saved line items use. At least
+  one item stays. The receipt instruction marks this person's part of a group order as the
+  grand-total guess (not cash handed over). Reconcile prompt adds "Paid for part of the order?"
+  when the total is below the lines.
+- Agent's call, open to change: spec §7 still asks when the guess is more than 5 off the lines,
+  so the paid figure is the first total button rather than picked automatically.
+- `/code-review`: 10 findings. Fixed: the instruction could mark cash handed over as the total;
+  minus item lines were not scaled; leaving out against the whole order total silently charged
+  the left-out dishes to the kept ones (now a ⚠️ warning at 10% or more); the reconcile hint
+  hid the "shared like tax" line; the property test now checks both currencies and minus items;
+  the button is hidden where it could only be refused; units of one dish named once; this
+  entry. Noted, not changed: `draft_items_split` bills the draft itself, so its indices are
+  into the billed lines; the docstring says so.
+- Tests: 528 passed, 22 skipped (Postgres, run in CI); ruff clean.
+- Next action / owner: merge the PR, deploy, run the seven-step checklist / Sufyan.

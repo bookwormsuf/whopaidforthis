@@ -37,6 +37,7 @@ Terms used throughout the code, the spec and the export. Implementation details 
 - **Unlisted / rounding** — the adjustment line for a receipt total the lines don't reach (or pass); stored as a service charge or discount and shared like tax.
 - **Claim** — a participant marked as having had a line item, by the initiator on its "Who had this?" screen. An item with several claims is **shared** between those claimants equally.
 - **Item by item** — the split that walks the receipt's claimable items one screen at a time, asking "Who had this?".
+- **Left out** — an item marked `Not on this bill` on its "Who had this?" screen: someone else paid for it (a group order where each pays their own part). An itemised split bills only the kept items, with adjustments scaled to their share of the item sum.
 - **Candidate total** — a number on a receipt that might be the grand total. The printed grand total is authoritative once chosen.
 - **Reconciliation** — the check that line items plus adjustments equal the receipt total, and that shares sum to the expense amount.
 - **Receipt read** — one attempt to have the model read a receipt photo, whether a new photo or `Try again`.

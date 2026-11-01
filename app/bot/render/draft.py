@@ -18,7 +18,7 @@ from app.bot.formatting import (
     fmt_signed_money,
     format_expense_amount,
 )
-from app.bot.keyboards.items import fix_list_keyboard, walk_keyboard
+from app.bot.keyboards.items import UNIT_SUFFIX, fix_list_keyboard, walk_keyboard
 from app.bot.keyboards.receipt import (
     choose_total_keyboard,
     manual_amount_keyboard,
@@ -38,10 +38,12 @@ from app.services.drafts import (
     MAX_CLAIMABLE_ITEMS,
     UNLISTED_DESCRIPTION,
     Draft,
+    billed,
     by_items_available,
     claimable_indices,
     draft_items_split,
     draft_shares,
+    left_out_still_charged,
     original_total,
     person_for,
 )
@@ -159,8 +161,11 @@ def _render_reconcile(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMark
         f"🧾 <b>{desc}</b>\n"
         f"Items {items_str} + adjustments {adjustments_str} = {computed_str}\n"
         f"Receipt total {total_str} (difference {difference_str})\n"
-        f"({difference_str} isn't on any line; it'll be shared like tax)"
     )
+    text += f"({difference_str} isn't on any line; it'll be shared like tax)"
+    if difference < 0 and by_items_available(draft):
+        # Likely a group order where this person paid only their part (sprint 14).
+        text += "\nPaid for part of the order? Go item by item and mark the rest Not on this bill."
     return text, reconcile_keyboard(draft.draft_id, total_str)
 
 
@@ -232,12 +237,15 @@ def _render_split_method(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardM
 def _render_walk(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
     """ "Who had this? (n of N)", then the item and its amount (sprint 13 pin)."""
     positions = claimable_indices(draft)
-    item = draft.line_items[positions[draft.walk_index]]
+    index = positions[draft.walk_index]
+    item = draft.line_items[index]
     text = (
         f"{_header(draft, trip)}\n\n"
         f"Who had this?  ({draft.walk_index + 1} of {len(positions)})\n"
         f"<b>{escape(item.description)}</b> · {fmt_money(item.amount_minor, draft.currency)}"
     )
+    if index in draft.left_out:
+        text += "\nNot on this bill"
     return text, walk_keyboard(draft)
 
 
@@ -250,8 +258,9 @@ def _items_preview_lines(draft: Draft, trip: Trip) -> list[str]:
     """Per person `• Ada ¥1,430 (S$11.58)` then `items ¥1,300 + tax ¥130` (sprint 6
     pin, sprint 8 layout). Service charge shows as its own `+ service` term, and
     the `Unlisted / rounding` line as `+ unlisted` (or `− unlisted`), apart from
-    the kind it is stored as (sprint 13).
+    the kind it is stored as (sprint 13). Items left out are not in it (sprint 14).
     """
+    draft = billed(draft)
     split = draft_items_split(draft, trip)
     shares = draft_shares(draft, trip)
     ccy = draft.currency
@@ -336,13 +345,42 @@ def _render_preview(
             lines.append(f"• {name} {share}")
     text = head + "\n" + "\n".join(lines)
     if isinstance(draft.split, Items):
-        text += _adjustments_line(draft)
+        text += _adjustments_line(billed(draft)) + _left_out_line(draft)
     if save_error:
         text += "\n\n" + SAVE_ERROR_LINE
     keyboard = preview_keyboard(
         draft.draft_id, retry=save_error, by_items=isinstance(draft.split, Items)
     )
     return text, keyboard
+
+
+_LEFT_OUT_SHOWN = 3
+
+
+def _left_out_line(draft: Draft) -> str:
+    """`Not on this bill: Pad thai, Iced tea, Mango rice, …` (sprint 14). Empty when
+    nothing was left out.
+    """
+    # Units of one line are one dish here: "Bael Juice", not "(1/2)" and "(2/2)".
+    names = list(
+        dict.fromkeys(
+            escape(UNIT_SUFFIX.sub("", draft.line_items[i].description))
+            for i in claimable_indices(draft)
+            if i in draft.left_out
+        )
+    )
+    if not names:
+        return ""
+    shown = ", ".join(names[:_LEFT_OUT_SHOWN]) + (", …" if len(names) > _LEFT_OUT_SHOWN else "")
+    line = f"\nNot on this bill: {shown}"
+    if still := left_out_still_charged(draft):
+        amount = fmt_money(draft.amount_minor, draft.currency)
+        line += (
+            f"\n⚠️ {fmt_money(still, draft.currency)} of {amount}"
+            " isn't on any kept dish and is shared like tax. If you paid less, Cancel and"
+            " pick the amount you paid."
+        )
+    return line
 
 
 def _adjustments_line(draft: Draft) -> str:

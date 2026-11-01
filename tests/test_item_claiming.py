@@ -123,11 +123,20 @@ async def test_walk_is_in_receipt_order_with_one_screen_per_item() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await _walk(group)
     assert "Who had this?  (1 of 3)\n<b>Ramen</b> · ¥1,000" in card.text
-    assert card.buttons == ["Ada", "Bo", "Everyone", "Next ▶", "Cancel"]  # no Back on 1
+    # No Back on the first item.
+    assert card.buttons == ["Ada", "Bo", "Everyone", "🚫 Not on this bill", "Next ▶", "Cancel"]
     await group.press(ADA, card, "Ada")
     await group.press(ADA, card, "Next ▶")
     assert "(2 of 3)\n<b>Udon</b> · ¥800" in card.text
-    assert card.buttons == ["Ada", "Bo", "Everyone", "◀ Back", "Next ▶", "Cancel"]
+    assert card.buttons == [
+        "Ada",
+        "Bo",
+        "Everyone",
+        "🚫 Not on this bill",
+        "◀ Back",
+        "Next ▶",
+        "Cancel",
+    ]
 
 
 async def test_names_toggle_and_two_ticks_share_the_item() -> None:
@@ -246,7 +255,7 @@ async def test_an_item_left_empty_by_back_is_asked_again_before_the_summary() ->
 async def test_non_initiator_presses_are_refused_everywhere() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await _walk(group)
-    for label in ("Ada", "Everyone", "Next ▶"):
+    for label in ("Ada", "Everyone", "🚫 Not on this bill", "Next ▶"):
         assert await group.press(BO, card, label) == "Only Ada can edit this"
     await group.press(ADA, card, "Ada")
     await group.press(ADA, card, "Next ▶")

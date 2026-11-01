@@ -49,6 +49,12 @@ not show a currency explicitly, assume {trip_currency}.
 List every number printed on the receipt that could plausibly be the grand total, in
 `candidate_totals`, even ones you are not sure about. Set `is_grand_total_guess=true`
 on the one you believe is the actual total the customer paid, if you can tell.
+Group orders: if the receipt says the order was split so each person paid their own
+part, and prints this person's part as well as the order total (wording such as "your
+share", "you paid" or คุณจ่าย, below an order total it is smaller than), list both and set
+`is_grand_total_guess=true` on this person's part only. This is not cash or a card amount
+handed over for the whole bill (お預り, "Cash", "Tendered", "Paid"): on an ordinary receipt
+the grand total is still the guess.
 
 Japanese receipt conventions, when this is a Japanese receipt:
 - 税込 (zeikomi) means tax is already included in the shown amount.
