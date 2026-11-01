@@ -176,6 +176,6 @@ just picking more than one name. Decided with Sufyan on 2026-11-01.
 8. `Type amounts instead` still works as the old Custom.
 
 ## Exit criteria
-- [ ] Checklist passes
-- [ ] Tests, ruff green; `/review` findings addressed
-- [ ] `STATUS.md` entry with your sign-off
+- [x] Checklist passes
+- [x] Tests, ruff green; `/review` findings addressed
+- [x] `STATUS.md` entry with your sign-off

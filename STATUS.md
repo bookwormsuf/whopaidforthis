@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-10-16 (sprint 12 signed off; repo public)
+Updated: 2026-11-01 (sprint 13 signed off)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -22,7 +22,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 9 Neon store and export | written 2026-10-15 (+ amendments) | done | green (446, 21 against Postgres) | 2026-10-15, findings fixed | 2026-10-15, steps 1-4 and 7; 5 and 6 deferred | 2026-10-15 | Sprint 9 closed. Steps 5 and 6 later / Sufyan. |
 | 10 `/start` menu with buttons | written 2026-10-15 (+ three amendments) | done | green (478) | 2026-10-15, findings fixed | 2026-10-15, steps 1 and 3 seen; others on Sufyan's word | 2026-10-15 | Sprint 10 closed. Sprint 11 dropped |
 | 12 Receipt read budget | written 2026-10-16 (+ warning wording amended after review) | done | green (513) | 2026-10-16, findings fixed | 2026-10-16, on Sufyan's word; no step reported individually | 2026-10-16 | Sprint 12 closed. Repo public. Watch `fly logs` for refusals after the launch post / Sufyan |
-| 13 Guided item split | written 2026-11-01 (+ §7/§8/§9 amendments) | done | green (497) | 2026-11-01, findings fixed (one declined) | — | — | Merge PR, deploy, run the checklist / Sufyan |
+| 13 Guided item split | written 2026-11-01 (+ §7/§8/§9 amendments) | done | green (497) | 2026-11-01, findings fixed (one declined) | 2026-11-01, on Sufyan's word; no step reported individually | 2026-11-01 | Sprint 13 closed. Next: run sprint 14 / agent |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -1042,3 +1042,10 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   bot is skipped; malformed HTML stops after the first group. New store query
   `list_open_trip_chat_ids`, with an in-memory and a Postgres test. 507 passed, ruff clean.
 - Next action / owner: write the message, dry run, `--only` in a test group, then `--send` / Sufyan.
+
+### 2026-11-01 — Sprint 13 sign-off
+
+- Sufyan: "sign off sprint 13". Checklist steps not reported individually; recorded on Sufyan's
+  word.
+  Tested in a real trip group, which surfaced the group-order case planned as Sprint 14.
+- Next action / owner: run sprint 14 / agent.
