@@ -8,7 +8,7 @@ Terms used throughout the code, the spec and the export. Implementation details 
 - **Everyone** — the set of trip users in this group at the moment a participant choice is made. Not the Telegram member list, which bots cannot see.
 - **Payer** — the trip user who handed money to the merchant. Defaults to the sender of the expense message; may be overridden with "paid by <name>".
 - **Creator** — the trip user who sent the message that produced the expense. Usually the payer, not always.
-- **Initiator** — the creator of a draft; the only person allowed to move that draft through participants, split method, Done, Confirm, Edit and Cancel.
+- **Initiator** — the creator of a draft; the only person allowed to move that draft through participants, split method, item by item, Confirm, Edit and Cancel.
 - **Participant** — a trip user who consumed part of an expense and therefore owes a share of it.
 
 ## Trips and money
@@ -34,7 +34,9 @@ Terms used throughout the code, the spec and the export. Implementation details 
 - **Share** — the portion of an expense that belongs to one participant, in both currencies. Shares of an expense always sum exactly to the expense amount.
 - **Split method** — how shares were derived: `equal`, `custom`, `items`. Percentage is a planned future method.
 - **Line item** — one priced line from a receipt. Regular items are claimable. **Adjustment lines** (tax, service charge, discount) are never claimable and are allocated proportionally.
-- **Claim** — a participant marking a line item as theirs. An item with several claims is **shared** between those claimants equally.
+- **Unlisted / rounding** — the adjustment line for a receipt total the lines don't reach (or pass); stored as a service charge or discount and shared like tax.
+- **Claim** — a participant marked as having had a line item, by the initiator on its "Who had this?" screen. An item with several claims is **shared** between those claimants equally.
+- **Item by item** — the split that walks the receipt's claimable items one screen at a time, asking "Who had this?".
 - **Candidate total** — a number on a receipt that might be the grand total. The printed grand total is authoritative once chosen.
 - **Reconciliation** — the check that line items plus adjustments equal the receipt total, and that shares sum to the expense amount.
 - **Receipt read** — one attempt to have the model read a receipt photo, whether a new photo or `Try again`.

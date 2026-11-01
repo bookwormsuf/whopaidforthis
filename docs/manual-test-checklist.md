@@ -60,12 +60,13 @@ Result is `pass`, or `fail` with the step numbers. Fixes go in `STATUS.md`.
 14. A receipt printing two different totals → "Which is the final total?" with the totals,
     **Other amount** and **Cancel**. Pick one; the saved amount matches.
 15. On that card, **Other amount** → reply with a number the lines don't make → the difference
-    prompt with **Fix items** / **Use total anyway** / **Cancel**.
-16. **Fix items** → item card with "Still to claim: ¥x", tax listed in the text, an **Unlisted**
-    item. Tap a 🍽 item: your initial appears. **✅ Done (¥x left)** shows a pop-up of what's
-    left. Reply `mine 2,3` to the card: those get your initial. **↪ Rest → everyone** → **✅ Done**
-    → your total with `items ¥a + tax ¥b` under it → **Confirm**. Line Items show `claimed`/`everyone` and the tax
-    `proportional`.
+    prompt with "(¥x isn't on any line; it'll be shared like tax)" and **Continue with ¥y** /
+    **Cancel**.
+16. **Continue** → **Everyone** → **🍽 Go item by item ▶** → "Who had this? (1 of n)". **Next ▶**
+    with nobody ticked: "Pick who had this first". Tick yourself → **Next ▶**; **Everyone** on
+    the rest → check card with `items ¥a + tax ¥b + unlisted ¥c` and "Shared in proportion:
+    … Unlisted / rounding ¥x" → **Confirm**. Line Items show `claimed`/`everyone`, and the tax
+    and Unlisted rows `proportional`.
 17. A blurry photo or a non-receipt → "Couldn't read that receipt" with **Try again** / **Enter
     amount manually**. Enter `2400` as a reply → normal card → Confirm.
 18. A receipt with the caption `dinner` saves as "Dinner". With the caption `split everyone`, it
@@ -91,26 +92,28 @@ B sends `/join` in the test group first (or taps **I'm in too** on your `/join` 
 reads "Joined so far: A, B" and "(2 joined)").
 
 ### Splitting (Sprint 5 steps 1–7)
-26. A: `6000 yen dinner split everyone` → split-method card → **Equally** → both at ¥3,000 →
+26. A: `6000 yen dinner split everyone` → split-method card → **Split equally** → both at ¥3,000 →
     **Confirm**. `/balances` shows B owes A half.
-27. A: `4850 yen dinner` → **Everyone** → **Equally**: ¥2,425 each.
+27. A: `4850 yen dinner` → **Everyone** → **Split equally**: ¥2,425 each.
 28. A: `6000 taxi` → **Choose people** → tick B, untick A → **Next** → B ¥6,000, no share for A
     → **Confirm**.
 29. B: `3000 yen lunch paid by <A's first name> split between me and <A's first name>` → payer
     A, ¥1,500 each → B confirms.
 30. B taps **Confirm** on one of A's open cards → "Only <A> can edit this"; nothing changes.
-31. A: `9000 yen izakaya` → **Everyone** → **Custom** → reply `me 4000` (no Confirm yet), then
+31. A: `9000 yen izakaya` → **Everyone** → **Type amounts instead** → reply `me 4000` (no Confirm yet), then
     reply `<B's name> 5000` → `Remaining: ¥0 ✅` and Confirm appears → **Confirm** →
     **Confirm**.
 32. `/balances`, `/mine` (each of you), `/settle`. Check by hand that the transfers zero out
     `/balances`.
 
-### Item claiming (Sprint 6 steps 1–7)
-33. A sends a restaurant receipt with a tax line → **Everyone** → **By items**. Each taps their
-    own dishes; both tap one shared dish (its button shows both initials) → A taps **Done**.
-    The per-person totals add up exactly to the receipt total → **Confirm**. Line Items show
-    the right user IDs; the tax row says `proportional`.
-34. A supermarket receipt: claim two items, **Rest → everyone**, **Done**, **Confirm**.
-35. B taps **Done** on A's item card → "Only <A> can edit this".
+### Item by item (Sprint 6 steps 1–7, reworked in Sprint 13)
+33. A sends a restaurant receipt with a tax line → **Everyone** → **🍽 Go item by item ▶**. A
+    ticks one name per dish and both names on one shared dish → check card. The per-person
+    totals add up exactly to the receipt total → **Confirm**. Line Items show the right user
+    IDs; the tax row says `proportional`.
+34. A receipt with two of one item: one screen per unit, `(1/2)` and `(2/2)`. Give one to A and
+    share the other between A and B. **Fix an item** → change one → back on the check card →
+    **Confirm**.
+35. B taps a name or **Next ▶** on A's "Who had this?" → "Only <A> can edit this".
 36. `/balances` reflects the itemised expenses. `/undo` the test expenses afterwards if the test
     Sheet should stay tidy.

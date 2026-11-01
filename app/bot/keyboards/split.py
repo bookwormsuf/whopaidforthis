@@ -75,14 +75,16 @@ def participants_keyboard(draft: Draft) -> InlineKeyboardMarkup:
 
 
 def split_method_keyboard(draft_id: str, by_items: bool) -> InlineKeyboardMarkup:
-    """`[Equally] [By items] [Custom]`; `By items` only when the draft has 1 to 40
-    claimable items (spec §8, sprint 6 pin).
+    """One per row: `🍽 Go item by item ▶` (only for 1 to 40 claimable items),
+    `Split equally`, `Type amounts instead`, `Cancel` (sprint 13 pin).
     """
-    row = [_button(draft_id, "Equally", "equal")]
+    rows = []
     if by_items:
-        row.append(_button(draft_id, "By items", "byitems"))
-    row.append(_button(draft_id, "Custom", "custom"))
-    return InlineKeyboardMarkup([row, [_cancel(draft_id)]])
+        rows.append([_button(draft_id, "🍽 Go item by item ▶", "walk")])
+    rows.append([_button(draft_id, "Split equally", "equal")])
+    rows.append([_button(draft_id, "Type amounts instead", "custom")])
+    rows.append([_cancel(draft_id)])
+    return InlineKeyboardMarkup(rows)
 
 
 def custom_keyboard(draft_id: str, balanced: bool) -> InlineKeyboardMarkup:
@@ -92,21 +94,25 @@ def custom_keyboard(draft_id: str, balanced: bool) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([row])
 
 
-def preview_keyboard(draft_id: str, *, retry: bool = False) -> InlineKeyboardMarkup:
-    """`retry=True` (spec §10/§14: a failed save keeps the draft in `preview` with
+def preview_keyboard(
+    draft_id: str, *, retry: bool = False, by_items: bool = False
+) -> InlineKeyboardMarkup:
+    """`Confirm / Edit / Cancel`; an itemised preview (sprint 13) has `Confirm` and
+    `Fix an item` on the first row, `Edit` and `Cancel` on the second.
+
+    `retry=True` (spec §10/§14: a failed save keeps the draft in `preview` with
     a `Retry save` button) relabels Confirm without changing its callback action,
     so pressing it simply calls `confirm` again -- no new state needed.
     """
-    confirm_label = "Retry save" if retry else "Confirm"
-    return InlineKeyboardMarkup(
-        [
+    confirm = _button(draft_id, "Retry save" if retry else "Confirm", "confirm")
+    if by_items:
+        return InlineKeyboardMarkup(
             [
-                _button(draft_id, confirm_label, "confirm"),
-                _button(draft_id, "Edit", "edit"),
-                _button(draft_id, "Cancel", "cancel"),
+                [confirm, _button(draft_id, "Fix an item", "fixlist")],
+                [_button(draft_id, "Edit", "edit"), _cancel(draft_id)],
             ]
-        ]
-    )
+        )
+    return InlineKeyboardMarkup([[confirm, _button(draft_id, "Edit", "edit"), _cancel(draft_id)]])
 
 
 def _candidate_label(person: Person, others: list[Person]) -> str:

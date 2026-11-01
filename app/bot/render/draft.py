@@ -18,7 +18,7 @@ from app.bot.formatting import (
     fmt_signed_money,
     format_expense_amount,
 )
-from app.bot.keyboards.items import items_keyboard
+from app.bot.keyboards.items import fix_list_keyboard, walk_keyboard
 from app.bot.keyboards.receipt import (
     choose_total_keyboard,
     manual_amount_keyboard,
@@ -36,6 +36,7 @@ from app.bot.keyboards.split import (
 from app.models.trip import Trip
 from app.services.drafts import (
     MAX_CLAIMABLE_ITEMS,
+    UNLISTED_DESCRIPTION,
     Draft,
     by_items_available,
     claimable_indices,
@@ -43,7 +44,6 @@ from app.services.drafts import (
     draft_shares,
     original_total,
     person_for,
-    unclaimed_total,
 )
 from app.services.splitting import Custom, Items
 
@@ -90,8 +90,10 @@ def render_draft(
         return _render_split_method(draft, trip)
     if draft.state == "custom":
         return _render_custom(draft, trip)
-    if draft.state == "items":
-        return _render_items(draft, trip)
+    if draft.state == "item_walk":
+        return _render_walk(draft, trip)
+    if draft.state == "fix_list":
+        return _render_fix_list(draft, trip)
     if draft.state == "preview":
         return _render_preview(draft, trip, save_error=save_error)
     if draft.state == "rate_failed":
@@ -156,10 +158,10 @@ def _render_reconcile(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMark
     text = (
         f"🧾 <b>{desc}</b>\n"
         f"Items {items_str} + adjustments {adjustments_str} = {computed_str}\n"
-        f"Receipt total {total_str} (difference {difference_str})\n\n"
-        "Use the receipt total anyway?"
+        f"Receipt total {total_str} (difference {difference_str})\n"
+        f"({difference_str} isn't on any line; it'll be shared like tax)"
     )
-    return text, reconcile_keyboard(draft.draft_id)
+    return text, reconcile_keyboard(draft.draft_id, total_str)
 
 
 def _render_manual_amount(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup | None]:
@@ -217,74 +219,65 @@ def _render_participants(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardM
 
 def _render_split_method(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
     too_many = ""
-    if draft.items_allowed and len(claimable_indices(draft)) > MAX_CLAIMABLE_ITEMS:
+    if len(claimable_indices(draft)) > MAX_CLAIMABLE_ITEMS:
         too_many = "\nToo many items to split individually"
+    question = "Who had what?" if by_items_available(draft) else "How should it be split?"
     text = (
         f"{_header(draft, trip)}\nShared by {_names(draft, draft.participant_ids)}\n\n"
-        f"How should it be split?{too_many}"
+        f"{question}{too_many}"
     )
     return text, split_method_keyboard(draft.draft_id, by_items_available(draft))
 
 
-_ADJUSTMENT_LABELS = {"tax": "Tax", "service_charge": "Service", "discount": "Discount"}
+def _render_walk(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    """ "Who had this? (n of N)", then the item and its amount (sprint 13 pin)."""
+    positions = claimable_indices(draft)
+    item = draft.line_items[positions[draft.walk_index]]
+    text = (
+        f"{_header(draft, trip)}\n\n"
+        f"Who had this?  ({draft.walk_index + 1} of {len(positions)})\n"
+        f"<b>{escape(item.description)}</b> · {fmt_money(item.amount_minor, draft.currency)}"
+    )
+    return text, walk_keyboard(draft)
 
 
-def _render_items(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
-    """The item card (spec §9, sprint 8 wording): what is still to claim, the
-    adjustment lines in the text (never buttons), then how to use the three kinds of
-    button.
-    """
-    lines = [
-        _header(draft, trip),
-        f"Still to claim: <b>{fmt_signed_money(unclaimed_total(draft), draft.currency)}</b>",
-    ]
-    for item in draft.line_items:
-        if item.kind == "item":
-            continue
-        sign = "−" if item.kind == "discount" else ""
-        lines.append(
-            f"{_ADJUSTMENT_LABELS[item.kind]} {sign}"
-            f"{fmt_money(abs(item.amount_minor), draft.currency)} ({escape(item.description)}) "
-            "is shared in proportion."
-        )
-    lines += ["", "🍽 Tap what you had. Tap a shared dish each."]
-    if len(draft.people) > 1:
-        sender = escape(person_for(draft, draft.initiator_id).first_name)
-        if draft.claiming_for is not None:
-            name = escape(person_for(draft, draft.claiming_for).display_name)
-            lines.append(f"👤 {sender}'s taps go to <b>{name}</b>.")
-        else:
-            lines.append(f"👤 {sender} can tap for someone else.")
-    sender = person_for(draft, draft.initiator_id).first_name or "the sender"
-    lines.append(
-        f"↪ gives what's left to everyone. ✅ shows the split to check (only {escape(sender)})."
-    )
-    lines.append(
-        "<i>Or reply: <code>mine 1,4</code> · <code>split 5 everyone</code> · "
-        "<code>unclaim 2</code> · <code>amir 1,3</code></i>"
-    )
-    if draft.items_error:
-        lines.append(f"⚠️ {escape(draft.items_error, quote=False)}")
-    return "\n".join(lines), items_keyboard(draft)
+def _render_fix_list(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    text = f"{_header(draft, trip)}\n\nWhich item do you want to change?"
+    return text, fix_list_keyboard(draft)
 
 
 def _items_preview_lines(draft: Draft, trip: Trip) -> list[str]:
     """Per person `• Ada ¥1,430 (S$11.58)` then `items ¥1,300 + tax ¥130` (sprint 6
-    pin, sprint 8 layout). Service charge shows as its own `+ service` term.
+    pin, sprint 8 layout). Service charge shows as its own `+ service` term, and
+    the `Unlisted / rounding` line as `+ unlisted` (or `− unlisted`), apart from
+    the kind it is stored as (sprint 13).
     """
     split = draft_items_split(draft, trip)
     shares = draft_shares(draft, trip)
     ccy = draft.currency
+    by_kind: dict[str, dict[int, int]] = {}
+    unlisted: dict[int, int] | None = None
+    for index, allocation in split.line_allocations.items():
+        if draft.line_items[index].description == UNLISTED_DESCRIPTION:
+            bucket = unlisted = unlisted if unlisted is not None else {}
+        else:
+            bucket = by_kind.setdefault(draft.line_items[index].kind, {})
+        for uid, part in allocation.items():
+            bucket[uid] = bucket.get(uid, 0) + part
     lines = []
     for pid, (_share_trip, share_home) in shares.items():
         name = escape(person_for(draft, pid).display_name)
         terms = f"items {fmt_signed_money(split.subtotals.get(pid, 0), ccy)}"
         for kind, label in (("tax", "tax"), ("service_charge", "service")):
-            if kind in split.adjustments:
-                terms += f" + {label} {fmt_money(split.adjustments[kind].get(pid, 0), ccy)}"
-        if "discount" in split.adjustments:
-            discount = -split.adjustments["discount"].get(pid, 0)
+            if kind in by_kind:
+                terms += f" + {label} {fmt_money(by_kind[kind].get(pid, 0), ccy)}"
+        if "discount" in by_kind:
+            discount = -by_kind["discount"].get(pid, 0)
             terms += f" − discount {fmt_money(discount, ccy)}"
+        if unlisted is not None:
+            part = unlisted.get(pid, 0)
+            sign = "−" if part < 0 else "+"
+            terms += f" {sign} unlisted {fmt_money(abs(part), ccy)}"
         total = fmt_signed_money(split.shares[pid], ccy)
         if ccy != trip.home_currency:
             total += f" ({fmt_money(share_home, trip.home_currency)})"
@@ -342,9 +335,29 @@ def _render_preview(
             share = format_expense_amount(trip, draft.currency, share_trip, share_home)
             lines.append(f"• {name} {share}")
     text = head + "\n" + "\n".join(lines)
+    if isinstance(draft.split, Items):
+        text += _adjustments_line(draft)
     if save_error:
         text += "\n\n" + SAVE_ERROR_LINE
-    return text, preview_keyboard(draft.draft_id, retry=save_error)
+    keyboard = preview_keyboard(
+        draft.draft_id, retry=save_error, by_items=isinstance(draft.split, Items)
+    )
+    return text, keyboard
+
+
+def _adjustments_line(draft: Draft) -> str:
+    """The adjustment lines, under the shares: `Shared in proportion: VAT ฿80.25 ·
+    Unlisted / rounding ฿0.29` (sprint 13). Empty when there are none.
+    """
+    parts = []
+    for item in draft.line_items:
+        if item.kind == "item":
+            continue
+        sign = "−" if item.kind == "discount" else ""
+        parts.append(
+            f"{escape(item.description)} {sign}{fmt_money(abs(item.amount_minor), draft.currency)}"
+        )
+    return "\n\nShared in proportion: " + " · ".join(parts) if parts else ""
 
 
 def _render_rate_failed(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:

@@ -19,6 +19,7 @@ sprint and points at the master spec sections it implements.
 | 10 | [`/start` menu with buttons](10-start-menu.md) | Add the bot to a group, run a trip by tapping | Yes, ~2 min (delete refusal) |
 | 11 | Dropped 2026-10-15: Google Sheet export, persistent drafts and older-trip export were judged not core. Revisit only on request. | | |
 | 12 | [Receipt read budget](12-receipt-read-budget.md) | Daily cap on receipt reads before going public | Yes, ~5 min (cap at 7 locally) |
+| 13 | [Guided item split](13-guided-item-split.md) | "Who had this?" one item at a time; shared dishes by ticking two names; no typing | Yes, ~2 min (non-initiator tap) |
 
 ## How a sprint runs
 

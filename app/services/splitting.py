@@ -63,7 +63,7 @@ class Custom:
 class Items:
     """`claims` maps a claimable line item (its index in the draft's line items, as
     a string) to its claimants. `everyone` lists the items that went to all
-    participants via `Rest → everyone`, so the Line Items row can say so.
+    participants via `Everyone`, so the Line Items row can say so.
     """
 
     claims: dict[str, list[int]] = field(default_factory=dict)
@@ -165,6 +165,9 @@ class ItemsSplit:
     adjustments: dict[AdjustmentKind, dict[int, int]]
     shares: dict[int, int]
     assignments: dict[int, tuple[list[int], str]]
+    # Each adjustment line's own allocation, by its index in the line items, so a
+    # card can show one line (the `Unlisted / rounding` gap) apart from its kind.
+    line_allocations: dict[int, dict[int, int]] = field(default_factory=dict)
 
 
 def split_items(
@@ -204,8 +207,9 @@ def split_items(
             subtotals[uid] = subtotals.get(uid, 0) + part
         assignments[index] = (sorted(claimants), method)
 
-    # A negative item (an "Unlisted" correction when the lines came to more than
-    # the total) reduces its claimants in proportion to what their items cost, so a
+    # A negative item (before Sprint 13, an "Unlisted" correction when the lines
+    # came to more than the total; the gap is now an adjustment line) reduces its
+    # claimants in proportion to what their items cost, so a
     # claimant with nothing else is not pushed below zero; with no such items
     # between them it is split equally.
     for index, item in enumerate(line_items):
@@ -229,11 +233,13 @@ def split_items(
     weighted_ids = sorted(uid for uid, w in weights.items() if w > 0)
     adjustments: dict[AdjustmentKind, dict[int, int]] = {}
     shares = dict(subtotals)
+    line_allocations: dict[int, dict[int, int]] = {}
     for index, item in enumerate(line_items):
         if item.kind == "item":
             continue
         amount = -abs(item.amount_minor) if item.kind == "discount" else item.amount_minor
         allocated = allocate_proportional(amount, weights, payer_id)
+        line_allocations[index] = allocated
         bucket = adjustments.setdefault(item.kind, {})
         for uid, part in allocated.items():
             bucket[uid] = bucket.get(uid, 0) + part
@@ -244,7 +250,7 @@ def split_items(
         raise SplitError(
             f"item shares sum to {sum(shares.values())}, receipt total is {total_minor}"
         )
-    return ItemsSplit(subtotals, adjustments, shares, assignments)
+    return ItemsSplit(subtotals, adjustments, shares, assignments, line_allocations)
 
 
 def shares_in_both_currencies(
