@@ -20,6 +20,7 @@ sprint and points at the master spec sections it implements.
 | 11 | Dropped 2026-10-15: Google Sheet export, persistent drafts and older-trip export were judged not core. Revisit only on request. | | |
 | 12 | [Receipt read budget](12-receipt-read-budget.md) | Daily cap on receipt reads before going public | Yes, ~5 min (cap at 7 locally) |
 | 13 | [Guided item split](13-guided-item-split.md) | "Who had this?" one item at a time; shared dishes by ticking two names; no typing | Yes, ~2 min (non-initiator tap) |
+| 14 | [Not on this bill](14-not-on-this-bill.md) | Leave out dishes someone else paid for on a group order; amount is "you paid" | No |
 
 ## How a sprint runs
 
