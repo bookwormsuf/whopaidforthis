@@ -1,6 +1,6 @@
 """The item-by-item keyboards (sprint 13 pins): "Who had this?" (a toggle per
-participant, `Everyone`, `Back` / `Next`) and the `Fix an item` list, one button per
-claimable item, `"{n} {desc} {amount} · {initials}"`.
+participant, `Everyone`, `Not on this bill`, `Back` / `Next`) and the `Fix an item`
+list, one button per claimable item, `"{n} {desc} {amount} · {initials}"`.
 """
 
 from __future__ import annotations
@@ -16,6 +16,8 @@ from app.services.names import Person
 
 _MAX_DESCRIPTION_CHARS = 24
 EVERYONE_MARK = "all"
+LEFT_OUT_MARK = "—"
+LEFT_OUT_LABEL = "🚫 Not on this bill"
 _UNIT_SUFFIX = re.compile(r" \(\d+/\d+\)$")
 
 
@@ -61,6 +63,8 @@ def item_button_text(draft: Draft, number: int, index: int, initials: dict[int, 
         keep = max(_MAX_DESCRIPTION_CHARS - len(suffix) - 1, 1)
         description = description[: len(description) - len(suffix)][:keep] + "…" + suffix
     text = f"🍽 {number} {description} {fmt_signed_money(item.amount_minor, draft.currency)}"
+    if index in draft.left_out:
+        return f"{text} · {LEFT_OUT_MARK}"
     claimants = draft.item_claims.get(index, ())
     everyone = set(draft.participant_ids)
     if index in draft.everyone_items or (len(everyone) > 1 and everyone <= set(claimants)):
@@ -72,9 +76,9 @@ def item_button_text(draft: Draft, number: int, index: int, initials: dict[int, 
 
 def walk_keyboard(draft: Draft) -> InlineKeyboardMarkup:
     """One toggle per participant, three per row, `✓ ` when ticked; `Everyone`;
-    `◀ Back` (not on the first item, unless opened from `Fix an item`) and
-    `Next ▶`; `Cancel`. Every button carries the item's position, so a press from
-    an older render changes nothing (sprint 13 pin).
+    `Not on this bill` (sprint 14); `◀ Back` (not on the first item, unless opened
+    from `Fix an item`) and `Next ▶`; `Cancel`. Every button carries the item's
+    position, so a press from an older render changes nothing (sprint 13 pin).
     """
     position = draft.walk_index
     index = claimable_indices(draft)[position]
@@ -91,6 +95,7 @@ def walk_keyboard(draft: Draft) -> InlineKeyboardMarkup:
     ]
     rows = [toggles[i : i + 3] for i in range(0, len(toggles), 3)]
     rows.append([_button(draft.draft_id, "Everyone", "weveryone", str(position))])
+    rows.append([_button(draft.draft_id, LEFT_OUT_LABEL, "wleftout", str(position))])
     moves = []
     if position > 0 or draft.fixing_one:
         moves.append(_button(draft.draft_id, "◀ Back", "wback", str(position)))

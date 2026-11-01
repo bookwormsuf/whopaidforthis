@@ -102,6 +102,7 @@ Who had this?  (2 of 4)
 Egg Sando Set (2/2) · ฿333.73
 [✓ Irina] [✓ Sufyan] [hn]
 [Everyone]
+[🚫 Not on this bill]
 [◀ Back]  [Next ▶]
 ```
 
@@ -125,6 +126,15 @@ If the lines don't add up to the receipt total, the difference becomes one **Unl
 rounding** line, shared like tax. A total you picked or typed gets a prompt first showing the
 difference, with **Continue with <total>** and **Cancel**; a total the bot picked on its own is
 at most 5 off the lines and needs no prompt.
+
+**Group orders where everyone paid their own part.** Some delivery receipts list the whole
+order but also say what you paid ("you paid", "your share"). The bot puts that figure first on
+the total buttons. Pick it, then **Continue**; the prompt suggests marking the rest. Go item by
+item and tap **🚫 Not on this bill** on each dish someone else paid for. Fees and discounts are
+scaled to the dishes you kept, and whatever is still left over (the app's own rounding of its
+split) goes on the **Unlisted / rounding** line. The check card lists what was left out;
+**Fix an item** shows those dishes with `—` and can bring one back by ticking a name. At least one
+dish must stay. **Split equally** and **Type amounts instead** ignore these marks.
 
 ## BotFather setup
 

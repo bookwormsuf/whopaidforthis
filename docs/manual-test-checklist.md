@@ -117,3 +117,7 @@ reads "Joined so far: A, B" and "(2 joined)").
 35. B taps a name or **Next ▶** on A's "Who had this?" → "Only <A> can edit this".
 36. `/balances` reflects the itemised expenses. `/undo` the test expenses afterwards if the test
     Sheet should stay tidy.
+36a. (Sprint 14) A group-order receipt that shows both the order total and what you paid: pick
+    the paid figure, **Continue**, go item by item, tap **🚫 Not on this bill** on the dishes
+    someone else paid for. The check card lists them under "Not on this bill" and the shares add
+    up to what you paid.

@@ -46,8 +46,9 @@ Starts only after Sprint 13 is signed off.
 - The expense amount is the receipt total picked as today (spec §7). With the reading rule
   below, that is the "you paid" figure when the receipt prints one.
 - When items are left out, tax, service charge, delivery, fees and discounts are scaled to the
-  kept items' share of the item sum, using largest remainder (spec §5). Example: kept items worth
-  ฿750 of ฿1,069 get 750/1,069 of each adjustment.
+  kept items' share of the item sum, each rounded half up to the minor unit (any rounding lands
+  on the rounding line below). Example: kept items worth ฿750 of ฿1,069 get 750/1,069 of each
+  adjustment. An adjustment that scales to zero is dropped.
 - The `Unlisted / rounding` line is worked out again when the walk ends, from the kept items
   plus the scaled adjustments against the amount. It is spread like tax, as in Sprint 13. On
   Irina's receipt the line is only Grab's own rounding of its group split, a few baht.
@@ -75,14 +76,22 @@ Starts only after Sprint 13 is signed off.
   list both in `candidate_totals`, and set `is_grand_total_guess` on the paid figure only.
 - If the reader marks both, or neither, the existing total buttons ask (spec §7). No new
   schema field.
+- **Agent's call at build, open to change:** spec §7's rule only picks a guess on its own when
+  it is within 5 of the lines. A "you paid" figure is far from them, so the bot still asks,
+  with the paid figure as the first button, and then shows the reconciliation prompt with the
+  "Paid for part of the order?" line. Picking it automatically would mean loosening §7 for every
+  receipt, which also guards against a misread total. So the amount is the paid figure after one
+  tap, not straight away.
 
 ## Agent builds
-1. `app/services/drafts.py`: a `left_out: frozenset[int]` field on `Draft` (claimable positions);
+1. `app/services/drafts.py`: a `left_out: frozenset[int]` field on `Draft` (indices into
+   `line_items`, like `item_claims`);
    `walk_left_out(draft_id, presser_id, position)`; toggling a name on a left-out item brings it
-   back; the "keep at least one" guard; the rounding line worked out again in `_walk_done` from
-   kept items with scaled adjustments; the saved line items. Tests first.
-2. `app/services/splitting.py`: scale adjustments to the kept share (largest remainder). Shares
-   still sum to the amount in both currencies.
+   back; the "keep at least one" guard; `billed(draft)`, the kept items with scaled adjustments
+   and the rounding line worked out again, used for the shares, the summary and the saved line
+   items. Tests first.
+2. `app/services/splitting.py`: unchanged; `split_items` runs on the billed lines. Shares still
+   sum to the amount in both currencies.
 3. `app/bot/keyboards/items.py`: the `Not on this bill` row; `—` in the fix list.
 4. `app/bot/render/draft.py`: "Not on this bill" on the walk card; the summary line; the new
    reconcile line.
@@ -109,12 +118,13 @@ Starts only after Sprint 13 is signed off.
 - The reconcile prompt shows the "Paid for part of the order?" line only when the total is
   below the lines and item-by-item is on offer.
 - `Split equally` after leaving items out splits the full amount.
-- Receipt reading: a recorded Grab-style reading with both figures picks the paid figure with
-  no question.
+- Receipt reading: the instruction names the "you paid" wording; a Grab-style reading with both
+  figures offers the paid figure as the first total button.
 
 ## After: your checklist
-1. Photo of a group-order receipt that shows both an order total and what you paid. The card
-   amount is the paid figure.
+1. Photo of a group-order receipt that shows both an order total and what you paid. The paid
+   figure is the first total button; pick it. The prompt says "Paid for part of the order?";
+   `Continue`.
 2. `Everyone` or pick people → `Go item by item`. Mark two dishes `Not on this bill`, assign the
    rest.
 3. Try to mark the last remaining dish `Not on this bill` too: "Keep at least one item, or
