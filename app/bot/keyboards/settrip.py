@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-# Sprint 9 pin (spec §18): SGD, MYR, JPY, CNY shown first, then "Other…" (a 3-letter
-# code by reply). Same order for both the trip- and home-currency keyboards.
-_CCY_CHOICES: list[str] = ["SGD", "MYR", "JPY", "CNY"]
-TRIP_CCY_CHOICES: list[str] = _CCY_CHOICES
-HOME_CCY_CHOICES: list[str] = _CCY_CHOICES
+# Sprint 9 pin (spec §18), then "Other…" (a 3-letter code by reply). Amended
+# 2026-11-01: the trip currency offers THB in SGD's place, since SGD is the home
+# currency rather than somewhere a trip goes; the home currency keeps SGD.
+TRIP_CCY_CHOICES: list[str] = ["THB", "MYR", "JPY", "CNY"]
+HOME_CCY_CHOICES: list[str] = ["SGD", "MYR", "JPY", "CNY"]
 
 _OTHER = "Other…"
 _ROW_WIDTH = 3

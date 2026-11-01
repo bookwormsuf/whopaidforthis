@@ -1030,3 +1030,5 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   each failing on the old code. 500 passed, ruff clean.
 - Next action / owner: merge and deploy; meanwhile `/cancel` in the group clears the stuck setup
   / Sufyan.
+- Same PR, at Sufyan's request: the trip currency buttons show THB in SGD's place (THB, MYR,
+  JPY, CNY, Other…); the home currency buttons keep SGD. Spec §18 amended. 501 passed.

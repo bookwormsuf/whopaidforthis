@@ -185,7 +185,7 @@ At startup the bot creates a small connection pool and applies any pending migra
 ### Starting a trip
 
 In the Telegram group for the trip, run `/settrip`. It asks three quick questions with buttons:
-the trip currency (what you're paying in — SGD, MYR, JPY, CNY shown first, then **Other…** for
+the trip currency (what you're paying in — THB, MYR, JPY, CNY shown first, then **Other…** for
 any other 3-letter code), the home currency (what you'll settle up in), and the timezone
 (defaults to the one that matches the trip currency, e.g. Japan → Asia/Tokyo). Confirm, and the
 trip is saved. A group that already has an open trip gets a new one — the old trip is closed,

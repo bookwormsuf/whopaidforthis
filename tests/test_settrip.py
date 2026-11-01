@@ -65,8 +65,8 @@ async def test_settrip_goes_straight_to_trip_currency_buttons() -> None:
     (text,), kwargs = update.effective_message.reply_text.call_args
     assert text == "Trip currency?"
     buttons = [b.text for row in kwargs["reply_markup"].inline_keyboard for b in row]
-    # Spec §18 pin: SGD, MYR, JPY, CNY shown first, then Other….
-    assert buttons == ["SGD", "MYR", "JPY", "CNY", "Other…"]
+    # Spec §18 pin, amended 2026-11-01: THB in SGD's place for the trip currency.
+    assert buttons == ["THB", "MYR", "JPY", "CNY", "Other…"]
     assert len(deps.settrip_sessions._sessions) == 1
 
 
@@ -198,7 +198,20 @@ async def test_settrip_start_new_trip_moves_on_to_currency_buttons() -> None:
     (text,), kwargs = start_new_update.callback_query.edit_message_text.call_args
     assert text == "Trip currency?"
     buttons = [b.text for row in kwargs["reply_markup"].inline_keyboard for b in row]
-    assert buttons == ["SGD", "MYR", "JPY", "CNY", "Other…"]
+    assert buttons == ["THB", "MYR", "JPY", "CNY", "Other…"]
+
+
+def test_home_currency_buttons_keep_sgd() -> None:
+    from app.bot.keyboards.settrip import home_currency_keyboard
+
+    markup = home_currency_keyboard("01SESSION0000000000000000")
+    assert [b.text for row in markup.inline_keyboard for b in row] == [
+        "SGD",
+        "MYR",
+        "JPY",
+        "CNY",
+        "Other…",
+    ]
 
 
 async def test_settrip_again_closes_the_old_open_trip() -> None:
