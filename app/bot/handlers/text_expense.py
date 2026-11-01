@@ -32,6 +32,7 @@ from app.services.drafts import (
     DraftError,
     DraftExpired,
     DraftToast,
+    DraftUnchanged,
     NotInitiator,
 )
 from app.services.expense_parser import parse_expense
@@ -83,8 +84,8 @@ async def text_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     # through and parses as usual.
     if await handle_manual_amount_reply(update, context):
         return
-    # Likewise a reply to a custom-split card carries `<name> <amount>` lines, and a
-    # reply to an item card carries `mine 1,4`-style shortcuts.
+    # Likewise a reply to a custom-split card carries `<name> <amount>` lines; a
+    # reply to an item screen is swallowed, never read as a new expense.
     if await handle_custom_split_reply(update, context):
         return
     if await handle_item_reply(update, context):
@@ -199,8 +200,8 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     await answer()
                     return
                 draft = await deps.draft_service.choose_total(draft_id, presser.id, index)
-            elif action == "usetotal":
-                draft = await deps.draft_service.use_total_anyway(draft_id, presser.id)
+            elif action == "continue":
+                draft = await deps.draft_service.continue_total(draft_id, presser.id)
             elif action == "retry":
                 # Check first, take the budget second (spec §20): a press that
                 # `check_retry` would refuse (non-initiator, expired, wrong state, or a
@@ -265,15 +266,31 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 draft = await deps.draft_service.finish_custom(draft_id, presser.id)
             elif action == "edit":
                 draft = await deps.draft_service.edit(draft_id, presser.id)
-            elif action == "byitems":
-                draft = await deps.draft_service.choose_by_items(draft_id, presser.id)
-            elif action == "item":
+            elif action == "walk":
+                draft = await deps.draft_service.start_walk(draft_id, presser.id)
+            elif action in ("wtoggle", "weveryone", "wnext", "wback", "fixpick"):
+                numbers = _arg.split(",")
                 try:
-                    index = int(_arg)
-                except ValueError:
+                    position = int(numbers[0])
+                    user_id = int(numbers[1]) if action == "wtoggle" else 0
+                except (ValueError, IndexError):
                     await answer()
                     return
-                draft = await deps.draft_service.toggle_item(draft_id, presser.id, index)
+                service = deps.draft_service
+                if action == "wtoggle":
+                    draft = await service.walk_toggle(draft_id, presser.id, position, user_id)
+                elif action == "weveryone":
+                    draft = await service.walk_everyone(draft_id, presser.id, position)
+                elif action == "wnext":
+                    draft = await service.walk_next(draft_id, presser.id, position)
+                elif action == "wback":
+                    draft = await service.walk_back(draft_id, presser.id, position)
+                else:
+                    draft = await service.fix_pick(draft_id, presser.id, position)
+            elif action == "fixlist":
+                draft = await deps.draft_service.fix_list(draft_id, presser.id)
+            elif action == "fixback":
+                draft = await deps.draft_service.fix_back(draft_id, presser.id)
             elif action == "payer":
                 try:
                     user_id = int(_arg)
@@ -281,22 +298,6 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     await answer()
                     return
                 draft = await deps.draft_service.set_payer(draft_id, presser.id, user_id)
-            elif action == "for":
-                if _arg == "next":
-                    draft = await deps.draft_service.cycle_claiming_for(draft_id, presser.id)
-                else:
-                    try:
-                        user_id = int(_arg)
-                    except ValueError:
-                        await answer()
-                        return
-                    draft = await deps.draft_service.set_claiming_for(draft_id, presser.id, user_id)
-            elif action == "rest":
-                draft = await deps.draft_service.rest_to_everyone(draft_id, presser.id)
-            elif action == "done":
-                draft = await deps.draft_service.items_done(draft_id, presser.id)
-            elif action == "fix":
-                draft = await deps.draft_service.fix_items(draft_id, presser.id)
             else:
                 await answer()
                 return
@@ -306,6 +307,9 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 await query.edit_message_text(EXPIRED_TEXT, parse_mode="HTML")
             except Exception:  # noqa: BLE001 - editing an already-changed message is not fatal
                 logger.debug("draft %s: could not edit expired draft message", draft_id)
+            return
+        except DraftUnchanged:
+            await answer()  # a press from an older render of the card: ignored
             return
         except NotInitiator as exc:
             await answer(f"Only {exc.initiator_name} can edit this")

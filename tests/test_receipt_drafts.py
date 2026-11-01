@@ -129,9 +129,16 @@ async def test_ambiguous_total_asks_then_choose_total_proceeds() -> None:
     # 2618 != computed (2380) -> reconcile state
     assert chosen.state == "reconcile"
 
-    proceeded = await service.use_total_anyway(chosen.draft_id, presser_id=42)
+    proceeded = await service.continue_total(chosen.draft_id, presser_id=42)
     assert proceeded.state == "detected"
     assert proceeded.amount_minor == 2618
+    # The gap is one adjustment line, shared like tax (sprint 13 pin).
+    gap = proceeded.line_items[-1]
+    assert (gap.description, gap.kind, gap.amount_minor) == (
+        "Unlisted / rounding",
+        "service_charge",
+        2618 - 2380,
+    )
 
 
 async def test_confident_total_within_tolerance_skips_reconciliation() -> None:
@@ -204,9 +211,9 @@ async def test_reconcile_state_renders_numbers() -> None:
     assert "¥100" in text  # adjustments
     assert "¥2,618" in text  # total
     assert "¥138" in text  # difference
+    assert "(¥138 isn't on any line; it'll be shared like tax)" in text
     assert [b.text for row in markup.inline_keyboard for b in row] == [
-        "Fix items",
-        "Use total anyway",
+        "Continue with ¥2,618",
         "Cancel",
     ]
 
@@ -450,6 +457,6 @@ async def test_single_total_far_from_items_asks_to_reconcile() -> None:
     )
     assert draft.state == "reconcile"
     assert draft.amount_minor == 1200
-    proceeded = await service.use_total_anyway(draft.draft_id, presser_id=42)
+    proceeded = await service.continue_total(draft.draft_id, presser_id=42)
     assert proceeded.state == "detected"
     assert proceeded.amount_minor == 1200

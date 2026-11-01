@@ -54,10 +54,10 @@ async def test_step1_split_everyone_two_people() -> None:
     card = await group.send(ADA, "6000 yen dinner split everyone")
     assert card is not None
     # Everyone selected straight from the message: the split-method card.
-    assert card.buttons == ["Equally", "Custom", "Cancel"]
+    assert card.buttons == ["Split equally", "Type amounts instead", "Cancel"]
     assert "Shared by Ada, Bo" in card.text
 
-    await group.press(ADA, card, "Equally")
+    await group.press(ADA, card, "Split equally")
     assert "• Ada ¥3,000 (S$24.30)" in card.text
     assert "• Bo ¥3,000 (S$24.30)" in card.text
     assert card.buttons == ["Confirm", "Edit", "Cancel"]
@@ -87,7 +87,7 @@ async def test_step2_everyone_button_remainder_skips_payer() -> None:
     assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
 
     await group.press(ADA, card, "Everyone")
-    await group.press(ADA, card, "Equally")
+    await group.press(ADA, card, "Split equally")
     draft_id = card.draft_id
     await _confirm(group, ADA, card)
 
@@ -102,7 +102,7 @@ async def test_step2_two_people_even_split() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await group.send(ADA, "4850 yen dinner")
     await group.press(ADA, card, "Everyone")
-    await group.press(ADA, card, "Equally")
+    await group.press(ADA, card, "Split equally")
     assert "• Ada ¥2,425" in card.text and "• Bo ¥2,425" in card.text
 
 
@@ -148,10 +148,10 @@ async def test_step4_paid_by_and_split_between_from_tester_b() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await group.send(BO, "3000 yen lunch paid by Ada split between me and Ada")
     # Both names resolved: participants card skipped, split method asked.
-    assert card.buttons == ["Equally", "Custom", "Cancel"]
+    assert card.buttons == ["Split equally", "Type amounts instead", "Cancel"]
     assert "Ada paid" in card.text
 
-    await group.press(BO, card, "Equally")
+    await group.press(BO, card, "Split equally")
     assert "• Ada ¥1,500" in card.text
     assert "• Bo ¥1,500" in card.text
 
@@ -173,7 +173,7 @@ async def test_step4_paid_by_and_split_between_from_tester_b() -> None:
 async def test_step5_non_initiator_gets_toast_and_no_change(label: str) -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await group.send(ADA, "6000 yen dinner split everyone")
-    await group.press(ADA, card, "Equally")
+    await group.press(ADA, card, "Split equally")
     before = (card.text, card.buttons)
 
     toast = await group.press(BO, card, label)
@@ -201,7 +201,7 @@ async def test_step6_custom_split_by_replies() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await group.send(ADA, "9000 yen izakaya")
     await group.press(ADA, card, "Everyone")
-    await group.press(ADA, card, "Custom")
+    await group.press(ADA, card, "Type amounts instead")
     assert "Reply to this message with one line per person" in card.text
     assert "Remaining: ¥9,000 ❌" in card.text
     assert card.buttons == ["Cancel"]
@@ -231,7 +231,7 @@ async def test_custom_over_total_shows_negative_remaining_and_no_confirm() -> No
     group = await FakeGroup.create(ADA, BO)
     card = await group.send(ADA, "9000 yen izakaya")
     await group.press(ADA, card, "Everyone")
-    await group.press(ADA, card, "Custom")
+    await group.press(ADA, card, "Type amounts instead")
     await group.send(ADA, "me 4000\nbo 5500", reply_to=card)
     card = group.cards[card.message_id]
     assert "Remaining: −¥500 ❌" in card.text
@@ -242,7 +242,7 @@ async def test_custom_unmentioned_person_dropped_and_problems_listed() -> None:
     group = await FakeGroup.create(ADA, BO, CY)
     card = await group.send(ADA, "9000 yen izakaya")
     await group.press(ADA, card, "Everyone")
-    await group.press(ADA, card, "Custom")
+    await group.press(ADA, card, "Type amounts instead")
     await group.send(ADA, "ada 9000\nzed 100", reply_to=card)
     card = group.cards[card.message_id]
     assert "⚠️ Who is 'zed'?" in card.text
@@ -257,7 +257,7 @@ async def test_custom_reply_from_someone_else_is_ignored() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await group.send(ADA, "9000 yen izakaya")
     await group.press(ADA, card, "Everyone")
-    await group.press(ADA, card, "Custom")
+    await group.press(ADA, card, "Type amounts instead")
     before = card.text
     # Bo's reply neither changes the card nor starts a ¥5,000 expense.
     assert await group.send(BO, "Bo 5000", reply_to=card) is None
@@ -269,7 +269,7 @@ async def test_custom_confirm_pressed_while_unbalanced_is_a_toast() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await group.send(ADA, "9000 yen izakaya")
     await group.press(ADA, card, "Everyone")
-    await group.press(ADA, card, "Custom")
+    await group.press(ADA, card, "Type amounts instead")
     await group.send(ADA, "me 9000", reply_to=card)
     card = group.cards[card.message_id]
     stale = card.callback_for("Confirm")
@@ -288,14 +288,14 @@ async def test_custom_confirm_pressed_while_unbalanced_is_a_toast() -> None:
 async def test_edit_returns_to_participants_keeping_amount_and_payer() -> None:
     group = await FakeGroup.create(ADA, BO, CY)
     card = await group.send(BO, "6000 yen dinner paid by Ada split between me and Ada")
-    await group.press(BO, card, "Equally")
+    await group.press(BO, card, "Split equally")
     await group.press(BO, card, "Edit")
     assert card.buttons == ["✓ Ada", "✓ Bo", "Cy", "Next", "Cancel"]
     assert "¥6,000" in card.text and "Ada paid" in card.text
 
     await group.press(BO, card, "Cy")
     await group.press(BO, card, "Next")
-    await group.press(BO, card, "Equally")
+    await group.press(BO, card, "Split equally")
     assert "¥6,000" in card.text
     assert "• Ada ¥2,000" in card.text
     assert "• Bo ¥2,000" in card.text and "• Cy ¥2,000" in card.text
@@ -313,7 +313,7 @@ async def test_ambiguous_name_asks_with_candidates() -> None:
     assert card.buttons == ["Jo Lim", "Jo Tan", "Not sure, choose people", "Cancel"]
 
     await group.press(ADA, card, "Jo Tan")
-    assert card.buttons == ["Equally", "Custom", "Cancel"]
+    assert card.buttons == ["Split equally", "Type amounts instead", "Cancel"]
     assert "Shared by Ada, Jo Tan" in card.text
 
 
@@ -362,10 +362,10 @@ async def test_steps7_and_8_balances_settle_and_undo() -> None:
     group = await FakeGroup.create(ADA, BO, CY)
     # Ada pays ¥9,000 for everyone; Bo pays ¥3,000 for Bo and Cy.
     card = await group.send(ADA, "9000 yen dinner split everyone")
-    await group.press(ADA, card, "Equally")
+    await group.press(ADA, card, "Split equally")
     await _confirm(group, ADA, card)
     card = await group.send(BO, "3000 yen taxi split between me and cy")
-    await group.press(BO, card, "Equally")
+    await group.press(BO, card, "Split equally")
     await _confirm(group, BO, card)
 
     # Home: dinner S$72.90 = 24.30 each; taxi S$24.30 = 12.15 each.
@@ -438,7 +438,7 @@ async def test_home_currency_custom_split() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await group.send(ADA, "S$30 grab")
     await group.press(ADA, card, "Everyone")
-    await group.press(ADA, card, "Custom")
+    await group.press(ADA, card, "Type amounts instead")
     await group.send(ADA, "me S$10\nbo S$20", reply_to=card)
     card = group.cards[card.message_id]
     assert "Remaining: S$0.00 ✅" in card.text
@@ -455,7 +455,7 @@ async def test_home_currency_custom_split_with_bare_numbers() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await group.send(ADA, "S$12 grab")
     await group.press(ADA, card, "Everyone")
-    await group.press(ADA, card, "Custom")
+    await group.press(ADA, card, "Type amounts instead")
     await group.send(ADA, "Me 6\nBo 6", reply_to=card)
     card = group.cards[card.message_id]
     assert "Remaining: S$0.00 ✅" in card.text
@@ -465,7 +465,7 @@ async def test_home_currency_custom_split_with_bare_numbers() -> None:
 async def test_settle_warns_when_recorded_shares_do_not_add_up() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await group.send(ADA, "6000 yen dinner split everyone")
-    await group.press(ADA, card, "Equally")
+    await group.press(ADA, card, "Split equally")
     draft_id = await _confirm(group, ADA, card)
     # Simulate a hand edit: drop Bo's Splits row.
     expense = group.ledger.expense_for(draft_id)
@@ -486,7 +486,7 @@ async def test_custom_amount_in_the_other_currency_is_rejected() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await group.send(ADA, "9000 yen izakaya")
     await group.press(ADA, card, "Everyone")
-    await group.press(ADA, card, "Custom")
+    await group.press(ADA, card, "Type amounts instead")
     await group.send(ADA, "me S$10", reply_to=card)
     card = group.cards[card.message_id]
     assert "Use ¥ amounts for this expense" in card.text
@@ -503,7 +503,7 @@ async def test_who_paid_step_when_nobody_is_tagged() -> None:
     assert "Bo paid" in card.text
     assert card.buttons == ["Just me", "Everyone", "Choose people", "Cancel"]
     await group.press(ADA, card, "Everyone")
-    await group.press(ADA, card, "Equally")
+    await group.press(ADA, card, "Split equally")
     draft_id = card.draft_id
     await group.press(ADA, card, "Confirm")
     assert group.ledger.expense_for(draft_id).payer_user_id == BO.id
@@ -537,13 +537,14 @@ async def test_who_paid_is_asked_even_with_a_split_clause() -> None:
     assert card.text.endswith("Who paid?")
     await group.press(ADA, card, "Bo")
     assert "Bo paid" in card.text
-    assert card.buttons == ["Equally", "Custom", "Cancel"]  # the clause chose everyone
+    # The clause chose everyone.
+    assert card.buttons == ["Split equally", "Type amounts instead", "Cancel"]
 
     group = await FakeGroup.create(ADA, BO, CY)
     card = await group.send(ADA, "3000 yen taxi split between me and cy", who_paid=False)
     assert card.text.endswith("Who paid?")
     await group.press(ADA, card, "Me")
-    await group.press(ADA, card, "Equally")
+    await group.press(ADA, card, "Split equally")
     draft = await group.deps.draft_service._drafts.get(card.draft_id)
     assert (draft.payer_id, set(draft.participant_ids)) == (ADA.id, {ADA.id, CY.id})
 
@@ -556,4 +557,4 @@ async def test_who_paid_is_asked_for_a_receipt_captioned_with_a_split() -> None:
     assert card.text.endswith("Who paid?")
     await group.press(ADA, card, "Bo")
     assert "Bo paid" in card.text
-    assert "Equally" in card.buttons
+    assert "Split equally" in card.buttons

@@ -44,7 +44,7 @@ Postgres tables, created by `app/db/migrations/001_initial.sql`:
 | `trip_users` | one person in a trip | Telegram user ID, name, joined |
 | `expenses` | one confirmed or cancelled expense | payer, description, original amount, trip and home amounts, rate, split method, status |
 | `splits` | one person's share of one expense | share in trip and home currency |
-| `line_items` | one line from a receipt | amount, who had it, `claimed` / `everyone` / `proportional` for a By items split (`unassigned` otherwise), kind |
+| `line_items` | one line from a receipt | amount, who had it, `claimed` / `everyone` / `proportional` for an item-by-item split (`unassigned` otherwise), kind |
 | `exchange_rates` | one cached rate | currency pair, requested date, rate date, rate |
 
 Amounts are stored in minor units (yen as whole numbers, SGD in cents). Every expense's shares
@@ -65,9 +65,9 @@ paid?** with a button per person (you as **Me**).
 
 With more than one participant the card asks how to split:
 
-- **Equally** — everyone gets `total // n`; the leftover minor units (yen, cents) go one each
+- **Split equally** — everyone gets `total // n`; the leftover minor units (yen, cents) go one each
   to participants in Telegram user ID order, skipping the payer while anyone else is left.
-- **Custom** — reply to the card with one line per person, e.g. `Amir 2000`. The card shows
+- **Type amounts instead** — reply to the card with one line per person, e.g. `Amir 2000`. The card shows
   each person's amount and `Remaining: ¥0 ✅` once they add up exactly; **Confirm** only
   appears then. Anyone you don't mention gets nothing and is dropped.
 
@@ -92,35 +92,39 @@ up exactly to the expense amount in both currencies.
 
 ### Itemised receipts
 
-On a receipt with 1 to 40 items, the split-method card offers **By items** next to Equally and
-Custom. The item card's buttons come in three kinds, each with its own emoji:
+On a receipt with 1 to 40 items, the split card asks "Who had what?" and offers, one per row,
+**🍽 Go item by item ▶**, **Split equally** and **Type amounts instead**.
 
-- **🍽 items**, one per item, `🍽 3 Gyoza ¥600 · AB`, with the initials of whoever claimed it.
-  Anyone who has joined taps the items they had; tapping again un-claims. A shared dish is
-  tapped by each person who shared it and split equally between them. Tapping adds you to the
-  expense if you weren't in it.
-- **👤 Tapping for: Me ▸** (only the sender) moves on to the next person each time it is
-  pressed, back round to Me. While it shows someone else, the sender's taps go to them. Or
-  reply `amir 1,3`.
-- **↪ Rest → everyone** gives every unclaimed item to everyone in the expense. Tap one of those
-  items to make it just yours again. **✅ Done** (only the sender) shows the split to check once
-  nothing is unclaimed; until then it reads `✅ Done (¥x left)`.
+Item by item shows one item at a time, in the order printed on the receipt:
 
-The card's text says how much is still to claim. Tax, service charge and discount lines are
-listed in the text, never as buttons. Reply to the item card with `mine 1,4`,
-`split 5 everyone` or `unclaim 2` instead of tapping.
+```
+Who had this?  (2 of 4)
+Egg Sando Set (2/2) · ฿333.73
+[✓ Irina] [✓ Sufyan] [hn]
+[Everyone]
+[◀ Back]  [Next ▶]
+```
+
+Tap the names of whoever had it, then **Next ▶**. Two or more names means they shared it,
+split equally. **Everyone** gives the item to everyone and moves on. **Next ▶** with nobody
+ticked says "Pick who had this first". A line with a quantity of 2 to 10 gets one screen per
+unit, `(1/2)` and `(2/2)`, so one set can go to one person and the other be shared. Only the
+person who sent the receipt can press these buttons.
+
+After the last item the check card shows each person's total with `items ¥a + tax ¥b` under
+it, and the tax, service, discount and unlisted lines it spread. **Fix an item** lists every
+item with the initials of who had it; pick one, answer it again, and you are back on the check
+card. **Edit** goes back to choosing people; picks for people still in are kept.
 
 Tax, service charge and discounts are spread in proportion to what each person's items cost
-(largest-remainder method, so the yen add up exactly); someone with no items pays none of them.
-The preview shows each person's total with `items ¥a + tax ¥b − discount ¥c` under it, and
-**Edit** returns to the item card with the claims kept. The `Line Items` tab records who had each item and whether it
+(largest-remainder method, so the yen add up exactly); someone with no items pays none of them
+and is saved with a zero share. The `Line Items` tab records who had each item and whether it
 was `claimed`, went to `everyone`, or was spread `proportional`ly.
 
-If the lines don't add up to the receipt total you picked, **Fix items** on that prompt opens the
-item card with an extra **Unlisted** item for the difference (negative if the lines come to
-more), to be claimed like any other. A total the bot picked on its own is at most 5 off the
-lines; that small gap also becomes an Unlisted item. **Use total anyway** keeps the total but
-turns By items off for that receipt.
+If the lines don't add up to the receipt total, the difference becomes one **Unlisted /
+rounding** line, shared like tax. A total you picked or typed gets a prompt first showing the
+difference, with **Continue with <total>** and **Cancel**; a total the bot picked on its own is
+at most 5 off the lines and needs no prompt.
 
 ## BotFather setup
 
@@ -214,8 +218,9 @@ totals section at the bottom — the clearer and flatter the photo, the better t
 If the receipt shows more than one number that could be the total (for example a
 tax-included and a tax-excluded total both printed), the bot asks "Which is the final
 total?" with buttons for each candidate, plus **Other amount** to type it yourself. If the
-total you pick doesn't match the line items added up, it shows the difference with **Fix
-items**, **Use total anyway** and **Cancel** — the total you chose is always what gets saved.
+total you pick doesn't match the line items added up, it shows the difference with **Continue
+with <total>** and **Cancel**; the difference is shared like tax. The total you chose is always
+what gets saved.
 
 If the bot can't read a receipt at all (too blurry, not a receipt), it says "Couldn't read
 that receipt" with two buttons: **Try again** (re-reads the same photo) and **Enter amount
@@ -326,7 +331,7 @@ bot:     🧾 Ramen · ¥1,200 (S$9.72)
          Rate 1 JPY = 0.00810 SGD (1 Oct)
          Who should share this?
          [Just me] [Everyone] [Choose people] [Cancel]
-Ada:     (taps Everyone, then Equally)
+Ada:     (taps Everyone, then Split equally)
 bot:     Check before saving
          🧾 Ramen · ¥1,200 (S$9.72)
          Ada paid

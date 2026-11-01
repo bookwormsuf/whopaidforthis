@@ -33,13 +33,16 @@ def choose_total_keyboard(
     )
 
 
-def reconcile_keyboard(draft_id: str) -> InlineKeyboardMarkup:
-    """`Fix items` / `Use total anyway` / `Cancel` (spec §7)."""
+def reconcile_keyboard(draft_id: str, total_label: str) -> InlineKeyboardMarkup:
+    """`Continue with <total>` / `Cancel` (sprint 13 pin): the gap is shared like
+    tax, so there is nothing else to choose.
+    """
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("Fix items", callback_data=f"{draft_id}:fix:-"),
-                InlineKeyboardButton("Use total anyway", callback_data=f"{draft_id}:usetotal:-"),
+                InlineKeyboardButton(
+                    f"Continue with {total_label}", callback_data=f"{draft_id}:continue:-"
+                )
             ],
             [InlineKeyboardButton("Cancel", callback_data=f"{draft_id}:cancel:-")],
         ]

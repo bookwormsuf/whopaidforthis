@@ -232,7 +232,7 @@ async def test_total_choice_callback_proceeds_to_reconcile() -> None:
     await draft_callback(callback_update, context)
     callback_update.callback_query.edit_message_text.assert_awaited_once()
     (text,), kwargs = callback_update.callback_query.edit_message_text.call_args
-    assert "Use the receipt total anyway?" in text
+    assert "isn't on any line; it'll be shared like tax" in text
 
 
 def _draft_id_from(update: MagicMock) -> str:

@@ -318,48 +318,6 @@ def parse_custom_line(
     return CustomLine(name_text, located.amount_minor, located.currency)
 
 
-_ITEM_COMMAND_RE = re.compile(
-    r"^(?P<verb>mine|unclaim|split)\s+(?P<numbers>\d+(?:\s*,\s*\d+|\s+\d+)*)"
-    r"(?P<everyone>\s+(?:everyone|all))?$",
-    re.IGNORECASE,
-)
-
-
-def parse_item_command(line: str) -> tuple[str, list[int]] | None:
-    """An item-card text shortcut (spec §9): `mine 1,4`, `unclaim 2`,
-    `split 5 everyone`. Returns `(verb, item numbers)`, verb one of `mine`,
-    `unclaim`, `everyone`; `None` if the line is not one of these.
-    """
-    match = _ITEM_COMMAND_RE.match(line.strip())
-    if match is None:
-        return None
-    verb = match.group("verb").lower()
-    has_everyone = match.group("everyone") is not None
-    if (verb == "split") != has_everyone:
-        return None  # `split` needs `everyone`; `mine`/`unclaim` must not have it
-    numbers = [int(n) for n in re.findall(r"\d+", match.group("numbers"))]
-    return ("everyone" if verb == "split" else verb), numbers
-
-
-_ITEM_ASSIGN_RE = re.compile(
-    r"^(?P<who>@?[^\d\s,][^\d,]*?)\s+(?P<numbers>\d+(?:\s*,\s*\d+|\s+\d+)*)$"
-)
-
-
-def parse_item_assignment(line: str) -> tuple[str, list[int]] | None:
-    """`amir 1,3` on the item card: the sender gives items 1 and 3 to Amir (added
-    2026-10-02). Returns `(name as written, item numbers)`, or `None`. The verbs of
-    `parse_item_command` are not names.
-    """
-    match = _ITEM_ASSIGN_RE.match(line.strip())
-    if match is None:
-        return None
-    who = match.group("who").strip()
-    if who.casefold() in {"mine", "unclaim", "split"}:
-        return None
-    return who, [int(n) for n in re.findall(r"\d+", match.group("numbers"))]
-
-
 def parse_expense(
     text: str, trip_currency: str, home_currency: str, bot_username: str
 ) -> ParsedExpense | None:
