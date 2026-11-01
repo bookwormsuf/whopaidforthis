@@ -67,6 +67,15 @@ class SettripSessionStore:
     def delete(self, session_id: str) -> None:
         self._sessions.pop(session_id, None)
 
+    def discard_for(self, chat_id: int, user_id: int | None = None) -> None:
+        """Drops every session in this chat, or only `user_id`'s. A setup that is
+        replaced or finished must not linger: one left waiting on typed text would
+        catch the person's messages for the rest of its 30 minutes.
+        """
+        for session in list(self._sessions.values()):
+            if session.chat_id == chat_id and user_id in (None, session.initiator_id):
+                del self._sessions[session.session_id]
+
     def find_pending_for(self, chat_id: int, user_id: int) -> SettripSession | None:
         """Any live session for this chat and initiator, expired ones evicted."""
         for session in list(self._sessions.values()):
