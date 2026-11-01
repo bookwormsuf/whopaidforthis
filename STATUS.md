@@ -22,6 +22,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 9 Neon store and export | written 2026-10-15 (+ amendments) | done | green (446, 21 against Postgres) | 2026-10-15, findings fixed | 2026-10-15, steps 1-4 and 7; 5 and 6 deferred | 2026-10-15 | Sprint 9 closed. Steps 5 and 6 later / Sufyan. |
 | 10 `/start` menu with buttons | written 2026-10-15 (+ three amendments) | done | green (478) | 2026-10-15, findings fixed | 2026-10-15, steps 1 and 3 seen; others on Sufyan's word | 2026-10-15 | Sprint 10 closed. Sprint 11 dropped |
 | 12 Receipt read budget | written 2026-10-16 (+ warning wording amended after review) | done | green (513) | 2026-10-16, findings fixed | 2026-10-16, on Sufyan's word; no step reported individually | 2026-10-16 | Sprint 12 closed. Repo public. Watch `fly logs` for refusals after the launch post / Sufyan |
+| 13 Guided item split | written 2026-11-01 (+ §7/§8/§9 amendments) | not started | — | — | — | — | Run sprint 13 / agent |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -967,3 +968,20 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Sufyan: "sign off sprint 12". Checklist steps not reported individually; recorded on his word.
 - Next action / owner: after the launch post, check `fly logs` for "receipt read refused" lines
   / Sufyan. Sprint 9 steps 5 and 6 still open / Sufyan.
+
+### 2026-11-01 — Sprint 13 grilled and written
+
+- Performed by: Claude with Sufyan.
+- Trigger: on a real receipt with two of one set (one eaten by one person, the other shared by
+  two), Sufyan picked `Custom` over `By items` because nothing suggested items could handle a
+  shared unit, then had to work out and type amounts. One person usually assigns for the group.
+- Grilled in three rounds (nine questions). Decided: one "Who had this?" screen per item in
+  receipt order, toggle names then `Next`, `Everyone` shortcut, initiator only; typed Custom
+  moved behind `Type amounts instead`; participants step stays separate; no "Same as last";
+  summary with `Fix an item`; all-items card, `Tapping for` and item text replies retired; any
+  receipt-total gap is an `Unlisted / rounding` adjustment shared like tax, and the reconcile
+  prompt becomes `Continue` / `Cancel`.
+- Agent's call, open to change at review: the gap line reuses kind `service_charge` /
+  `discount` so no migration is needed.
+- Sub-spec `docs/sprints/13-guided-item-split.md`; spec §7, §8, §9 amended. Docs only, no code.
+- Next action / owner: run sprint 13 / agent.
