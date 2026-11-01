@@ -1076,3 +1076,18 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   into the billed lines; the docstring says so.
 - Tests: 528 passed, 22 skipped (Postgres, run in CI); ruff clean.
 - Next action / owner: merge the PR, deploy, run the seven-step checklist / Sufyan.
+
+### 2026-11-01 — Fix: custom amounts read as a new expense
+
+- Performed by: Claude, from tester A's report in a trip group: amounts typed for the
+  `Type amounts instead` card were saved as a new expense, twice.
+- Causes: (1) lines sent without replying to the card are read as a new expense like any
+  message; (2) the Sprint 13 sign-off merge (docs only) still deployed, and the restart cleared
+  the open card's draft from memory, so the reply a minute later found no draft and was read as
+  a new expense.
+- Fix: `<name> <amount>` lines sent without replying fill the sender's open custom card when
+  every line names someone on it; a reply to a bot card that still shows buttons but whose
+  draft is gone gets "That card has expired…" and never becomes an expense; the deploy workflow
+  skips pushes that only touch `docs/` or Markdown. Seven tests. 535 passed, ruff clean.
+- Next action / owner: merge when nobody in the groups is mid-expense (the deploy restarts the
+  bot) / Sufyan.

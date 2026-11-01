@@ -18,7 +18,12 @@ from app.bot.deps import get_deps
 from app.bot.formatting import unsupported_currency_text
 from app.bot.handlers.join import require_trip_for_expense
 from app.bot.handlers.photo_expense import handle_manual_amount_reply, read_receipt_photo
-from app.bot.handlers.split import handle_custom_split_reply, handle_item_reply
+from app.bot.handlers.split import (
+    handle_custom_split_reply,
+    handle_expired_card_reply,
+    handle_item_reply,
+    handle_unreplied_custom_lines,
+)
 from app.bot.handlers.tags import join_tagged, tags_as_text
 from app.bot.receipt_gate import send_five_left_warning, take_receipt_read
 from app.bot.render.draft import render_draft
@@ -89,6 +94,10 @@ async def text_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     if await handle_custom_split_reply(update, context):
         return
     if await handle_item_reply(update, context):
+        return
+    if await handle_expired_card_reply(update, context):
+        return
+    if await handle_unreplied_custom_lines(update, context):
         return
 
     trip = await require_trip_for_expense(update, context)
