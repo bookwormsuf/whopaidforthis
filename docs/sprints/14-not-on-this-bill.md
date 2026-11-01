@@ -41,6 +41,8 @@ Starts only after Sprint 13 is signed off.
   shows the toast "Keep at least one item, or Cancel".
 - A one-participant receipt (`Just me`, or only one person picked) still skips the walk. The
   "you paid" amount is enough there.
+- The button is not shown on the only item still on the bill (a one-item receipt, or every
+  other item already left out), where it could only be refused. Added at review.
 
 ### Amount and adjustments
 - The expense amount is the receipt total picked as today (spec §7). With the reading rule
@@ -56,13 +58,20 @@ Starts only after Sprint 13 is signed off.
 
 ### Reconciliation prompt
 - When the picked total is **less** than items + adjustments and item-by-item is on offer, the
-  reconciliation prompt line changes to "(Paid for part of the order? Go item by item and mark
-  the rest Not on this bill.)". `Continue with <total>` / `Cancel` stay as they are.
+  reconciliation prompt adds a line under the Sprint 13 one: "Paid for part of the order? Go
+  item by item and mark the rest Not on this bill." (Changed at review: the Sprint 13 "shared
+  like tax" line stays, as it is still true for `Split equally` or a walk with nothing left
+  out.) `Continue with <total>` / `Cancel` stay as they are.
 - Otherwise the prompt is unchanged from Sprint 13.
 
 ### Summary and saved expense
 - The summary lists left-out items once, in one line: `Not on this bill: <desc>, <desc>, …`
   (shortened with `…` after 3). Per-person totals cover kept items only.
+- **Added at review (agent's call, open to change):** when items are left out but the amount
+  is still about the whole order's, the left-out dishes come back on the rounding line. When
+  that line is 10% of the amount or more, the summary warns: "⚠️ <x> of <amount> isn't on any
+  kept dish and is shared like tax. If you paid less, Cancel and pick the amount you paid."
+  Units of one line are named once on the `Not on this bill` line.
 - `Fix an item` lists every claimable item, left-out ones included, with `—` in place of
   initials, so a mistake can be undone.
 - The saved expense holds only the kept items, the scaled adjustments and the rounding line, so

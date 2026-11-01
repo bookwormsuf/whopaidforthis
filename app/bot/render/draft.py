@@ -18,7 +18,7 @@ from app.bot.formatting import (
     fmt_signed_money,
     format_expense_amount,
 )
-from app.bot.keyboards.items import fix_list_keyboard, walk_keyboard
+from app.bot.keyboards.items import UNIT_SUFFIX, fix_list_keyboard, walk_keyboard
 from app.bot.keyboards.receipt import (
     choose_total_keyboard,
     manual_amount_keyboard,
@@ -43,6 +43,7 @@ from app.services.drafts import (
     claimable_indices,
     draft_items_split,
     draft_shares,
+    left_out_still_charged,
     original_total,
     person_for,
 )
@@ -161,11 +162,10 @@ def _render_reconcile(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMark
         f"Items {items_str} + adjustments {adjustments_str} = {computed_str}\n"
         f"Receipt total {total_str} (difference {difference_str})\n"
     )
+    text += f"({difference_str} isn't on any line; it'll be shared like tax)"
     if difference < 0 and by_items_available(draft):
         # Likely a group order where this person paid only their part (sprint 14).
-        text += "(Paid for part of the order? Go item by item and mark the rest Not on this bill.)"
-    else:
-        text += f"({difference_str} isn't on any line; it'll be shared like tax)"
+        text += "\nPaid for part of the order? Go item by item and mark the rest Not on this bill."
     return text, reconcile_keyboard(draft.draft_id, total_str)
 
 
@@ -361,15 +361,26 @@ def _left_out_line(draft: Draft) -> str:
     """`Not on this bill: Pad thai, Iced tea, Mango rice, …` (sprint 14). Empty when
     nothing was left out.
     """
-    names = [
-        escape(draft.line_items[i].description)
-        for i in claimable_indices(draft)
-        if i in draft.left_out
-    ]
+    # Units of one line are one dish here: "Bael Juice", not "(1/2)" and "(2/2)".
+    names = list(
+        dict.fromkeys(
+            escape(UNIT_SUFFIX.sub("", draft.line_items[i].description))
+            for i in claimable_indices(draft)
+            if i in draft.left_out
+        )
+    )
     if not names:
         return ""
     shown = ", ".join(names[:_LEFT_OUT_SHOWN]) + (", …" if len(names) > _LEFT_OUT_SHOWN else "")
-    return f"\nNot on this bill: {shown}"
+    line = f"\nNot on this bill: {shown}"
+    if still := left_out_still_charged(draft):
+        amount = fmt_money(draft.amount_minor, draft.currency)
+        line += (
+            f"\n⚠️ {fmt_money(still, draft.currency)} of {amount}"
+            " isn't on any kept dish and is shared like tax. If you paid less, Cancel and"
+            " pick the amount you paid."
+        )
+    return line
 
 
 def _adjustments_line(draft: Draft) -> str:

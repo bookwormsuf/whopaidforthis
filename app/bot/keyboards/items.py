@@ -18,7 +18,7 @@ _MAX_DESCRIPTION_CHARS = 24
 EVERYONE_MARK = "all"
 LEFT_OUT_MARK = "—"
 LEFT_OUT_LABEL = "🚫 Not on this bill"
-_UNIT_SUFFIX = re.compile(r" \(\d+/\d+\)$")
+UNIT_SUFFIX = re.compile(r" \(\d+/\d+\)$")
 
 
 def initials_for(people: list[Person]) -> dict[int, str]:
@@ -58,7 +58,7 @@ def item_button_text(draft: Draft, number: int, index: int, initials: dict[int, 
     description = item.description
     if len(description) > _MAX_DESCRIPTION_CHARS:
         # Keep a unit's "(1/3)": it is what tells the units of a line apart.
-        match = _UNIT_SUFFIX.search(description)
+        match = UNIT_SUFFIX.search(description)
         suffix = match.group(0) if match else ""
         keep = max(_MAX_DESCRIPTION_CHARS - len(suffix) - 1, 1)
         description = description[: len(description) - len(suffix)][:keep] + "…" + suffix
@@ -95,7 +95,9 @@ def walk_keyboard(draft: Draft) -> InlineKeyboardMarkup:
     ]
     rows = [toggles[i : i + 3] for i in range(0, len(toggles), 3)]
     rows.append([_button(draft.draft_id, "Everyone", "weveryone", str(position))])
-    rows.append([_button(draft.draft_id, LEFT_OUT_LABEL, "wleftout", str(position))])
+    others_kept = any(i != index and i not in draft.left_out for i in claimable_indices(draft))
+    if others_kept:  # leaving out the only item still on the bill is refused anyway
+        rows.append([_button(draft.draft_id, LEFT_OUT_LABEL, "wleftout", str(position))])
     moves = []
     if position > 0 or draft.fixing_one:
         moves.append(_button(draft.draft_id, "◀ Back", "wback", str(position)))

@@ -9,22 +9,26 @@ Rate in every test: 1 JPY = 0.0081 SGD (`tests.helpers.make_deps`).
 from __future__ import annotations
 
 from dataclasses import replace
+from decimal import Decimal
 
-from hypothesis import given, settings
+import pytest
+from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from app.models.receipt import ReceiptLineItem
+from app.services.conversion import both_amounts
 from app.services.drafts import (
     KEEP_ONE_TEXT,
     UNLISTED_DESCRIPTION,
     Draft,
+    DraftToast,
     billed,
     items_spec,
     with_unlisted_line,
 )
 from app.services.llm_schemas import ReceiptExtraction
 from app.services.receipt_parser import SYSTEM_PROMPT_TEMPLATE, line_item_sums
-from app.services.splitting import Items, split_items
+from app.services.splitting import Items, shares_in_both_currencies, split_items
 from tests.group_sim import ADA, BO, CY, Card, FakeGroup
 from tests.test_item_claiming import RESTAURANT, _draft, _fix_buttons, _receipt, _walk
 
@@ -98,10 +102,18 @@ async def test_leaving_out_every_item_is_refused() -> None:
     card = await _walk(group)
     await group.press(ADA, card, LEAVE_OUT)
     await group.press(ADA, card, LEAVE_OUT)
-    toast = await group.press(ADA, card, LEAVE_OUT)
-    assert toast == KEEP_ONE_TEXT == "Keep at least one item, or Cancel"
     assert "(3 of 3)" in card.text
+    assert LEAVE_OUT not in card.buttons  # the only item still on the bill
+    with pytest.raises(DraftToast) as refused:
+        await group.deps.draft_service.walk_left_out(card.draft_id, ADA.id, 2)
+    assert str(refused.value) == KEEP_ONE_TEXT == "Keep at least one item, or Cancel"
     assert (await _draft(group, card)).left_out == frozenset({0, 1})
+
+
+async def test_a_one_item_receipt_has_no_not_on_this_bill() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    card = await _walk(group, _receipt([("Wagyu", 3000, "item")], 3000))
+    assert LEAVE_OUT not in card.buttons
 
 
 async def test_a_stale_not_on_this_bill_changes_nothing() -> None:
@@ -211,7 +223,7 @@ async def test_total_below_the_lines_suggests_not_on_this_bill() -> None:
     assert "Paid for part of the order? Go item by item and mark the rest Not on this bill." in (
         card.text
     )
-    assert "isn't on any line" not in card.text
+    assert "(¥800 isn't on any line; it'll be shared like tax)" in card.text
     assert card.buttons == ["Continue with ¥1,000", "Cancel"]
 
 
@@ -306,11 +318,39 @@ async def test_group_order_paid_in_part_end_to_end() -> None:
     # over is Grab's own rounding of its split, a few baht.
     rounding = [line for line in lines if line.description == UNLISTED_DESCRIPTION]
     assert len(rounding) == 1 and rounding[0].amount_minor < 3000
+    assert "⚠️" not in card.text
 
 
 def test_receipt_instruction_prefers_what_this_person_paid() -> None:
     assert "you paid" in SYSTEM_PROMPT_TEMPLATE
     assert "คุณจ่าย" in SYSTEM_PROMPT_TEMPLATE
+    # Not cash handed over on an ordinary receipt.
+    assert "お預り" in SYSTEM_PROMPT_TEMPLATE.split("Group orders:")[1]
+
+
+async def test_leaving_out_against_the_whole_order_total_warns() -> None:
+    """The full order total was kept: the left-out dish comes back as rounding."""
+    group = await FakeGroup.create(ADA, BO)
+    card = await _leave_out_gyoza(group)  # ¥600 of ¥2,400 left out, amount still ¥2,640
+    assert "⚠️ ¥660 of ¥2,640 isn't on any kept dish and is shared like tax." in card.text
+
+
+async def test_units_of_one_left_out_dish_are_named_once() -> None:
+    group = await FakeGroup.create(ADA, BO, trip_currency="THB")
+    card = await group.send_receipt(ADA, _grab_order())
+    await group.press(ADA, card, "฿764.00")
+    await group.press(ADA, card, "Continue with ฿764.00")
+    await group.press(ADA, card, "Me")
+    await group.press(ADA, card, "Everyone")
+    await group.press(ADA, card, "Go item by item ▶")
+    for _ in range(12):
+        if "Check before saving" in card.text:
+            break
+        if "Bael Juice" in card.text or "Super Crab" in card.text:
+            await group.press(ADA, card, LEAVE_OUT)
+        else:
+            await group.press(ADA, card, "Everyone")
+    assert "Not on this bill: Bael Juice, Super Crab Fried Rice\n" in card.text + "\n"
 
 
 async def test_three_people_one_left_out_is_not_on_the_expense_items() -> None:
@@ -363,6 +403,7 @@ def _draft_for(lines: list[ReceiptLineItem], amount: int, **fields) -> Draft:
 @settings(max_examples=300, deadline=None)
 @given(
     items=st.lists(st.integers(1, 50_000), min_size=1, max_size=12),
+    minus=st.lists(st.integers(1, 5_000), max_size=2),
     adjustments=st.lists(
         st.tuples(st.sampled_from(["tax", "service_charge", "discount"]), st.integers(1, 5_000)),
         max_size=4,
@@ -370,13 +411,22 @@ def _draft_for(lines: list[ReceiptLineItem], amount: int, **fields) -> Draft:
     amount=st.integers(1, 1_000_000),
     data=st.data(),
 )
-def test_shares_and_saved_lines_add_up_to_the_amount(items, adjustments, amount, data) -> None:
+def test_shares_and_saved_lines_add_up_to_the_amount(
+    items, minus, adjustments, amount, data
+) -> None:
     lines = [
         ReceiptLineItem(description=f"I{n}", quantity=1, amount_minor=a, kind="item")
         for n, a in enumerate(items)
     ]
     lines += [
         ReceiptLineItem(description=k, quantity=1, amount_minor=a, kind=k) for k, a in adjustments
+    ]
+    # An order-wide voucher read as a minus item: scaled like a discount. Kept small
+    # enough that the kept items still cost something to spread adjustments over.
+    assume(2 * sum(minus) <= min(items))
+    lines += [
+        ReceiptLineItem(description=f"V{n}", quantity=1, amount_minor=-a, kind="item")
+        for n, a in enumerate(minus)
     ]
     lines = with_unlisted_line(lines, amount)
     count = len(items)
@@ -397,3 +447,18 @@ def test_shares_and_saved_lines_add_up_to_the_amount(items, adjustments, amount,
     )
     split = split_items(bill.line_items, bill.split, [1, 2, 3], 1, amount)
     assert sum(split.shares.values()) == amount
+    # And in both currencies (CLAUDE.md): a THB receipt settled in SGD.
+    rate = Decimal("0.0379")
+    trip_amount, home_amount = both_amounts(amount, "THB", "THB", "SGD", rate)
+    trip_shares, home_shares = shares_in_both_currencies(
+        split.shares,
+        original_currency="THB",
+        trip_currency="THB",
+        home_currency="SGD",
+        trip_to_home_rate=rate,
+        trip_amount_minor=trip_amount,
+        home_amount_minor=home_amount,
+        payer_id=1,
+    )
+    assert sum(trip_shares.values()) == trip_amount == amount
+    assert sum(home_shares.values()) == home_amount

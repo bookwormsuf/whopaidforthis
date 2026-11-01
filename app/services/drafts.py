@@ -354,6 +354,27 @@ def _scaled(amount_minor: int, kept_minor: int, full_minor: int) -> int:
     return (2 * amount_minor * kept_minor + full_minor) // (2 * full_minor)
 
 
+LEFT_OUT_WARNING_SHARE = Decimal("0.10")
+
+
+def left_out_still_charged(draft: Draft) -> int:
+    """With items left out, the part of the amount no kept line accounts for, when
+    it is 10% of the amount or more (sprint 14, agent's call): the amount is likely
+    the whole order's, so the left-out dishes are being charged to the kept ones
+    after all. Zero otherwise; Grab's own rounding of a "you paid" figure is far
+    smaller.
+    """
+    bill = billed(draft)
+    if bill is draft or not bill.line_items:
+        return 0
+    last = bill.line_items[-1]
+    if last.description != UNLISTED_DESCRIPTION or last.kind != "service_charge":
+        return 0
+    if last.amount_minor < draft.amount_minor * LEFT_OUT_WARNING_SHARE:
+        return 0
+    return last.amount_minor
+
+
 def billed(draft: Draft) -> Draft:
     """The draft as it is billed (sprint 14 pin): with items left out of an
     itemised split, only the kept items, each adjustment scaled to the kept items'
@@ -378,7 +399,8 @@ def billed(draft: Draft) -> Draft:
     for index, item in enumerate(lines):
         if index == unlisted_at or index in draft.left_out:
             continue
-        if item.kind != "item":
+        if item.kind != "item" or item.amount_minor < 0:
+            # Adjustments, and an order-wide minus line read as an item.
             amount = _scaled(item.amount_minor, kept, full)
             if amount == 0:
                 continue
@@ -418,8 +440,10 @@ def items_spec(draft: Draft) -> Items:
 
 
 def draft_items_split(draft: Draft, trip: Trip) -> ItemsSplit:
-    """The itemised split of the billed draft: its indices are into
-    `billed(draft).line_items`.
+    """The itemised split of the billed draft. Its indices are into
+    `billed(draft).line_items`, not `draft.line_items`: a caller reading lines by
+    those indices must bill the draft first (the two are the same with nothing left
+    out).
     """
     assert isinstance(draft.split, Items)
     draft = billed(draft)
