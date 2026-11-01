@@ -1045,6 +1045,7 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 
 ### 2026-11-01 — Sprint 13 sign-off
 
-- Sufyan: "sign off sprint 13". Checklist steps not reported individually; recorded on his word.
+- Sufyan: "sign off sprint 13". Checklist steps not reported individually; recorded on Sufyan's
+  word.
   Tested in a real trip group, which surfaced the group-order case planned as Sprint 14.
 - Next action / owner: run sprint 14 / agent.
