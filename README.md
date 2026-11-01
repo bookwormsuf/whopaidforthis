@@ -407,3 +407,19 @@ balance. It is near-minimal, not guaranteed minimal.
 
 The database keeps everything — expenses, balances and settlement live in Postgres, not on the
 machine. `/settrip` again starts a new trip for the same group; `/deletetrip` erases one.
+
+## Announcing an update
+
+`python -m app.announce` sends one message, through the bot, to every group with an open trip.
+Write the message in a file (HTML, like every bot reply: `<b>bold</b>`), then:
+
+```bash
+uv run python -m app.announce --file whats-new.txt              # dry run: counts only
+uv run python -m app.announce --file whats-new.txt --only <id>  # try it in one group
+uv run python -m app.announce --file whats-new.txt --send       # every open trip
+```
+
+It reads `TELEGRAM_BOT_TOKEN` and `DATABASE_URL` from `.env`, like the bot. On Fly, pass the text
+inline instead: `fly ssh console -a whopaid-bot -C "python -m app.announce --text '<b>New</b>\n…' --send"`
+(a literal `\n` becomes a new line). It prints counts only, never chat IDs or the message's
+recipients; a group that removed the bot is skipped.

@@ -178,6 +178,18 @@ class PostgresLedgerStore:
 
         return await self._run(_do)
 
+    async def list_open_trip_chat_ids(self) -> list[int]:
+        """Every chat with an open trip, ascending (for `python -m app.announce`)."""
+
+        async def _do() -> list[int]:
+            async with self.pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "select chat_id from trips where closed_at is null order by chat_id"
+                )
+            return [row["chat_id"] for row in rows]
+
+        return await self._run(_do)
+
     async def latest_trip(self, chat_id: int) -> Trip | None:
         async def _do() -> Trip | None:
             async with self.pool.acquire() as conn:

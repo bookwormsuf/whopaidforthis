@@ -1032,3 +1032,13 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   / Sufyan.
 - Same PR, at Sufyan's request: the trip currency buttons show THB in SGD's place (THB, MYR,
   JPY, CNY, Other…); the home currency buttons keep SGD. Spec §18 amended. 501 passed.
+
+### 2026-11-01 — Announce script
+
+- Performed by: Claude, at Sufyan's request: a way to tell groups about the Sprint 13 changes.
+- `python -m app.announce` (in `app/` so it ships in the image): dry run by default with a group
+  count; `--only CHAT_ID` to preview in one group; `--send` for every chat with an open trip.
+  Message from `--file` or `--text`. Counts only on output, no chat ids. A group that removed the
+  bot is skipped; malformed HTML stops after the first group. New store query
+  `list_open_trip_chat_ids`, with an in-memory and a Postgres test. 507 passed, ruff clean.
+- Next action / owner: write the message, dry run, `--only` in a test group, then `--send` / Sufyan.

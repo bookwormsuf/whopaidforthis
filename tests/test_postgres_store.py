@@ -436,3 +436,15 @@ async def test_connection_error_becomes_ledger_unavailable(
             await store.get_binding(-1)
     finally:
         await broken_pool.close()
+
+
+async def test_list_open_trip_chat_ids_skips_closed_trips(
+    postgres_store: PostgresLedgerStore,
+) -> None:
+    open_trip = await postgres_store.save_binding(_trip(chat_id=-300))
+    closed = await postgres_store.save_binding(_trip(chat_id=-301))
+    await postgres_store.close_trip(closed)
+    chat_ids = await postgres_store.list_open_trip_chat_ids()
+    assert open_trip.chat_id in chat_ids
+    assert closed.chat_id not in chat_ids
+    assert chat_ids == sorted(chat_ids)

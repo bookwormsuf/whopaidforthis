@@ -51,6 +51,8 @@ class LedgerStore(Protocol):
 
     async def list_trips(self, chat_id: int) -> list[Trip]: ...
 
+    async def list_open_trip_chat_ids(self) -> list[int]: ...
+
     async def latest_trip(self, chat_id: int) -> Trip | None: ...
 
     async def get_trip(self, chat_id: int, trip_id: int) -> Trip | None: ...
@@ -186,6 +188,12 @@ class InMemoryLedgerStore:
 
     async def list_trips(self, chat_id: int) -> list[Trip]:
         return [self._trips_by_id[tid] for tid in self._trip_ids_by_chat.get(chat_id, [])]
+
+    async def list_open_trip_chat_ids(self) -> list[int]:
+        """Every chat with an open trip, ascending (for `python -m app.announce`)."""
+        return sorted(
+            {trip.chat_id for trip in self._trips_by_id.values() if trip.closed_at is None}
+        )
 
     async def latest_trip(self, chat_id: int) -> Trip | None:
         """The chat's open trip, or (if none is open) its most recently created
