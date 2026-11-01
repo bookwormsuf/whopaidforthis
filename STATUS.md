@@ -1016,3 +1016,19 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   equal split with line items `unassigned`, as `Just me` always has; shares are identical and
   changing it would touch share maths, out of scope.
 - Next action / owner: review and merge the PR, deploy, run the eight-step checklist / Sufyan.
+
+### 2026-11-01 — Fix: a leftover trip setup swallowed messages
+
+- Performed by: Claude, from Sufyan's report during the Sprint 13 checklist: a receipt photo got
+  no reply, and `100 baht test` got "Unknown currency code. Try again or /cancel." though the trip
+  was already set up.
+- Cause (Sprint 9/10 code): a second trip setup in the same chat, left after `Other…` was
+  pressed, stayed waiting on typed text for 30 minutes. Its text handler matched every message
+  from that person, photos included, and replied only to text, so the photo vanished silently.
+- Fix: a new `/settrip` or `Start a trip` drops that person's earlier setups; creating a trip
+  drops every other setup in the chat; the typed-text handler matches text only. Three tests,
+  each failing on the old code. 500 passed, ruff clean.
+- Next action / owner: merge and deploy; meanwhile `/cancel` in the group clears the stuck setup
+  / Sufyan.
+- Same PR, at Sufyan's request: the trip currency buttons show THB in SGD's place (THB, MYR,
+  JPY, CNY, Other…); the home currency buttons keep SGD. Spec §18 amended. 501 passed.

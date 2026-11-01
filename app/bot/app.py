@@ -237,7 +237,10 @@ def build_application(token: str, deps: Deps) -> Application:
     )
     application.add_handler(CallbackQueryHandler(draft_callback, pattern=DRAFT_CALLBACK_PATTERN))
     application.add_handler(
-        MessageHandler(AwaitingSettripText(deps.settrip_sessions), settrip_text_handler)
+        # Text only: a photo sent while a setup waits on typed text is a receipt.
+        MessageHandler(
+            filters.TEXT & AwaitingSettripText(deps.settrip_sessions), settrip_text_handler
+        )
     )
     # Text-expense candidates ("1200 yen ramen"): registered after the settrip
     # awaiting-text handler, so a session mid-/settrip still wins (sprint 2 pin).

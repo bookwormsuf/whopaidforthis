@@ -65,8 +65,8 @@ async def test_settrip_goes_straight_to_trip_currency_buttons() -> None:
     (text,), kwargs = update.effective_message.reply_text.call_args
     assert text == "Trip currency?"
     buttons = [b.text for row in kwargs["reply_markup"].inline_keyboard for b in row]
-    # Spec §18 pin: SGD, MYR, JPY, CNY shown first, then Other….
-    assert buttons == ["SGD", "MYR", "JPY", "CNY", "Other…"]
+    # Spec §18 pin, amended 2026-11-01: THB in SGD's place for the trip currency.
+    assert buttons == ["THB", "MYR", "JPY", "CNY", "Other…"]
     assert len(deps.settrip_sessions._sessions) == 1
 
 
@@ -198,7 +198,20 @@ async def test_settrip_start_new_trip_moves_on_to_currency_buttons() -> None:
     (text,), kwargs = start_new_update.callback_query.edit_message_text.call_args
     assert text == "Trip currency?"
     buttons = [b.text for row in kwargs["reply_markup"].inline_keyboard for b in row]
-    assert buttons == ["SGD", "MYR", "JPY", "CNY", "Other…"]
+    assert buttons == ["THB", "MYR", "JPY", "CNY", "Other…"]
+
+
+def test_home_currency_buttons_keep_sgd() -> None:
+    from app.bot.keyboards.settrip import home_currency_keyboard
+
+    markup = home_currency_keyboard("01SESSION0000000000000000")
+    assert [b.text for row in markup.inline_keyboard for b in row] == [
+        "SGD",
+        "MYR",
+        "JPY",
+        "CNY",
+        "Other…",
+    ]
 
 
 async def test_settrip_again_closes_the_old_open_trip() -> None:
@@ -344,3 +357,85 @@ async def test_run_settrip_sends_trip_currency_buttons_with_a_fake_send() -> Non
 
     assert sent[0][0] == "Trip currency?"
     assert len(deps.settrip_sessions._sessions) == 1
+
+
+# -- Stale setups (fixed 2026-11-01): a leftover setup waiting on typed text swallowed
+# the group's messages, a receipt photo included, for the rest of its 30 minutes.
+
+
+def _awaiting_text(deps: Deps) -> list[str]:
+    return [s.session_id for s in deps.settrip_sessions._sessions.values() if s.awaiting_text_for]
+
+
+async def test_a_second_settrip_replaces_the_first_left_waiting_on_text() -> None:
+    deps = _deps()
+    context = _context(deps)
+    await settrip.settrip_command(_command_update(), context)
+    first = _only_session_id(deps)
+    await settrip.settrip_callback(_callback_update(first, "trip_ccy", "other"), context)
+    assert _awaiting_text(deps) == [first]
+
+    await settrip.settrip_command(_command_update(), context)
+    second = _only_session_id(deps)
+    assert second != first
+    assert len(deps.settrip_sessions._sessions) == 1
+    assert deps.settrip_sessions.find_awaiting_text(-100, 1) is None
+
+
+async def test_creating_the_trip_drops_every_other_setup_in_the_chat() -> None:
+    deps = _deps()
+    context = _context(deps)
+    # Bo started a setup, pressed Other… and walked away.
+    bo = deps.settrip_sessions.create(
+        chat_id=-100, initiator_id=2, initiator_name="Bo", trip_name="Trip", step="trip_ccy"
+    )
+    deps.settrip_sessions.update(bo.session_id, awaiting_text_for="trip_ccy")
+    # A setup in another chat is left alone.
+    elsewhere = deps.settrip_sessions.create(
+        chat_id=-200, initiator_id=2, initiator_name="Bo", trip_name="Trip", step="trip_ccy"
+    )
+
+    await settrip.settrip_command(_command_update(), context)
+    ada = next(s for s in deps.settrip_sessions._sessions.values() if s.initiator_id == 1)
+    for step, value in (("trip_ccy", "JPY"), ("home_ccy", "SGD"), ("tz", "Asia/Tokyo")):
+        await settrip.settrip_callback(_callback_update(ada.session_id, step, value), context)
+    await settrip.settrip_callback(_callback_update(ada.session_id, "confirm", "yes"), context)
+
+    assert deps.settrip_sessions.find_awaiting_text(-100, 2) is None
+    assert list(deps.settrip_sessions._sessions) == [elsewhere.session_id]
+
+
+def test_a_photo_is_never_taken_by_a_setup_waiting_on_text() -> None:
+    from datetime import UTC, datetime
+
+    from telegram import Chat, Message, PhotoSize, Update, User
+    from telegram.ext import MessageHandler
+
+    from app.bot.app import build_application
+
+    deps = _deps()
+    session = deps.settrip_sessions.create(
+        chat_id=-100, initiator_id=1, initiator_name="Ada", trip_name="Trip", step="trip_ccy"
+    )
+    deps.settrip_sessions.update(session.session_id, awaiting_text_for="trip_ccy")
+    application = build_application("123456:fake-token", deps)
+    (handler,) = [
+        h
+        for group in application.handlers.values()
+        for h in group
+        if isinstance(h, MessageHandler) and h.callback is settrip.settrip_text_handler
+    ]
+
+    chat = Chat(id=-100, type="supergroup", title="Trip")
+    user = User(id=1, first_name="Ada", is_bot=False)
+    now = datetime.now(UTC)
+    photo = Message(
+        message_id=1,
+        date=now,
+        chat=chat,
+        from_user=user,
+        photo=(PhotoSize("f", "u", 100, 100),),
+    )
+    text = Message(message_id=2, date=now, chat=chat, from_user=user, text="thb")
+    assert not handler.check_update(Update(update_id=1, message=photo))
+    assert handler.check_update(Update(update_id=2, message=text))

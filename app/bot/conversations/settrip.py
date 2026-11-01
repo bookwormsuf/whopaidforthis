@@ -69,6 +69,8 @@ async def run_settrip(deps: Deps, chat: Chat, user: User, send: SendFn) -> None:
         return
 
     first_step = "rebind" if existing is not None else "trip_ccy"
+    # A second `/settrip` or `Start a trip` replaces this person's earlier setup.
+    deps.settrip_sessions.discard_for(chat.id, user.id)
     session = deps.settrip_sessions.create(
         chat_id=chat.id,
         initiator_id=user.id,
@@ -182,7 +184,9 @@ async def _create_trip(
             parse_mode="HTML",
         )
         return
-    deps.settrip_sessions.delete(session.session_id)
+    # The trip exists: any other setup in this chat is stale, including one left
+    # waiting on typed text, which would otherwise swallow the next messages.
+    deps.settrip_sessions.discard_for(session.chat_id)
     text = (
         f"Connected ✅ {escape(trip.name)} · {escape(trip.trip_currency)} → "
         f"{escape(trip.home_currency)} · {escape(trip.timezone)}"
