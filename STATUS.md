@@ -985,3 +985,7 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   `discount` so no migration is needed.
 - Sub-spec `docs/sprints/13-guided-item-split.md`; spec §7, §8, §9 amended. Docs only, no code.
 - Next action / owner: run sprint 13 / agent.
+- Second round (edge cases, four questions): participant with no items stays at zero; no
+  `Rest → everyone` shortcut on long receipts; a forgotten person is added through `Edit`; draft
+  expiry now runs 30 minutes from the last press (spec §8 amended). Double-tap protection,
+  one-participant skip, zero and negative item lines left to the agent and pinned in the sub-spec.

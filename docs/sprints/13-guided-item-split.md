@@ -92,6 +92,22 @@ just picking more than one name. Decided with Sufyan on 2026-11-01.
   "Who paid?" step when it applies.
 - `items_allowed` (set by `Use total anyway`) is removed.
 
+### Edge cases (decided with Sufyan, 2026-11-01, second round)
+- A participant with no items stays on the expense with a zero share, as today; the summary
+  lists them with 0.
+- No shortcut on long receipts: every claimable item gets its screen (up to 40). `Split equally`
+  is the way out for a receipt nobody wants to walk.
+- A person missing from the names is added through `Edit` (back to participants, picks kept).
+  No extra button on the item screens.
+- Draft expiry becomes 30 minutes from the last press or reply on the draft, not from when it
+  was created (applies to all drafts; spec §8 amended). Each accepted press or reply refreshes it.
+- Agent handles without asking: every walk button carries the item's position
+  (`{draft_id}:walk_next:{index}` etc.) and a press for a position other than the current one is
+  ignored with no change, so a double tap cannot skip an item; one participant only → no walk,
+  every item is theirs, straight to the summary; items of zero amount never get a screen (they
+  are already not claimable); an `item` line with a negative amount is treated as a `discount`
+  adjustment line.
+
 ### Retired
 - The all-items card as a state, the `Rest → everyone` and `Done` buttons, `👤 Tapping for ▸`
   and `claiming_for`.
@@ -105,7 +121,8 @@ just picking more than one name. Decided with Sufyan on 2026-11-01.
    `fixing_one: bool`; transitions `start_walk`, `walk_toggle`, `walk_everyone`, `walk_next`,
    `walk_back`, `fix_list`, `fix_pick`; gap as adjustment line in place of `_with_unlisted`
    items; `continue_total` replacing `fix_items` / `use_total_anyway`; remove `items` state,
-   `claiming_for`, `rest_everyone`, `items_allowed` and the item text shortcuts. Tests first.
+   `claiming_for`, `rest_everyone`, `items_allowed` and the item text shortcuts; expiry from a
+   `last_touched_at` refreshed on every accepted press or reply. Tests first.
 2. `app/bot/keyboards/split.py` and `items.py`: split-method rows; walk keyboard; fix-list
    keyboard; summary keyboard. `app/bot/keyboards/receipt.py`: reconcile keyboard.
 3. `app/bot/render/draft.py`: walk card, fix-list card, reconcile line.
@@ -137,6 +154,12 @@ just picking more than one name. Decided with Sufyan on 2026-11-01.
 - Reconcile prompt has only `Continue` and `Cancel`; `Continue` reaches the split step with
   item-by-item on offer; `Continue` with "Who paid?" pending asks it first.
 - Item text replies (`mine 1`) are ignored.
+- A participant with no items is saved with a zero share and shown with 0 on the summary.
+- A stale `Next` / `Everyone` / name press carrying an old position changes nothing.
+- One participant: no walk, straight to the summary with everything theirs.
+- Negative `item` line becomes a discount adjustment; zero-amount items get no screen.
+- Expiry: a draft touched 29 minutes after the last press survives; 31 minutes idle expires;
+  a draft older than 30 minutes but pressed recently survives.
 
 ## After: your checklist
 1. Photo of a receipt with 3+ items in a group with 3 joined people. `Everyone` → the split
