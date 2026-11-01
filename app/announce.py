@@ -81,7 +81,11 @@ def message_from(args: argparse.Namespace) -> str:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="python -m app.announce", description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="python -m app.announce",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--file", help="a UTF-8 text file holding the message")
     source.add_argument("--text", help="the message itself; \\n for a new line")

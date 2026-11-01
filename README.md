@@ -421,5 +421,5 @@ uv run python -m app.announce --file whats-new.txt --send       # every open tri
 
 It reads `TELEGRAM_BOT_TOKEN` and `DATABASE_URL` from `.env`, like the bot. On Fly, pass the text
 inline instead: `fly ssh console -a whopaid-bot -C "python -m app.announce --text '<b>New</b>\n…' --send"`
-(a literal `\n` becomes a new line). It prints counts only, never chat IDs or the message's
-recipients; a group that removed the bot is skipped.
+(a literal `\n` becomes a new line). It prints counts only, never chat IDs; a group that
+removed the bot is skipped.
