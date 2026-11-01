@@ -229,9 +229,6 @@ def _render_split_method(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardM
     return text, split_method_keyboard(draft.draft_id, by_items_available(draft))
 
 
-_ADJUSTMENT_LABELS = {"tax": "Tax", "service_charge": "Service", "discount": "Discount"}
-
-
 def _render_walk(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
     """ "Who had this? (n of N)", then the item and its amount (sprint 13 pin)."""
     positions = claimable_indices(draft)
@@ -262,9 +259,9 @@ def _items_preview_lines(draft: Draft, trip: Trip) -> list[str]:
     unlisted: dict[int, int] | None = None
     for index, allocation in split.line_allocations.items():
         if draft.line_items[index].description == UNLISTED_DESCRIPTION:
-            unlisted = allocation
-            continue
-        bucket = by_kind.setdefault(draft.line_items[index].kind, {})
+            bucket = unlisted = unlisted if unlisted is not None else {}
+        else:
+            bucket = by_kind.setdefault(draft.line_items[index].kind, {})
         for uid, part in allocation.items():
             bucket[uid] = bucket.get(uid, 0) + part
     lines = []
@@ -346,9 +343,6 @@ def _render_preview(
         draft.draft_id, retry=save_error, by_items=isinstance(draft.split, Items)
     )
     return text, keyboard
-
-
-_ADJUSTMENT_LABELS = {"tax": "Tax", "service_charge": "Service", "discount": "Discount"}
 
 
 def _adjustments_line(draft: Draft) -> str:

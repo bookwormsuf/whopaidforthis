@@ -346,8 +346,9 @@ def claimants_on_screen(draft: Draft, index: int) -> tuple[int, ...]:
 
 
 def items_spec(draft: Draft) -> Items:
-    """The draft's claims as an `Items` split. Anything unclaimed (only an item of
-    zero amount, which gets no screen) goes to everyone.
+    """The draft's claims as an `Items` split. Anything unclaimed goes to everyone;
+    the walk only reaches the preview once every claimable item has someone, so in
+    practice that is an item of zero amount, which gets no screen.
     """
     unclaimed = set(unclaimed_indices(draft))
     return Items(
@@ -1043,10 +1044,13 @@ class DraftService:
 
     async def walk_back(self, draft_id: str, presser_id: int, position: int) -> Draft:
         """`Back`: the previous item, picks kept; from an item opened by `Fix an
-        item`, back to that list.
+        item`, back to that list, but not with nobody ticked, which would leave the
+        item to be split among everyone unasked.
         """
         draft = await self._on_screen(draft_id, presser_id, position)
         if draft.fixing_one:
+            if not claimants_on_screen(draft, claimable_indices(draft)[position]):
+                raise DraftToast(PICK_FIRST_TEXT)
             updated = replace(draft, state="fix_list", fixing_one=False)
         elif position == 0:
             raise DraftUnchanged()
@@ -1056,19 +1060,22 @@ class DraftService:
         return updated
 
     async def _walk_forward(self, draft: Draft) -> Draft:
-        """On to the next item with nobody yet, or the preview when there is none
-        after this one, or straight back to it from `Fix an item`.
+        """On to the next item in receipt order, or straight back to the preview
+        from `Fix an item`. After the last item: the first item still with nobody,
+        if `Back` left one so, else the preview.
         """
         if draft.fixing_one:
             return await self._walk_done(draft)
         positions = claimable_indices(draft)
-        empty = set(unclaimed_indices(draft))
-        for position in range(draft.walk_index + 1, len(positions)):
-            if positions[position] in empty:
-                updated = replace(draft, walk_index=position)
-                await self._drafts.put(updated)
-                return updated
-        return await self._walk_done(draft)
+        if draft.walk_index + 1 < len(positions):
+            position = draft.walk_index + 1
+        elif empty := unclaimed_indices(draft):
+            position = positions.index(empty[0])
+        else:
+            return await self._walk_done(draft)
+        updated = replace(draft, walk_index=position)
+        await self._drafts.put(updated)
+        return updated
 
     async def _walk_done(self, draft: Draft) -> Draft:
         trip = await self._trip_for(draft)

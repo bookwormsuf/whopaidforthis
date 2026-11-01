@@ -216,6 +216,33 @@ async def test_back_keeps_picks() -> None:
     assert card.buttons[:2] == ["Ada", "✓ Bo"]
 
 
+async def test_next_after_going_back_twice_shows_every_item_in_turn() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    card = await _walk(group)
+    for _ in range(2):
+        await group.press(ADA, card, "Ada")
+        await group.press(ADA, card, "Next ▶")
+    assert "(3 of 3)" in card.text
+    await group.press(ADA, card, "◀ Back")
+    await group.press(ADA, card, "◀ Back")
+    await group.press(ADA, card, "Next ▶")
+    assert "(2 of 3)" in card.text  # not straight on to the unanswered item 3
+
+
+async def test_an_item_left_empty_by_back_is_asked_again_before_the_summary() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    card = await _walk(group)
+    for _ in range(2):
+        await group.press(ADA, card, "Ada")
+        await group.press(ADA, card, "Next ▶")
+    await group.press(ADA, card, "◀ Back")
+    await group.press(ADA, card, "✓ Ada")  # item 2 now has nobody
+    await group.press(ADA, card, "◀ Back")
+    await group.press(ADA, card, "Next ▶")
+    assert "(2 of 3)" in card.text
+    assert await group.press(ADA, card, "Next ▶") == PICK_FIRST_TEXT
+
+
 async def test_non_initiator_presses_are_refused_everywhere() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await _walk(group)
@@ -287,6 +314,37 @@ async def test_fix_an_item_returns_to_the_summary() -> None:
     assert "• Bo ¥880" in card.text
 
 
+async def test_a_fixed_item_cannot_be_left_with_nobody() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    card = await _walk(group)
+    for _ in range(3):
+        await group.press(ADA, card, "Ada")
+        await group.press(ADA, card, "Next ▶")
+    await group.press(ADA, card, "Fix an item")
+    await group.press(ADA, card, "2 Udon ¥800 · A")
+    await group.press(ADA, card, "✓ Ada")
+    assert await group.press(ADA, card, "◀ Back") == PICK_FIRST_TEXT
+    assert await group.press(ADA, card, "Next ▶") == PICK_FIRST_TEXT
+    assert "(2 of 3)" in card.text
+
+
+async def test_fix_list_says_all_when_every_name_was_ticked() -> None:
+    group = await FakeGroup.create(ADA, BO)
+    card = await _walk(group)
+    await group.press(ADA, card, "Ada")
+    await group.press(ADA, card, "Bo")
+    await group.press(ADA, card, "Next ▶")
+    await group.press(ADA, card, "Everyone")
+    await group.press(ADA, card, "Ada")
+    await group.press(ADA, card, "Next ▶")
+    await group.press(ADA, card, "Fix an item")
+    assert _fix_buttons(card) == [
+        "1 Ramen ¥1,000 · all",
+        "2 Udon ¥800 · all",
+        "3 Gyoza ¥600 · A",
+    ]
+
+
 async def test_back_from_a_fixed_item_and_back_to_summary() -> None:
     group = await FakeGroup.create(ADA, BO)
     card = await _walk(group)
@@ -335,6 +393,8 @@ async def test_edit_drops_removed_people_and_resumes_at_the_first_empty_item() -
     draft = await _draft(group, card)
     assert draft.item_claims[0] == (ADA.id,) and draft.item_claims[2] == (BO.id,)
     await group.press(ADA, card, "Bo")
+    await group.press(ADA, card, "Next ▶")
+    assert "(3 of 3)" in card.text and card.buttons[:2] == ["Ada", "✓ Bo"]
     await group.press(ADA, card, "Next ▶")
     assert card.text.startswith("<b>Check before saving</b>")
 

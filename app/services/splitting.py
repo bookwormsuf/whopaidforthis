@@ -207,8 +207,9 @@ def split_items(
             subtotals[uid] = subtotals.get(uid, 0) + part
         assignments[index] = (sorted(claimants), method)
 
-    # A negative item (an "Unlisted" correction when the lines came to more than
-    # the total) reduces its claimants in proportion to what their items cost, so a
+    # A negative item (before Sprint 13, an "Unlisted" correction when the lines
+    # came to more than the total; the gap is now an adjustment line) reduces its
+    # claimants in proportion to what their items cost, so a
     # claimant with nothing else is not pushed below zero; with no such items
     # between them it is split equally.
     for index, item in enumerate(line_items):

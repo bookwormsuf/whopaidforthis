@@ -11,13 +11,14 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from app.models.receipt import ReceiptLineItem
+from app.services.conversion import both_amounts
 from app.services.drafts import (
     UNLISTED_DESCRIPTION,
     InMemoryDraftStore,
     with_unlisted_line,
 )
 from app.services.receipt_parser import line_item_sums
-from app.services.splitting import Items, split_items
+from app.services.splitting import Items, shares_in_both_currencies, split_items
 from tests.test_drafts import _parsed, _setup
 
 # -- Expiry: 30 minutes from the last touch -------------------------------------------
@@ -112,9 +113,10 @@ def test_no_gap_and_no_lines_add_nothing_and_it_is_idempotent() -> None:
     tax=st.integers(min_value=0, max_value=5_000),
     gap=st.integers(min_value=-500, max_value=500),
     people=st.integers(min_value=1, max_value=5),
+    rate=st.decimals(min_value="0.0001", max_value="50", places=4),
     data=st.data(),
 )
-def test_gap_line_keeps_shares_exact(amounts, tax, gap, people, data) -> None:
+def test_gap_line_keeps_shares_exact(amounts, tax, gap, people, rate, data) -> None:
     lines = [_item(a) for a in amounts]
     if tax:
         lines.append(ReceiptLineItem(description="Tax", quantity=1, amount_minor=tax, kind="tax"))
@@ -138,3 +140,17 @@ def test_gap_line_keeps_shares_exact(amounts, tax, gap, people, data) -> None:
     assert len(gap_lines) == (gap != 0)
     for index in gap_lines:
         assert sum(result.line_allocations[index].values()) == gap
+    # And in both currencies (CLAUDE.md): a JPY receipt settled in SGD.
+    trip_amount, home_amount = both_amounts(total, "JPY", "JPY", "SGD", rate)
+    trip_shares, home_shares = shares_in_both_currencies(
+        result.shares,
+        original_currency="JPY",
+        trip_currency="JPY",
+        home_currency="SGD",
+        trip_to_home_rate=rate,
+        trip_amount_minor=trip_amount,
+        home_amount_minor=home_amount,
+        payer_id=1,
+    )
+    assert sum(trip_shares.values()) == trip_amount == total
+    assert sum(home_shares.values()) == home_amount

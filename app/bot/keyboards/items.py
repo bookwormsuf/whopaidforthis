@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import re
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import InlineKeyboardMarkup
 
 from app.bot.formatting import fmt_signed_money
-from app.bot.keyboards.split import short_name
+from app.bot.keyboards.split import _button, _cancel, short_name
 from app.services.drafts import Draft, claimable_indices, claimants_on_screen, person_for
 from app.services.names import Person
 
@@ -61,16 +61,13 @@ def item_button_text(draft: Draft, number: int, index: int, initials: dict[int, 
         keep = max(_MAX_DESCRIPTION_CHARS - len(suffix) - 1, 1)
         description = description[: len(description) - len(suffix)][:keep] + "…" + suffix
     text = f"🍽 {number} {description} {fmt_signed_money(item.amount_minor, draft.currency)}"
-    if index in draft.everyone_items:
-        return f"{text} · {EVERYONE_MARK}"
     claimants = draft.item_claims.get(index, ())
+    everyone = set(draft.participant_ids)
+    if index in draft.everyone_items or (len(everyone) > 1 and everyone <= set(claimants)):
+        return f"{text} · {EVERYONE_MARK}"
     if claimants:
         return f"{text} · {''.join(initials[uid] for uid in claimants)}"
     return text
-
-
-def _button(draft: Draft, label: str, action: str, arg: str) -> InlineKeyboardButton:
-    return InlineKeyboardButton(label, callback_data=f"{draft.draft_id}:{action}:{arg}")
 
 
 def walk_keyboard(draft: Draft) -> InlineKeyboardMarkup:
@@ -85,7 +82,7 @@ def walk_keyboard(draft: Draft) -> InlineKeyboardMarkup:
     people = [person_for(draft, pid) for pid in draft.participant_ids]
     toggles = [
         _button(
-            draft,
+            draft.draft_id,
             ("✓ " if person.user_id in ticked else "") + short_name(person, people),
             "wtoggle",
             f"{position},{person.user_id}",
@@ -93,13 +90,13 @@ def walk_keyboard(draft: Draft) -> InlineKeyboardMarkup:
         for person in people
     ]
     rows = [toggles[i : i + 3] for i in range(0, len(toggles), 3)]
-    rows.append([_button(draft, "Everyone", "weveryone", str(position))])
+    rows.append([_button(draft.draft_id, "Everyone", "weveryone", str(position))])
     moves = []
     if position > 0 or draft.fixing_one:
-        moves.append(_button(draft, "◀ Back", "wback", str(position)))
-    moves.append(_button(draft, "Next ▶", "wnext", str(position)))
+        moves.append(_button(draft.draft_id, "◀ Back", "wback", str(position)))
+    moves.append(_button(draft.draft_id, "Next ▶", "wnext", str(position)))
     rows.append(moves)
-    rows.append([_button(draft, "Cancel", "cancel", "-")])
+    rows.append([_cancel(draft.draft_id)])
     return InlineKeyboardMarkup(rows)
 
 
@@ -111,7 +108,7 @@ def fix_list_keyboard(draft: Draft) -> InlineKeyboardMarkup:
     rows = [
         [
             _button(
-                draft,
+                draft.draft_id,
                 item_button_text(draft, number, index, initials),
                 "fixpick",
                 str(number - 1),
@@ -119,5 +116,5 @@ def fix_list_keyboard(draft: Draft) -> InlineKeyboardMarkup:
         ]
         for number, index in enumerate(claimable_indices(draft), start=1)
     ]
-    rows.append([_button(draft, "◀ Back to summary", "fixback", "-")])
+    rows.append([_button(draft.draft_id, "◀ Back to summary", "fixback", "-")])
     return InlineKeyboardMarkup(rows)

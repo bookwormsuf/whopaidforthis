@@ -22,7 +22,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 9 Neon store and export | written 2026-10-15 (+ amendments) | done | green (446, 21 against Postgres) | 2026-10-15, findings fixed | 2026-10-15, steps 1-4 and 7; 5 and 6 deferred | 2026-10-15 | Sprint 9 closed. Steps 5 and 6 later / Sufyan. |
 | 10 `/start` menu with buttons | written 2026-10-15 (+ three amendments) | done | green (478) | 2026-10-15, findings fixed | 2026-10-15, steps 1 and 3 seen; others on Sufyan's word | 2026-10-15 | Sprint 10 closed. Sprint 11 dropped |
 | 12 Receipt read budget | written 2026-10-16 (+ warning wording amended after review) | done | green (513) | 2026-10-16, findings fixed | 2026-10-16, on Sufyan's word; no step reported individually | 2026-10-16 | Sprint 12 closed. Repo public. Watch `fly logs` for refusals after the launch post / Sufyan |
-| 13 Guided item split | written 2026-11-01 (+ §7/§8/§9 amendments) | not started | — | — | — | — | Run sprint 13 / agent |
+| 13 Guided item split | written 2026-11-01 (+ §7/§8/§9 amendments) | done | green (497) | 2026-11-01, findings fixed (one declined) | — | — | Merge PR, deploy, run the checklist / Sufyan |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -989,3 +989,30 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   `Rest → everyone` shortcut on long receipts; a forgotten person is added through `Edit`; draft
   expiry now runs 30 minutes from the last press (spec §8 amended). Double-tap protection,
   one-participant skip, zero and negative item lines left to the agent and pinned in the sub-spec.
+
+### 2026-11-01 — Sprint 13 built and reviewed
+
+- Performed by: Claude. Branch `sprint-13-guided-item-split`.
+- Build: draft states `item_walk` and `fix_list` replace the all-items card. Every walk button
+  carries the item's position, so a stale or double press changes nothing. Split screen is
+  `Go item by item` / `Split equally` / `Type amounts instead`. A receipt-total gap is one
+  `Unlisted / rounding` adjustment line (stored as `service_charge` or `discount`), added once
+  the total is settled; the reconcile prompt is `Continue with <total>` / `Cancel`. Draft expiry
+  runs from the last save. `split_items` now also returns each adjustment line's allocation so
+  the summary can show `+ unlisted` apart from tax or service. Retired: `Rest → everyone`,
+  `Done`, `Tapping for`, item text replies and their parsers; a reply to an item screen is
+  swallowed so it never starts an expense.
+- Tests: item tests rewritten around the walk, including the Eggtisan receipt end to end
+  (shares 357.17 / 542.48 / 327.35, sum ฿1,227.00 and the home amount); expiry with an injected
+  clock; a hypothesis test that the gap line keeps shares exact in both currencies. Old split
+  and receipt tests updated to the new labels. 497 passed, ruff clean. Postgres tests not run
+  here (no database in this session); no schema change.
+- Review (`/code-review` high): 10 findings. Fixed: a `Fix an item` screen could be left with
+  nobody via `Back`, giving the item to everyone unasked (now the toast); `Next` jumped to the
+  next unanswered item instead of the next item; `Fix an item` showed `ABC` instead of `all`
+  when every name was ticked; the property test now checks both currencies; the summary sums
+  every `Unlisted / rounding` line rather than keeping the last; duplicate constants, duplicate
+  button helpers and stale docstrings. Declined: a one-participant receipt still saves as an
+  equal split with line items `unassigned`, as `Just me` always has; shares are identical and
+  changing it would touch share maths, out of scope.
+- Next action / owner: review and merge the PR, deploy, run the eight-step checklist / Sufyan.
