@@ -21,7 +21,9 @@ Terms used throughout the code, the spec and the export. Implementation details 
 - **Menu** — the buttons under the welcome. What it offers depends on whether the group has no trip, an open trip or a closed trip; a press is the same as typing the command.
 - **Trip currency** — the currency merchants are paid in during the trip (JPY for Japan).
 - **Home currency** — the currency friends settle with each other in (SGD). Balances and settlement are computed in home currency.
-- **Original amount / original currency** — the amount exactly as paid. Must be either the trip currency or the home currency.
+- **Original amount / original currency** — the amount exactly as paid. Usually the trip currency or the home currency; since Sprint 15 it may be a **third currency**, with its own rate to the trip currency.
+- **Third currency** — an original currency that is neither the trip's nor the home currency. Shares are worked out in it, then converted to trip and home.
+- **Typed rate** — a third currency's rate to the trip currency given by the payer, when no published rate exists. Used for that expense only.
 - **Trip amount / home amount** — the expense expressed in each of the two trip currencies. One of them equals the original amount; the other is converted.
 - **Rate** — the exchange rate used for one expense, trip→home. **Rate date** — the date that rate was published for, which may be earlier than the transaction date (weekends, holidays, rate not yet published).
 - **Transaction date** — the day the money was spent, in the trip timezone. From the receipt if printed, else from the Telegram message time.

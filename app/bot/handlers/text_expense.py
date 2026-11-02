@@ -15,14 +15,15 @@ from telegram import Update
 from telegram.ext import ContextTypes, filters
 
 from app.bot.deps import get_deps
-from app.bot.formatting import unsupported_currency_text
 from app.bot.handlers.join import require_trip_for_expense
 from app.bot.handlers.photo_expense import handle_manual_amount_reply, read_receipt_photo
 from app.bot.handlers.split import (
     handle_custom_split_reply,
     handle_expired_card_reply,
     handle_item_reply,
+    handle_typed_rate_reply,
     handle_unreplied_custom_lines,
+    handle_unreplied_typed_rate,
 )
 from app.bot.handlers.tags import join_tagged, tags_as_text
 from app.bot.receipt_gate import send_five_left_warning, take_receipt_read
@@ -51,7 +52,6 @@ __all__ = [
     "TEXT_EXPENSE_FILTER",
     "draft_callback",
     "text_expense_handler",
-    "unsupported_currency_text",
 ]
 
 # ULID alphabet (Crockford base32, no I/L/O/U); cannot collide with "st:" or "join:".
@@ -95,9 +95,13 @@ async def text_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     if await handle_item_reply(update, context):
         return
+    if await handle_typed_rate_reply(update, context):
+        return
     if await handle_expired_card_reply(update, context):
         return
     if await handle_unreplied_custom_lines(update, context):
+        return
+    if await handle_unreplied_typed_rate(update, context):
         return
 
     trip = await require_trip_for_expense(update, context)
@@ -111,12 +115,6 @@ async def text_expense_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     parsed = parse_expense(text, trip.trip_currency, trip.home_currency, bot_username)
     if parsed is None:
         return  # not an expense candidate: stay silent (spec §6)
-    if parsed.error == "unsupported_currency":
-        await message.reply_text(
-            unsupported_currency_text(trip.trip_currency, trip.home_currency),
-            parse_mode="HTML",
-        )
-        return
 
     now = datetime.now(UTC)
     tg_user = TripUser.from_telegram_user(user, now)
@@ -211,6 +209,14 @@ async def draft_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 draft = await deps.draft_service.choose_total(draft_id, presser.id, index)
             elif action == "continue":
                 draft = await deps.draft_service.continue_total(draft_id, presser.id)
+            elif action == "typerate":
+                draft = await deps.draft_service.ask_typed_rate(draft_id, presser.id)
+            elif action == "ccyyes":
+                draft = await deps.draft_service.confirm_currency(draft_id, presser.id)
+            elif action == "ccyas":
+                draft = await deps.draft_service.confirm_currency(
+                    draft_id, presser.id, _arg.upper()
+                )
             elif action == "retry":
                 # Check first, take the budget second (spec §20): a press that
                 # `check_retry` would refuse (non-initiator, expired, wrong state, or a

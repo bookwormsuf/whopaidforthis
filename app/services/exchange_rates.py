@@ -133,7 +133,15 @@ class RateService:
         self._memory: dict[tuple[str, str, date], ExchangeRate] = {}
 
     async def rate_for(self, trip: Trip, on_date: date) -> ExchangeRate:
-        base, quote = trip.trip_currency, trip.home_currency
+        """The trip -> home rate for `on_date`."""
+        return await self.rate_between(trip, trip.trip_currency, trip.home_currency, on_date)
+
+    async def rate_between(self, trip: Trip, base: str, quote: str, on_date: date) -> ExchangeRate:
+        """Any `base -> quote` rate for `on_date` (sprint 15: a third currency to the
+        trip currency), with the same identity rule and cache as `rate_for`. A
+        currency the provider does not publish raises `RateUnavailable`; callers
+        check `has_published_rate` first to ask for a typed rate instead.
+        """
         if base == quote:
             return ExchangeRate(
                 base=base,

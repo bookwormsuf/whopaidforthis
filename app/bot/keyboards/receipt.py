@@ -8,6 +8,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from app.bot.formatting import fmt_money
 from app.models.receipt import CandidateTotal
+from app.models.trip import Trip
 
 
 def choose_total_keyboard(
@@ -57,5 +58,20 @@ def manual_amount_keyboard(draft_id: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton("Try again", callback_data=f"{draft_id}:retry:-"),
                 InlineKeyboardButton("Enter amount manually", callback_data=f"{draft_id}:manual:-"),
             ]
+        ]
+    )
+
+
+def confirm_currency_keyboard(draft_id: str, currency: str, trip: Trip) -> InlineKeyboardMarkup:
+    """`[Yes, MYR]` / `[It's THB] [It's SGD]` / `[Cancel]` (sprint 15)."""
+    corrections = list(dict.fromkeys([trip.trip_currency, trip.home_currency]))
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(f"Yes, {currency}", callback_data=f"{draft_id}:ccyyes:-")],
+            [
+                InlineKeyboardButton(f"It's {code}", callback_data=f"{draft_id}:ccyas:{code}")
+                for code in corrections
+            ],
+            [InlineKeyboardButton("Cancel", callback_data=f"{draft_id}:cancel:-")],
         ]
     )

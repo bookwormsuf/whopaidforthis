@@ -34,7 +34,13 @@ def fmt_amount_pair(trip_amount_minor: int, home_amount_minor: int, trip: Trip) 
     return f"{trip_str} ({home_str})"
 
 
-def format_expense_amount(trip: Trip, currency: str, trip_minor: int, home_minor: int) -> str:
+def format_expense_amount(
+    trip: Trip,
+    currency: str,
+    trip_minor: int,
+    home_minor: int,
+    original_minor: int | None = None,
+) -> str:
     """The one place that decides how an expense's amount is shown (spec §12).
 
     An expense entered in the home currency (`currency == trip.home_currency`) is
@@ -44,9 +50,19 @@ def format_expense_amount(trip: Trip, currency: str, trip_minor: int, home_minor
     existing `¥1,200 (S$9.72)` pair. Every per-expense renderer (draft card, Saved
     ✅ line, `/recent`, `/today`, `/mine`, `/undo`) must go through this, so the rule
     lives in one place.
+
+    An expense in a third currency (sprint 15) shows that amount first, then trip
+    and home: `RM 120.00 (฿850.00 · S$34.50)`; without `original_minor` it falls
+    back to the trip/home pair.
     """
     if currency == trip.home_currency:
         return fmt_money(home_minor, trip.home_currency)
+    if currency != trip.trip_currency and original_minor is not None:
+        trip_str = fmt_money(trip_minor, trip.trip_currency)
+        if trip.trip_currency == trip.home_currency:
+            return f"{fmt_money(original_minor, currency)} ({trip_str})"
+        home_str = fmt_money(home_minor, trip.home_currency)
+        return f"{fmt_money(original_minor, currency)} ({trip_str} · {home_str})"
     return fmt_amount_pair(trip_minor, home_minor, trip)
 
 
@@ -56,6 +72,7 @@ class _ExpenseLine(Protocol):
     transaction_date: date
     description: str
     original_currency: str
+    original_amount_minor: int
     trip_amount_minor: int
     home_amount_minor: int
     payer_display_name: str
@@ -67,7 +84,11 @@ def fmt_expense_bullet(expense: _ExpenseLine, trip: Trip, detail: str | None = N
     dot when given.
     """
     amount = format_expense_amount(
-        trip, expense.original_currency, expense.trip_amount_minor, expense.home_amount_minor
+        trip,
+        expense.original_currency,
+        expense.trip_amount_minor,
+        expense.home_amount_minor,
+        expense.original_amount_minor,
     )
     second = f"{escape(first_name(expense.payer_display_name))} paid"
     if detail:

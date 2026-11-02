@@ -12,10 +12,17 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import Decimal
 
 from app.models.category import Category
-from app.services.currencies import HOME_OR_USD, decimals_for, resolve_alias
+from app.services.conversion import to_minor
+from app.services.currencies import (
+    HOME_OR_USD,
+    WORD_LIKE_CODES,
+    YEN_SIGN,
+    is_iso_code,
+    resolve_alias,
+)
 
 _MAX_WORDS = 12
 
@@ -23,7 +30,7 @@ _MAX_WORDS = 12
 # A symbol, letters (`SGD`, `S`), or both (`S$`, `$SGD`) glued to the number. A
 # letter prefix that isn't a currency (e.g. `taxi3200`) means the word is not an
 # amount; see `_prefix_currency`.
-_CURRENCY_PREFIX_ALT = r"[¥$£€₩฿]?[A-Za-z]{1,3}[¥$£€₩฿]?|[¥$£€₩฿]"
+_CURRENCY_PREFIX_ALT = r"[¥$£€₩฿₹₱₫]?[A-Za-z]{1,3}[¥$£€₩฿₹₱₫]?|[¥$£€₩฿₹₱₫]"
 _WORD_AMOUNT_RE = re.compile(
     rf"^(?P<prefix>{_CURRENCY_PREFIX_ALT})?"
     r"(?P<number>\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
@@ -56,16 +63,13 @@ _CATEGORY_KEYWORDS: list[tuple[re.Pattern[str], Category]] = [
     (re.compile(r"\b(shop|uniqlo|donki|mall)\b", re.IGNORECASE), Category.SHOPPING),
 ]
 
-_UNSUPPORTED = "UNSUPPORTED"
-
 
 @dataclass(frozen=True)
 class ParsedExpense:
     """The result of `parse_expense` for a candidate expense message.
 
-    `error="unsupported_currency"` means an amount and a currency token were both
-    found, but the currency isn't the trip's or the home currency; `amount_minor`
-    and `currency` are meaningless in that case.
+    `currency` may be a third currency (sprint 15: neither the trip's nor the home
+    currency).
     """
 
     amount_minor: int
@@ -74,7 +78,6 @@ class ParsedExpense:
     category: Category
     participants_text: str | None = None
     payer_text: str | None = None
-    error: str | None = None
 
 
 def _strip_bot_mention(text: str, bot_username: str) -> str:
@@ -115,9 +118,10 @@ def _extract_trailing(text: str) -> tuple[str, str | None, str | None]:
 
 
 def _match_currency_token(token: str, trip_currency: str, home_currency: str) -> str | None:
-    """Resolve a possible currency token to `trip_currency`, `home_currency`,
-    `_UNSUPPORTED` (a real currency, but not this trip's), or None (not a currency
-    token at all).
+    """Resolve a possible currency token to a currency code (the trip's, the home
+    currency, or since sprint 15 a third one), or None (not a currency token). A
+    three-letter ISO code counts in any case, except codes that are also everyday
+    words (`all`, `cup`, `top`), which count only in capitals.
     """
     stripped = token.strip(".,!?").strip()
     if not stripped:
@@ -128,16 +132,18 @@ def _match_currency_token(token: str, trip_currency: str, home_currency: str) ->
     if upper == home_currency:
         return home_currency
     alias = resolve_alias(stripped.lower())
-    if alias is None:
-        return None
     if alias == HOME_OR_USD:
         # Spec §4: "$" -> home currency when home is SGD or USD, else USD.
-        alias = home_currency if home_currency in ("SGD", "USD") else "USD"
-    if alias == trip_currency:
-        return trip_currency
-    if alias == home_currency:
-        return home_currency
-    return _UNSUPPORTED
+        return home_currency if home_currency in ("SGD", "USD") else "USD"
+    if stripped == YEN_SIGN and "CNY" in (trip_currency, home_currency):
+        return "CNY"
+    if alias is not None:
+        return alias
+    if len(stripped) == 3 and stripped.isalpha() and is_iso_code(upper):
+        if upper in WORD_LIKE_CODES and stripped != upper:
+            return None
+        return upper
+    return None
 
 
 def _prefix_currency(prefix: str, trip_currency: str, home_currency: str) -> str | None:
@@ -163,8 +169,8 @@ def _category_for(text: str) -> Category:
 @dataclass(frozen=True)
 class _LocatedAmount:
     """The first amount in a word list, plus every word index it consumed (the
-    amount itself and an adjacent currency word, if any). `currency` is the trip or
-    home currency, or `_UNSUPPORTED`.
+    amount itself and an adjacent currency word, if any). `currency` is any
+    currency code (sprint 15).
     """
 
     amount_minor: int
@@ -179,11 +185,11 @@ def _locate_amount(
     `parse_amount_only`, `parse_caption_description` and `parse_custom_line`. A bare
     number is in `bare_currency`, which defaults to the trip currency.
     """
-    # A glued code for another currency (`rm12`) might be a room number: skip it,
+    # A glued code for a third currency (`rm12`) might be a room number: skip it,
     # but only trust a later amount that is clearly one (a currency, or 3+ digits:
-    # `Hotel rm12 6000`); otherwise it's still "I can only record …" (`Dinner RM120
-    # for 3`), never a wrong small amount.
-    skipped: set[int] | None = None
+    # `Hotel rm12 6000`); otherwise the glued one is the amount (`Dinner RM120 for
+    # 3` is RM120, sprint 15), never a wrong small amount.
+    skipped: _LocatedAmount | None = None
     for index, word in enumerate(words):
         match = _WORD_AMOUNT_RE.match(word)
         if not match:
@@ -198,8 +204,14 @@ def _locate_amount(
             currency_token = _prefix_currency(prefix, trip_currency, home_currency)
             if currency_token is None and any(c.isalpha() for c in prefix):
                 continue  # `taxi3200`, `part1`: letters that aren't a currency
-            if currency_token == _UNSUPPORTED and prefix.isalpha() and skipped is None:
-                skipped = {index}
+            if (
+                currency_token not in (None, trip_currency, home_currency)
+                and prefix.isalpha()
+                and skipped is None
+            ):
+                skipped = _LocatedAmount(
+                    _minor(number_str, currency_token), currency_token, frozenset({index})
+                )
                 continue
         if currency_token is None and suffix:
             currency_token = _match_currency_token(suffix, trip_currency, home_currency)
@@ -214,19 +226,17 @@ def _locate_amount(
                 currency_token = candidate
                 consumed.add(index - 1)
 
-        if currency_token == _UNSUPPORTED:
-            return _LocatedAmount(0, _UNSUPPORTED, frozenset(consumed))
         digits = sum(c.isdigit() for c in number_str.split(".")[0])
         if skipped is not None and currency_token is None and digits < 3:
-            return _LocatedAmount(0, _UNSUPPORTED, frozenset(skipped))
+            return skipped
         currency = currency_token if currency_token is not None else bare_currency or trip_currency
-        decimals = decimals_for(currency)
-        value = Decimal(number_str.replace(",", ""))
-        amount_minor = int((value * (Decimal(10) ** decimals)).to_integral_value(ROUND_HALF_EVEN))
-        return _LocatedAmount(amount_minor, currency, frozenset(consumed))
-    if skipped is not None:
-        return _LocatedAmount(0, _UNSUPPORTED, frozenset(skipped))
-    return None
+        return _LocatedAmount(_minor(number_str, currency), currency, frozenset(consumed))
+    return skipped
+
+
+def _minor(number_str: str, currency: str) -> int:
+    """`"1,200.50"` in `currency`'s minor units, rounded half-even."""
+    return to_minor(Decimal(number_str.replace(",", "")), currency)
 
 
 def _description_words(words: list[str], consumed: frozenset[int]) -> str:
@@ -282,10 +292,10 @@ def parse_amount_only(text: str, trip_currency: str, home_currency: str) -> tupl
 
     Uses the same amount/currency-token rule as `parse_expense` (spec §6), for the
     receipt "Enter amount manually" flow (spec §7/§8, sprint 4). Returns `None` if no
-    amount is found or the currency isn't the trip's or home currency.
+    amount is found. The currency may be a third one (sprint 15).
     """
     located = _locate_amount(text.strip().split(), trip_currency, home_currency)
-    if located is None or located.currency == _UNSUPPORTED:
+    if located is None:
         return None
     return located.amount_minor, located.currency
 
@@ -304,12 +314,12 @@ def parse_custom_line(
 ) -> CustomLine | None:
     """`<name> <amount>` (either order), using the same amount/currency rule as
     `parse_expense`, except that a bare number is in the expense's own currency
-    (`Me 6` on an S$12 expense is S$6). `None` if the line has no amount, no name,
-    or a currency that isn't the trip's or the home currency.
+    (`Me 6` on an S$12 expense is S$6). `None` if the line has no amount or no name;
+    the caller checks the currency is the expense's.
     """
     words = line.strip().split()
     located = _locate_amount(words, trip_currency, home_currency, expense_currency)
-    if located is None or located.currency == _UNSUPPORTED:
+    if located is None:
         return None
     name_text = " ".join(w for i, w in enumerate(words) if i not in located.consumed).strip()
     name_text = name_text.strip(":-–—").strip()
@@ -336,17 +346,6 @@ def parse_expense(
     located = _locate_amount(words, trip_currency, home_currency)
     if located is None:
         return None  # no amount found: not an expense candidate, stay silent
-
-    if located.currency == _UNSUPPORTED:
-        return ParsedExpense(
-            amount_minor=0,
-            currency="",
-            description="",
-            category=Category.OTHER,
-            participants_text=participants_text,
-            payer_text=payer_text,
-            error="unsupported_currency",
-        )
 
     leftover_text = _description_words(words, located.consumed)
     description = leftover_text.title() if leftover_text else "Expense"

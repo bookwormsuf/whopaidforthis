@@ -91,7 +91,8 @@ async def test_silent_on_non_expense_text() -> None:
     update.effective_message.reply_text.assert_not_awaited()
 
 
-async def test_unsupported_currency_gets_one_line_reply() -> None:
+async def test_a_third_currency_gets_a_card() -> None:
+    """Sprint 15: `500 baht` on a JPY/SGD trip is recorded in baht."""
     ledger, trip = await _bound_ledger()
     deps = make_deps(ledger)
     context = _context(deps)
@@ -99,9 +100,9 @@ async def test_unsupported_currency_gets_one_line_reply() -> None:
 
     await text_expense_handler(update, context)
 
-    update.effective_message.reply_text.assert_awaited_once_with(
-        "I can only record JPY or SGD for this trip.", parse_mode="HTML"
-    )
+    text = update.effective_message.reply_text.await_args.args[0]
+    assert "I can only record" not in text
+    assert "฿500.00" in text
 
 
 async def test_valid_expense_sends_draft_card_and_joins_sender() -> None:

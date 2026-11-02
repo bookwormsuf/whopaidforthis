@@ -74,6 +74,82 @@ async def handle_custom_split_reply(update: Update, context: ContextTypes.DEFAUL
     return True
 
 
+async def handle_typed_rate_reply(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """`True` if the message replies to a `typed_rate` card (sprint 15: no published
+    rate for the expense's currency). The initiator's reply is the rate, or the
+    total in the trip currency; anyone else's is swallowed, as it is about the card.
+    """
+    message = update.effective_message
+    chat = update.effective_chat
+    user = update.effective_user
+    if message is None or chat is None or user is None or not message.text:
+        return False
+    if message.reply_to_message is None:
+        return False
+    deps = get_deps(context)
+    draft = await deps.draft_service.find_by_bot_message(
+        chat.id, message.reply_to_message.message_id
+    )
+    if draft is None or draft.state != "typed_rate":
+        return False
+    if user.id != draft.initiator_id:
+        return True
+    try:
+        trip = await deps.ledger.get_binding(chat.id)
+    except LedgerUnavailable:
+        logger.exception("typed_rate_reply: could not read the current binding")
+        await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
+        return True
+    if trip is None:
+        return True
+    await _apply_typed_rate(update, context, draft.draft_id, trip)
+    return True
+
+
+async def _apply_typed_rate(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, draft_id: str, trip
+) -> None:
+    message = update.effective_message
+    chat = update.effective_chat
+    user = update.effective_user
+    deps = get_deps(context)
+    try:
+        updated = await deps.draft_service.set_typed_rate(draft_id, user.id, trip, message.text)
+    except LedgerUnavailable:
+        logger.exception("typed_rate: could not reach the store")
+        await message.reply_text(LEDGER_UNAVAILABLE_TEXT, parse_mode="HTML")
+        return
+    except DraftError:
+        logger.exception("typed_rate: draft %s error", draft_id)
+        return
+    await edit_draft_card(context, chat.id, updated, trip)
+
+
+async def handle_unreplied_typed_rate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """`True` if a message sent without replying is the rate (or trip-currency total)
+    for the sender's card waiting on one, and it was applied.
+    """
+    message = update.effective_message
+    chat = update.effective_chat
+    user = update.effective_user
+    if message is None or chat is None or user is None or not message.text:
+        return False
+    if message.reply_to_message is not None:
+        return False
+    deps = get_deps(context)
+    draft = await deps.draft_service.open_typed_rate_card(chat.id, user.id)
+    if draft is None:
+        return False
+    try:
+        trip = await deps.ledger.get_binding(chat.id)
+    except LedgerUnavailable:
+        return False
+    if trip is None or not deps.draft_service.typed_rate_fits(trip, message.text):
+        return False
+    await _apply_typed_rate(update, context, draft.draft_id, trip)
+    return True
+
+
 EXPIRED_CARD_TEXT = (
     "That card has expired. Unfinished expenses are cleared after 30 minutes, or when "
     "the bot is updated. Please send the expense again."

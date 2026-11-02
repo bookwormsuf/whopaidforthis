@@ -367,4 +367,7 @@ def _expense_to_record(expense: Expense) -> ExpenseRecord:
         status=expense.status,
         cancelled_at=expense.cancelled_at,
         notes=expense.notes,
+        original_rate=expense.original_rate,
+        original_rate_date=expense.original_rate_date,
+        original_rate_provider=expense.original_rate_provider,
     )

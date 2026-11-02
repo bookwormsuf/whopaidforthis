@@ -448,3 +448,37 @@ async def test_list_open_trip_chat_ids_skips_closed_trips(
     assert open_trip.chat_id in chat_ids
     assert closed.chat_id not in chat_ids
     assert chat_ids == sorted(chat_ids)
+
+
+async def test_a_third_currency_expense_roundtrips_its_rate(
+    postgres_store: PostgresLedgerStore,
+) -> None:
+    """Sprint 15: RM 12.00 on a JPY trip, with its MYR -> JPY rate; its line items
+    are stored in yen at that rate.
+    """
+    trip = await postgres_store.save_binding(_trip())
+    expense = _expense(trip, "01EXPENSE0000000000THIRD").model_copy(
+        update={
+            "original_amount_minor": 1200,
+            "original_currency": "MYR",
+            "original_rate": Decimal("33.5"),
+            "original_rate_date": date(2026, 10, 1),
+            "original_rate_provider": "frankfurter",
+        }
+    )
+    expense = expense.model_copy(
+        update={
+            "trip_amount_minor": 402,
+            "splits": [expense.splits[0].model_copy(update={"share_trip_minor": 402})],
+        }
+    )
+    line_items = [ReceiptLineItem(description="Nasi", quantity=1, amount_minor=1200, kind="item")]
+    await postgres_store.append_expense(trip, expense, line_items=line_items)
+
+    [record] = await postgres_store.list_expenses(trip)
+    assert (record.original_currency, record.original_amount_minor) == ("MYR", 1200)
+    assert record.original_rate == Decimal("33.5")
+    assert record.original_rate_date == date(2026, 10, 1)
+    assert record.original_rate_provider == "frankfurter"
+    [line] = await postgres_store.list_line_items(trip)
+    assert line.amount_trip_minor == 402  # RM 12.00 x 33.5 = ¥402

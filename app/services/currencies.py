@@ -12,12 +12,86 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+# Unchanged in sprint 15 on purpose: amounts already saved for a trip in, say, VND
+# or ISK use 2 decimals, and changing a code's decimals would misread them 100 times
+# off. A receipt read with the wrong scale is caught by the 100-times check (spec §7).
 MINOR_UNIT_DECIMALS: dict[str, int] = {"JPY": 0, "KRW": 0}
 
 
 def decimals_for(code: str) -> int:
     """Minor-unit decimal places for a currency code. Defaults to 2."""
     return MINOR_UNIT_DECIMALS.get(code.upper(), 2)
+
+
+# Active ISO 4217 currency codes (sprint 15). A receipt or message may be in any of
+# them; an expense is recorded in one once its rate to the trip currency is known.
+ISO_CODES: frozenset[str] = frozenset(
+    """AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB BRL
+    BSD BTN BWP BYN BZD CAD CDF CHF CLP CNY COP CRC CUP CVE CZK DJF DKK DOP DZD EGP ERN
+    ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD HNL HTG HUF IDR ILS INR IQD IRR
+    ISK JMD JOD JPY KES KGS KHR KMF KPW KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL
+    MGA MKD MMK MNT MOP MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN
+    PGK PHP PKR PLN PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP
+    STN SVC SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD UYU UZS VES VND VUV
+    WST XAF XCD XOF XPF YER ZAR ZMW ZWL""".split()
+)
+
+# Codes Frankfurter (the European Central Bank's reference rates) publishes. Any other
+# code needs a rate typed by the payer (sprint 15).
+PUBLISHED_RATE_CODES: frozenset[str] = frozenset(
+    """AUD BGN BRL CAD CHF CNY CZK DKK EUR GBP HKD HUF IDR ILS INR ISK JPY KRW MXN MYR
+    NOK NZD PHP PLN RON SEK SGD THB TRY USD ZAR""".split()
+)
+
+# Codes that are also everyday English words: typed in a message they count as a
+# currency only in capitals (`20 TRY`), so `3 cup coffee` is not Cuban pesos.
+WORD_LIKE_CODES: frozenset[str] = frozenset(
+    "ALL BAM BOB CAD COP CUP GEL MAD MOP NAD PEN RON RUB SOS TOP TRY".split()
+)
+
+
+def is_iso_code(code: str) -> bool:
+    return code.upper() in ISO_CODES
+
+
+def has_published_rate(code: str) -> bool:
+    return code.upper() in PUBLISHED_RATE_CODES
+
+
+CURRENCY_NAMES: dict[str, str] = {
+    "AED": "UAE dirham",
+    "AUD": "Australian dollar",
+    "CAD": "Canadian dollar",
+    "CHF": "Swiss franc",
+    "CNY": "Chinese yuan",
+    "EUR": "euro",
+    "GBP": "British pound",
+    "HKD": "Hong Kong dollar",
+    "IDR": "Indonesian rupiah",
+    "INR": "Indian rupee",
+    "JPY": "Japanese yen",
+    "KHR": "Cambodian riel",
+    "KRW": "South Korean won",
+    "LAK": "Lao kip",
+    "MYR": "Malaysian ringgit",
+    "NZD": "New Zealand dollar",
+    "PHP": "Philippine peso",
+    "SGD": "Singapore dollar",
+    "THB": "Thai baht",
+    "TWD": "Taiwan dollar",
+    "USD": "US dollar",
+    "VND": "Vietnamese dong",
+}
+
+
+def name_for(code: str) -> str:
+    """`Malaysian ringgit (RM)`, or the code alone when no name is tabulated."""
+    code = code.upper()
+    name = CURRENCY_NAMES.get(code)
+    symbol = symbol_for(code).strip()
+    if name is None:
+        return code
+    return f"{name} ({symbol})" if symbol != code else name
 
 
 TIMEZONE_DEFAULTS: dict[str, str] = {
@@ -90,12 +164,18 @@ CURRENCY_ALIASES: dict[str, str] = {
     "฿": "THB",
     "€": "EUR",
     "£": "GBP",
+    "₹": "INR",
+    "₱": "PHP",
+    "₫": "VND",
     "$": HOME_OR_USD,
     "s$": "SGD",
     "sgd": "SGD",
     "rm": "MYR",
     "rp": "IDR",
 }
+
+# `¥` is yen, unless the trip or home currency is the Chinese yuan (sprint 15).
+YEN_SIGN = "¥"
 
 
 def resolve_alias(token: str) -> str | None:
