@@ -12,14 +12,14 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import Decimal
 
 from app.models.category import Category
+from app.services.conversion import to_minor
 from app.services.currencies import (
     HOME_OR_USD,
     WORD_LIKE_CODES,
     YEN_SIGN,
-    decimals_for,
     is_iso_code,
     resolve_alias,
 )
@@ -69,8 +69,7 @@ class ParsedExpense:
     """The result of `parse_expense` for a candidate expense message.
 
     `currency` may be a third currency (sprint 15: neither the trip's nor the home
-    currency). `error="unsupported_currency"` is no longer produced by the parser
-    itself and is kept for callers that still handle it.
+    currency).
     """
 
     amount_minor: int
@@ -79,7 +78,6 @@ class ParsedExpense:
     category: Category
     participants_text: str | None = None
     payer_text: str | None = None
-    error: str | None = None
 
 
 def _strip_bot_mention(text: str, bot_username: str) -> str:
@@ -238,8 +236,7 @@ def _locate_amount(
 
 def _minor(number_str: str, currency: str) -> int:
     """`"1,200.50"` in `currency`'s minor units, rounded half-even."""
-    value = Decimal(number_str.replace(",", ""))
-    return int((value * (Decimal(10) ** decimals_for(currency))).to_integral_value(ROUND_HALF_EVEN))
+    return to_minor(Decimal(number_str.replace(",", "")), currency)
 
 
 def _description_words(words: list[str], consumed: frozenset[int]) -> str:

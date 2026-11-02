@@ -33,7 +33,6 @@ BOT = "whopaidforthisbot"
 def test_parses_the_six_examples(text, amount_minor, currency, description, category) -> None:
     result = parse_expense(text, "JPY", "SGD", BOT)
     assert result is not None
-    assert result.error is None
     assert result.amount_minor == amount_minor
     assert result.currency == currency
     assert result.description == description
@@ -75,7 +74,7 @@ def test_a_third_currency_is_read_as_itself() -> None:
     # Sprint 15: neither the trip's nor the home currency, recorded as is.
     result = parse_expense("500 baht massage", "JPY", "SGD", BOT)
     assert result is not None
-    assert (result.error, result.amount_minor, result.currency) == (None, 50000, "THB")
+    assert (result.amount_minor, result.currency) == (50000, "THB")
 
 
 def test_empty_description_defaults_to_expense() -> None:
@@ -108,7 +107,6 @@ def test_trailing_paid_by_and_split_clauses_captured_not_resolved() -> None:
 def test_brief_example_five_split_between_names() -> None:
     result = parse_expense("¥6000 dinner split between me Amir and John", "JPY", "SGD", BOT)
     assert result is not None
-    assert result.error is None
     assert result.amount_minor == 6000
     assert result.currency == "JPY"
     assert result.description == "Dinner"
@@ -120,7 +118,6 @@ def test_brief_example_five_split_between_names() -> None:
 def test_brief_example_six_split_everyone() -> None:
     result = parse_expense("¥2400 taxi split everyone", "JPY", "SGD", BOT)
     assert result is not None
-    assert result.error is None
     assert result.amount_minor == 2400
     assert result.currency == "JPY"
     assert result.description == "Taxi"
@@ -150,7 +147,6 @@ def test_leading_bot_mention_is_ignored() -> None:
 def test_dollar_sign_resolves_to_home_currency_when_home_is_sgd() -> None:
     result = parse_expense("$12 grab", "JPY", "SGD", BOT)
     assert result is not None
-    assert result.error is None
     assert result.amount_minor == 1200
     assert result.currency == "SGD"
 
@@ -158,7 +154,6 @@ def test_dollar_sign_resolves_to_home_currency_when_home_is_sgd() -> None:
 def test_dollar_sign_resolves_to_home_currency_when_home_is_usd() -> None:
     result = parse_expense("$12 grab", "JPY", "USD", BOT)
     assert result is not None
-    assert result.error is None
     assert result.currency == "USD"
 
 
@@ -248,7 +243,6 @@ def test_glued_letters_naming_another_currency_are_not_an_amount() -> None:
     # `rm12` is room 12 here, not ringgit: the ¥6,000 is the amount.
     result = parse_expense("Hotel rm12 6000", "JPY", "SGD", BOT)
     assert result is not None
-    assert result.error is None
     assert (result.amount_minor, result.currency) == (6000, "JPY")
     # Without a clear amount elsewhere, a glued code is that currency (sprint 15):
     # never a wrong small yen amount.
@@ -278,8 +272,8 @@ def test_glued_letters_naming_another_currency_are_not_an_amount() -> None:
         ("€30 museum", 3000, "EUR"),
         ("£8 coffee", 800, "GBP"),
         ("₩15000 bibimbap", 15000, "KRW"),
-        ("100000 vnd pho", 100000, "VND"),
-        ("₫100000 pho", 100000, "VND"),
+        ("100000 vnd pho", 10000000, "VND"),
+        ("₫100000 pho", 10000000, "VND"),
         ("20 TRY simit", 2000, "TRY"),
     ],
 )

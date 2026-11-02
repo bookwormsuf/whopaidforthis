@@ -44,6 +44,7 @@ from app.services.drafts import (
     by_items_available,
     claimable_indices,
     draft_items_split,
+    draft_original_shares,
     draft_shares,
     is_third_currency,
     left_out_still_charged,
@@ -153,8 +154,9 @@ def _render_typed_rate(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMar
         "",
         f"No exchange rate for {escape(draft.currency)}. Reply to this message with what "
         f"1 {escape(draft.currency)} is in {escape(trip_symbol)}, e.g. <code>0.25</code>, "
-        f"or with the total in {escape(trip_symbol)}, e.g. "
-        f"<code>{escape(fmt_money(85000, trip.trip_currency))}</code>.",
+        f"or with the total, {escape(trip_symbol)} included, e.g. "
+        f"<code>{escape(fmt_money(85000, trip.trip_currency))}</code>. A number on its own "
+        "is the rate.",
     ]
     if draft.typed_rate_error:
         lines.append(f"⚠️ {escape(draft.typed_rate_error, quote=False)}")
@@ -390,9 +392,12 @@ def _render_preview(
         lines = _items_preview_lines(draft, trip)
     else:
         lines = []
+        original = draft_original_shares(draft, trip)
         for pid, (share_trip, share_home) in draft_shares(draft, trip).items():
             name = escape(person_for(draft, pid).display_name)
-            share = format_expense_amount(trip, draft.currency, share_trip, share_home)
+            share = format_expense_amount(
+                trip, draft.currency, share_trip, share_home, original.get(pid)
+            )
             lines.append(f"• {name} {share}")
     text = head + "\n" + "\n".join(lines)
     if isinstance(draft.split, Items):
@@ -458,6 +463,14 @@ def _render_rate_failed(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMa
         f"🧾 <b>{desc}</b>\n{amount_str}\nPaid by {payer} · {date_str}\n\n"
         "⚠️ Couldn't fetch the exchange rate, try again in a minute"
     )
+    if is_third_currency(draft.currency, trip):
+        text += ", or enter the rate yourself"
+        return text, _buttons(
+            draft.draft_id,
+            ("Retry", "retry_rate"),
+            ("Enter rate", "typerate"),
+            ("Cancel", "cancel"),
+        )
     return text, _buttons(draft.draft_id, ("Retry", "retry_rate"), ("Cancel", "cancel"))
 
 

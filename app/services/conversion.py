@@ -104,32 +104,43 @@ def amount_in_trip_currency(
     )[0]
 
 
-_RATE_RE = re.compile(r"^\d+(?:\.\d+)?$|^\.\d+$")
+_RATE_RE = re.compile(r"^(?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d+)?$")
 
 
 def parse_rate(text: str) -> Decimal | None:
-    """A typed rate (sprint 15): a bare positive number, `0.0013`, `7.08` or
-    `.25`. `None` for anything else (a currency, a word, zero).
+    """A typed rate (sprint 15): any bare positive number, `0.0013`, `7.08`, `.25`,
+    `1,200`. A bare number is always the rate; a total needs its currency (`฿850`).
+    `None` for anything else (a currency, a word, zero).
     """
     stripped = text.strip()
-    if not _RATE_RE.match(stripped):
+    if not stripped or not _RATE_RE.match(stripped):
         return None
     try:
-        rate = Decimal(stripped)
+        rate = Decimal(stripped.replace(",", ""))
     except InvalidOperation:
         return None
     return rate if rate > 0 else None
 
 
-def rate_from_amounts(from_minor: int, from_ccy: str, to_minor: int, to_ccy: str) -> Decimal | None:
+def to_major(amount_minor: int, ccy: str) -> Decimal:
+    """`1250` SGD -> `Decimal("12.50")`."""
+    return Decimal(amount_minor) / (Decimal(10) ** decimals_for(ccy))
+
+
+def to_minor(major: Decimal, ccy: str) -> int:
+    """`Decimal("12.505")` SGD -> `1250`, rounded half-even to the currency's decimals."""
+    return int((major * (Decimal(10) ** decimals_for(ccy))).to_integral_value(ROUND_HALF_EVEN))
+
+
+def rate_from_amounts(
+    from_minor: int, from_ccy: str, to_minor_: int, to_ccy: str
+) -> Decimal | None:
     """The `from_ccy -> to_ccy` rate that turns one amount into the other, e.g. a
     typed trip-currency total for a third-currency expense (sprint 15).
     """
-    if from_minor <= 0 or to_minor <= 0:
+    if from_minor <= 0 or to_minor_ <= 0:
         return None
-    from_major = Decimal(from_minor) / (Decimal(10) ** decimals_for(from_ccy))
-    to_major = Decimal(to_minor) / (Decimal(10) ** decimals_for(to_ccy))
-    return to_major / from_major
+    return to_major(to_minor_, to_ccy) / to_major(from_minor, from_ccy)
 
 
 def rescale_minor(amount_minor: int, from_ccy: str, to_ccy: str) -> int:

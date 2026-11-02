@@ -12,18 +12,14 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# ISO 4217 minor units for every code that is not 2 (sprint 15: any currency can be
-# an expense's original currency, so VND must never be read 100 times off).
-MINOR_UNIT_DECIMALS: dict[str, int] = {
-    **dict.fromkeys(
-        "BIF CLP DJF GNF ISK JPY KMF KRW PYG RWF UGX UYI VND VUV XAF XOF XPF".split(), 0
-    ),
-    **dict.fromkeys("BHD IQD JOD KWD LYD OMR TND".split(), 3),
-}
+# Unchanged in sprint 15 on purpose: amounts already saved for a trip in, say, VND
+# or ISK use 2 decimals, and changing a code's decimals would misread them 100 times
+# off. A receipt read with the wrong scale is caught by the 100-times check (spec §7).
+MINOR_UNIT_DECIMALS: dict[str, int] = {"JPY": 0, "KRW": 0}
 
 
 def decimals_for(code: str) -> int:
-    """Minor-unit decimal places for a currency code (ISO 4217). Defaults to 2."""
+    """Minor-unit decimal places for a currency code. Defaults to 2."""
     return MINOR_UNIT_DECIMALS.get(code.upper(), 2)
 
 

@@ -31,6 +31,7 @@ import `app.bot` or build telegram objects.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -476,6 +477,20 @@ def draft_items_split(draft: Draft, trip: Trip) -> ItemsSplit:
     )
 
 
+def draft_original_shares(draft: Draft, trip: Trip) -> dict[int, int]:
+    """Each participant's share in the expense's own currency, e.g. ringgit for a
+    third-currency expense (sprint 15), for showing it first on the card.
+    """
+    draft = billed(draft)
+    return split_shares(
+        draft.split or Equal(),
+        original_total(draft, trip),
+        draft.participant_ids,
+        draft.payer_id,
+        line_items=draft.line_items,
+    )
+
+
 def draft_shares(draft: Draft, trip: Trip) -> dict[int, tuple[int, int]]:
     """Each participant's `(share_trip, share_home)` for the draft's split, in
     participant order. Both columns sum exactly to the expense amounts (spec §4/§5).
@@ -667,18 +682,21 @@ class DraftService:
         """
         third = is_third_currency(draft.currency, trip)
         original_rate = draft.original_rate if third else None
+        published = has_published_rate(draft.currency) and has_published_rate(trip.trip_currency)
+        on_date = draft.transaction_date
         try:
-            rate = await self._rates.rate_for(trip, draft.transaction_date)
-            if third and original_rate is None:
-                if not (
-                    has_published_rate(draft.currency) and has_published_rate(trip.trip_currency)
-                ):
-                    updated = replace(draft, state="typed_rate", rate=rate)
-                    await self._drafts.put(updated)
-                    return updated
-                original_rate = await self._rates.rate_between(
-                    trip, draft.currency, trip.trip_currency, draft.transaction_date
+            if third and original_rate is None and published:
+                # Independent lookups: fetch both at once, not one after the other.
+                rate, original_rate = await asyncio.gather(
+                    self._rates.rate_for(trip, on_date),
+                    self._rates.rate_between(trip, draft.currency, trip.trip_currency, on_date),
                 )
+            else:
+                rate = await self._rates.rate_for(trip, on_date)
+            if third and original_rate is None:
+                updated = replace(draft, state="typed_rate", rate=rate)
+                await self._drafts.put(updated)
+                return updated
         except RateUnavailable:
             updated = replace(draft, state="rate_failed")
             await self._drafts.put(updated)
@@ -703,10 +721,44 @@ class DraftService:
         )
         return await self._apply_clauses(updated, trip)
 
+    async def ask_typed_rate(self, draft_id: str, presser_id: int) -> Draft:
+        """`Enter rate` on a third-currency `rate_failed` card: the rate could not be
+        fetched, so the payer may type it instead (sprint 15, found at review).
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        trip = await self._trip_for(draft)
+        if draft.state != "rate_failed" or not is_third_currency(draft.currency, trip):
+            raise DraftUnchanged()
+        updated = replace(draft, state="typed_rate")
+        await self._drafts.put(updated)
+        return updated
+
+    async def open_typed_rate_card(self, chat_id: int, user_id: int) -> Draft | None:
+        """The sender's most recent card waiting for a typed rate in this chat."""
+        return await self._drafts.latest_for(chat_id, user_id, "typed_rate")
+
+    @staticmethod
+    def typed_rate_fits(trip: Trip, text: str) -> bool:
+        """Whether `text`, sent without replying, reads as an answer to the typed-rate
+        card: a bare number, or an amount with the trip currency's symbol or code.
+        """
+        if parse_rate(text) is not None:
+            return True
+        words = text.split()
+        if not words or len(words) > 2:
+            return False
+        total = parse_amount_only(text, trip.trip_currency, trip.home_currency)
+        return (
+            total is not None
+            and total[1] == trip.trip_currency
+            and any(not w.replace(",", "").replace(".", "").isdigit() for w in words)
+        )
+
     async def set_typed_rate(self, draft_id: str, presser_id: int, trip: Trip, text: str) -> Draft:
         """A reply to the `typed_rate` card (sprint 15): what 1 unit of the expense's
         currency is in the trip currency (`0.0013`), or the total in the trip
-        currency (`฿850`, `850 thb`). Used for this expense only, never cached.
+        currency (`฿850`, `850 thb`). A bare number is always the rate: a total needs
+        its currency. Used for this expense only, never cached.
         """
         draft = await self._get_active(draft_id, presser_id)
         if draft.state != "typed_rate":

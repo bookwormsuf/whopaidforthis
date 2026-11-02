@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-11-02 (sprint 14 signed off)
+Updated: 2026-11-02 (sprint 14 signed off; sprint 15 built)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -24,6 +24,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 12 Receipt read budget | written 2026-10-16 (+ warning wording amended after review) | done | green (513) | 2026-10-16, findings fixed | 2026-10-16, on Sufyan's word; no step reported individually | 2026-10-16 | Sprint 12 closed. Repo public. Watch `fly logs` for refusals after the launch post / Sufyan |
 | 13 Guided item split | written 2026-11-01 (+ §7/§8/§9 amendments) | done | green (497) | 2026-11-01, findings fixed (one declined) | 2026-11-01, on Sufyan's word; no step reported individually | 2026-11-01 | Sprint 13 closed. Next: run sprint 14 / agent |
 | 14 Not on this bill | written 2026-11-01 (+ §7/§9 amendments) | done | green (528) | 2026-11-01, findings fixed (one noted) | 2026-11-02, on Sufyan's word; no step reported individually | 2026-11-02 | Sprint 14 closed. Next: run sprint 15 / agent |
+| 15 Other currencies | written 2026-11-02 (+ §4/§6/§7/§12/§18 amendments) | done | green (567; 23 against Postgres) | 2026-11-02, findings fixed (one changed the plan) | — | — | Merge PR, deploy, run the seven-step checklist / Sufyan |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -1097,3 +1098,28 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Sufyan: "sign off and run" (sprint 14). Checklist steps not reported individually; recorded
   on Sufyan's word.
 - Next action / owner: run sprint 15 / agent.
+
+### 2026-11-02 — Sprint 15 planned and built: other currencies
+
+- Performed by: Claude with Sufyan.
+- Trigger: a receipt in a currency that was neither the trip's nor the home currency was
+  refused, so it could not be split.
+- Decided (five questions): a receipt read in a third currency asks "Is that right?" with
+  `Yes` / `It's <trip>` / `It's <home>`; typed expenses accept strict codes and one-currency
+  symbols with no confirm step; a currency with no published rate asks for a typed rate; cards
+  show the original amount, then trip and home; balances stay in the home currency.
+- Built: migration `002` (nullable `original_rate`, `original_rate_date`,
+  `original_rate_provider`); `RateService.rate_between`; shares worked out in the original
+  currency and converted to trip and home, each reconciled; draft states `confirm_currency`
+  and `typed_rate`; parser accepts ISO codes (word-like ones only in capitals) and `€ £ ₩ ₹ ₱ ₫`,
+  `RM`; "I can only record …" retired for text.
+- `/code-review`: 10 findings. Fixed: a bare number on the rate card is always the rate (the
+  card says a total needs its currency); a rate sent without replying fills the open rate
+  card; a store outage while replying is reported; a failed third-currency fetch offers
+  `Enter rate`; per-person shares show the original currency first; both rates are fetched in
+  parallel; dead `ParsedExpense.error` removed; one minor-unit helper; this entry. Changed the
+  plan: ISO minor units for every code were dropped, since a trip already in VND or ISK has
+  amounts saved with 2 decimals.
+- Tests: 567 passed, 23 Postgres tests passed against a local Postgres 16 (migration included);
+  ruff clean.
+- Next action / owner: merge the PR, deploy, run the seven-step checklist / Sufyan.

@@ -142,10 +142,10 @@ async def test_its_thb_rereads_the_receipt_in_baht() -> None:
 
 
 async def test_its_thb_rescales_when_the_decimals_differ() -> None:
-    """Read as dong (no decimals), it was baht: 50,000 is ฿50,000.00, not ฿500."""
+    """Read as yen (no decimals), it was baht: 50,000 is ฿50,000.00, not ฿500."""
     group = await _group(ADA, BO)
-    card = await group.send_receipt(ADA, _receipt("VND", [("Pho", 50000)], 50000))
-    assert "Vietnamese dong (₫)" in card.text
+    card = await group.send_receipt(ADA, _receipt("JPY", [("Pho", 50000)], 50000))
+    assert "Japanese yen (¥)" in card.text
     await group.press(ADA, card, "It's THB")
     if card.text.endswith("Who paid?"):
         await group.press(ADA, card, "Me")
@@ -199,10 +199,33 @@ async def test_a_rate_fetch_failure_offers_retry() -> None:
     group = await _group(ADA, BO, rates={("THB", "SGD"): Decimal("0.0406")})
     card = await group.send(ADA, "30 eur museum")
     assert "Couldn't fetch the exchange rate" in card.text
-    assert card.buttons == ["Retry", "Cancel"]
+    assert card.buttons == ["Retry", "Enter rate", "Cancel"]
     group.deps.draft_service._rates._provider.rates[("EUR", "THB")] = Decimal("38")
     await group.press(ADA, card, "Retry")
     assert "€30.00 (฿1,140.00 · S$46.28)" in card.text
+
+
+async def test_a_rate_fetch_failure_can_take_a_typed_rate() -> None:
+    group = await _group(ADA, BO, rates={("THB", "SGD"): Decimal("0.0406")})
+    card = await group.send(ADA, "30 eur museum")
+    await group.press(ADA, card, "Enter rate")
+    assert "No exchange rate for EUR." in card.text
+    await group.send(ADA, "38", reply_to=card)
+    assert "€30.00 (฿1,140.00 · S$46.28)" in group.cards[card.message_id].text
+
+
+async def test_a_trip_currency_rate_failure_has_no_enter_rate() -> None:
+    group = await _group(ADA, BO, rates={})
+    card = await group.send(ADA, "300 baht taxi")
+    assert card.buttons == ["Retry", "Cancel"]
+
+
+async def test_each_share_shows_the_original_currency_first() -> None:
+    group = await _group(ADA, BO)
+    card = await group.send(ADA, "50 usd taxi")
+    await group.press(ADA, card, "Everyone")
+    await group.press(ADA, card, "Split equally")
+    assert "• Ada US$25.00 (฿837.50 · S$34.00)" in card.text
 
 
 # -- No published rate: typed ------------------------------------------------------
@@ -218,7 +241,7 @@ async def test_dong_asks_for_a_rate_and_takes_one() -> None:
     if card.text.endswith("Who paid?"):
         await group.press(ADA, card, "Me")
     # ₫100,000 x 0.0013 = ฿130.00; x 0.0406 = S$5.28.
-    assert "₫100,000 (฿130.00 · S$5.28)" in card.text
+    assert "₫100,000.00 (฿130.00 · S$5.28)" in card.text
     assert "Rate 1 VND = 0.00130 THB (typed)" in card.text
     await group.press(ADA, card, "Just me")
     draft_id = card.draft_id
@@ -233,7 +256,7 @@ async def test_dong_takes_the_total_in_baht_instead() -> None:
     card = await group.send(ADA, "100000 vnd pho")
     await group.send(ADA, "฿130", reply_to=card)
     card = group.cards[card.message_id]
-    assert "₫100,000 (฿130.00 · S$5.28)" in card.text
+    assert "₫100,000.00 (฿130.00 · S$5.28)" in card.text
 
 
 async def test_an_unreadable_rate_says_so_and_waits() -> None:
@@ -243,6 +266,21 @@ async def test_an_unreadable_rate_says_so_and_waits() -> None:
     card = group.cards[card.message_id]
     assert "Couldn't read 'about a dollar'" in card.text
     assert "No exchange rate for VND." in card.text
+
+
+async def test_a_rate_sent_without_replying_fills_the_card() -> None:
+    group = await _group(ADA, BO)
+    card = await group.send(ADA, "100000 vnd pho")
+    assert await group.send(ADA, "0.0013") is None  # not a new ฿0 expense
+    assert "₫100,000.00 (฿130.00 · S$5.28)" in group.cards[card.message_id].text
+
+
+async def test_a_bare_number_is_always_the_rate() -> None:
+    group = await _group(ADA, BO)
+    card = await group.send(ADA, "100 vnd snack")
+    await group.send(ADA, "1,200", reply_to=card)
+    # ₫100 x 1,200 = ฿120,000.00: the number was the rate; the card shows it.
+    assert "₫100.00 (฿120,000.00" in group.cards[card.message_id].text
 
 
 async def test_someone_elses_rate_reply_is_ignored() -> None:

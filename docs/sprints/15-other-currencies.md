@@ -28,8 +28,11 @@ currency gets "I can only record THB or SGD for this trip" and nothing else happ
 - Any ISO 4217 code. Frankfurter publishes rates for about 30 (AUD BGN BRL CAD CHF CNY CZK DKK
   EUR GBP HKD HUF IDR ILS INR ISK JPY KRW MXN MYR NOK NZD PHP PLN RON SEK SGD THB TRY USD ZAR).
   Any other code (VND, TWD, AED, …) is accepted with a typed rate (below).
-- Minor units follow ISO 4217 for every code used (VND 0 decimals, KRW 0, JPY 0, the rest as
-  ISO), so amounts are never read 100 times off.
+- ~~Minor units follow ISO 4217 for every code used~~ **Changed at review:** decimals stay as
+  they were (JPY and KRW 0, everything else 2). A trip already in VND or ISK has amounts saved
+  with 2 decimals, and changing a code's decimals would misread them 100 times off. A receipt
+  read at the wrong scale is still caught by the existing 100-times check; VND shows as
+  `₫100,000.00`.
 
 ### Receipts: confirm the currency
 - When the reader's currency is neither the trip's nor the home currency, before the total
@@ -70,7 +73,13 @@ currency gets "I can only record THB or SGD for this trip" and nothing else happ
 - The card reads "No exchange rate for VND. Reply to this message with what 1 VND is in ฿, e.g.
   `0.0013`." with `[Cancel]`. Initiator only, a reply to the card.
 - The reply may also be the converted total, `฿850` or `850 thb`, read as the trip-currency
-  amount; the rate is then worked out from it. Agent's call, open to change.
+  amount; the rate is then worked out from it. Agent's call, open to change. **Settled at
+  review:** a number on its own (`850`, `1,200`) is always the rate; a total needs its currency.
+  The card says so, and shows the converted amounts so a slip is visible before saving.
+- Sent without replying, a bare number or a trip-currency amount still fills the sender's open
+  rate card (as Sprint 14's fix does for custom amounts).
+- When a published rate can't be fetched, the `rate_failed` card of a third-currency expense
+  also offers `Enter rate` (added at review), so the expense is never stuck.
 - A typed rate is saved on the expense with provider `typed`, used for that expense only, and
   never cached for others.
 
@@ -136,7 +145,8 @@ currency gets "I can only record THB or SGD for this trip" and nothing else happ
 3. Confirm; `/balances` moves by the S$ amount on the card.
 4. A receipt the bot reads in the wrong currency: `It's THB` corrects it.
 5. Type `50 usd taxi`: a card in US$ with ฿ and S$; Split equally; Confirm.
-6. Type `100000 vnd pho`: the typed-rate card; reply `0.0013`; the card shows ฿130.00.
+6. Type `100000 vnd pho`: the typed-rate card; reply `0.0013`; the card shows ฿130.00 (send it
+   without replying too: it still fills the card).
 7. A normal ฿ receipt and `200 baht taxi` behave as before.
 
 ## Exit criteria
