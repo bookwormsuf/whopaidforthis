@@ -71,10 +71,11 @@ def test_bare_number_defaults_to_trip_currency() -> None:
     assert result.currency == "JPY"
 
 
-def test_unsupported_currency_token_sets_error() -> None:
+def test_a_third_currency_is_read_as_itself() -> None:
+    # Sprint 15: neither the trip's nor the home currency, recorded as is.
     result = parse_expense("500 baht massage", "JPY", "SGD", BOT)
     assert result is not None
-    assert result.error == "unsupported_currency"
+    assert (result.error, result.amount_minor, result.currency) == (None, 50000, "THB")
 
 
 def test_empty_description_defaults_to_expense() -> None:
@@ -162,10 +163,10 @@ def test_dollar_sign_resolves_to_home_currency_when_home_is_usd() -> None:
 
 
 def test_dollar_sign_falls_back_to_usd_when_home_is_neither_sgd_nor_usd() -> None:
-    # USD isn't this trip's currency either, so it's unsupported.
+    # USD isn't this trip's currency either: a third currency (sprint 15).
     result = parse_expense("$12 grab", "JPY", "EUR", BOT)
     assert result is not None
-    assert result.error == "unsupported_currency"
+    assert (result.amount_minor, result.currency) == (1200, "USD")
 
 
 # The six trailing clauses (sprint 5): three "split <word> <names>", two "split
@@ -202,7 +203,8 @@ def test_custom_line() -> None:
     assert parse("Me 6", expense_currency="SGD") == CustomLine("Me", 600, "SGD")
     assert parse("2000") is None  # no name
     assert parse("Amir") is None  # no amount
-    assert parse("Amir 20 baht") is None  # not this trip's currency
+    # Another currency is read as such; the draft refuses it for this expense.
+    assert parse("Amir 20 baht") == CustomLine("Amir", 2000, "THB")
 
 
 def test_bare_split_is_dropped_and_selects_nobody() -> None:
@@ -248,11 +250,59 @@ def test_glued_letters_naming_another_currency_are_not_an_amount() -> None:
     assert result is not None
     assert result.error is None
     assert (result.amount_minor, result.currency) == (6000, "JPY")
-    # Without a clear amount elsewhere, a glued code is still another currency:
+    # Without a clear amount elsewhere, a glued code is that currency (sprint 15):
     # never a wrong small yen amount.
-    for text in ("Dinner RM120 for 3 people", "Grab RM15 2 pax", "RM45 nasi lemak"):
-        assert parse_expense(text, "JPY", "SGD", BOT).error == "unsupported_currency", text
+    for text, amount in (
+        ("Dinner RM120 for 3 people", 12000),
+        ("Grab RM15 2 pax", 1500),
+        ("RM45 nasi lemak", 4500),
+    ):
+        result = parse_expense(text, "JPY", "SGD", BOT)
+        assert (result.amount_minor, result.currency) == (amount, "MYR"), text
     assert parse_expense("Hotel rm12 ¥60", "JPY", "SGD", BOT).amount_minor == 60
-    # A symbol or a spaced code still says it isn't this trip's currency.
-    assert parse_expense("€12 lunch", "JPY", "SGD", BOT).error == "unsupported_currency"
-    assert parse_expense("500 baht massage", "JPY", "SGD", BOT).error == "unsupported_currency"
+    # A symbol or a spaced code is that currency too.
+    assert parse_expense("€12 lunch", "JPY", "SGD", BOT).currency == "EUR"
+    assert parse_expense("500 baht massage", "JPY", "SGD", BOT).currency == "THB"
+
+
+# -- Third currencies (sprint 15) ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "amount", "currency"),
+    [
+        ("50 usd taxi", 5000, "USD"),
+        ("myr 120 dinner", 12000, "MYR"),
+        ("RM120 lunch", 12000, "MYR"),
+        ("RM 120 lunch", 12000, "MYR"),
+        ("€30 museum", 3000, "EUR"),
+        ("£8 coffee", 800, "GBP"),
+        ("₩15000 bibimbap", 15000, "KRW"),
+        ("100000 vnd pho", 100000, "VND"),
+        ("₫100000 pho", 100000, "VND"),
+        ("20 TRY simit", 2000, "TRY"),
+    ],
+)
+def test_third_currency_codes_and_symbols(text: str, amount: int, currency: str) -> None:
+    result = parse_expense(text, "THB", "SGD", BOT)
+    assert result is not None, text
+    assert (result.amount_minor, result.currency) == (amount, currency), text
+
+
+def test_word_like_codes_count_only_in_capitals() -> None:
+    # `cup` and `top` are words: a bare number is the trip currency.
+    assert parse_expense("3 cup coffee", "THB", "SGD", BOT).currency == "THB"
+    assert parse_expense("200 top up", "THB", "SGD", BOT).currency == "THB"
+    assert parse_expense("20 try again", "THB", "SGD", BOT).currency == "THB"
+
+
+def test_dollar_and_yen_keep_their_rules() -> None:
+    assert parse_expense("$20 grab", "THB", "SGD", BOT).currency == "SGD"
+    assert parse_expense("¥500 snack", "THB", "SGD", BOT).currency == "JPY"
+    assert parse_expense("¥50 snack", "CNY", "SGD", BOT).currency == "CNY"
+
+
+def test_not_a_code_stays_as_it_was() -> None:
+    # `rmb` is not an ISO code: the number is the trip currency, as before.
+    assert parse_expense("20 rmb dumplings", "THB", "SGD", BOT).currency == "THB"
+    assert parse_expense("rm -rf", "THB", "SGD", BOT) is None

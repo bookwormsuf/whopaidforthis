@@ -61,6 +61,11 @@ class Expense(BaseModel):
     cancelled_at: datetime | None
     notes: str | None
     splits: list[ExpenseSplit]
+    # An expense in a third currency (sprint 15): its rate to the trip currency.
+    # `None` for an expense in the trip or home currency.
+    original_rate: Decimal | None = None
+    original_rate_date: date | None = None
+    original_rate_provider: str | None = None
 
     @model_validator(mode="after")
     def _check_invariants(self) -> Expense:
@@ -80,8 +85,8 @@ class Expense(BaseModel):
         elif self.original_currency == self.home_currency:
             if self.original_amount_minor != self.home_amount_minor:
                 raise ValueError("original_amount_minor must equal home_amount_minor")
-        else:
-            raise ValueError("original_currency must be the trip or home currency")
+        elif self.original_rate is None:
+            raise ValueError("an expense in a third currency needs its rate to the trip currency")
         return self
 
 
@@ -127,3 +132,6 @@ class ExpenseRecord(BaseModel):
     status: Status
     cancelled_at: datetime | None
     notes: str | None
+    original_rate: Decimal | None = None
+    original_rate_date: date | None = None
+    original_rate_provider: str | None = None

@@ -263,11 +263,33 @@ def shares_in_both_currencies(
     trip_amount_minor: int,
     home_amount_minor: int,
     payer_id: int,
+    original_to_trip_rate: Decimal | None = None,
 ) -> tuple[dict[int, int], dict[int, int]]:
     """`(trip_shares, home_shares)` from shares in the original currency (spec §4):
     the other currency's shares are converted per share and reconciled to that
-    currency's total with `convert_shares`, so both sums are exact.
+    currency's total with `convert_shares`, so both sums are exact. Shares in a
+    third currency (sprint 15) are converted to both, each reconciled the same way.
     """
+    if original_currency not in (trip_currency, home_currency):
+        if original_to_trip_rate is None:
+            raise SplitError(f"no {original_currency} -> {trip_currency} rate")
+        trip_shares = convert_shares(
+            original_shares,
+            original_to_trip_rate,
+            original_currency,
+            trip_currency,
+            trip_amount_minor,
+            payer_id,
+        )
+        home_shares = convert_shares(
+            original_shares,
+            original_to_trip_rate * trip_to_home_rate,
+            original_currency,
+            home_currency,
+            home_amount_minor,
+            payer_id,
+        )
+        return trip_shares, home_shares
     if original_currency == trip_currency:
         home_shares = convert_shares(
             original_shares,

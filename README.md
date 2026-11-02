@@ -254,7 +254,25 @@ Central Bank's daily reference rates. Each expense uses the rate for its own dat
 and holidays, or before the day's rate is out (around 16:00 CET), that is the previous business
 day's rate, and the card shows which date it used. Rates are cached in the `Exchange Rates` tab.
 If the provider can't be reached, the card says so with a **Retry** button and nothing is saved.
-An expense can be in the trip currency or the home currency; anything else is refused.
+
+### Other currencies
+
+An expense can also be in a third currency, say ringgit on a Thailand trip with SGD at home.
+Type it with its three-letter code (`50 usd taxi`, `myr 120 dinner`) or a symbol that means only
+one currency (`€30`, `£8`, `₩15000`, `RM120`). `$` and `¥` keep their usual meaning. Codes that
+are also words (`all`, `cup`, `top`, `try`) only count in capitals.
+
+A receipt the bot reads in a third currency asks first: "This receipt looks like it's in
+Malaysian ringgit (RM). Is that right?", with **Yes, MYR**, **It's THB** and **It's SGD**. The
+correction re-reads the amounts in that currency.
+
+The expense is split in its own currency, then each share is converted to the trip and home
+currency at that day's rates, so both still add up exactly. Cards show `RM120.00 (฿849.60 ·
+S$34.49)` and both rates. Balances and settling stay in the home currency.
+
+For a currency Frankfurter doesn't publish (VND, TWD, AED and others) the card asks you to reply
+with what 1 unit is in the trip currency (`0.0013`), or with the total in the trip currency
+(`฿130`). That rate is saved with that expense only.
 
 ## Environment variables
 
@@ -402,7 +420,8 @@ balance. It is near-minimal, not guaranteed minimal.
 - **Drafts are lost on restart.** A card that was mid-way when the bot restarted says "This
   expense expired, please send it again".
 - **Albums are separate drafts.** Several photos sent together each become their own expense.
-- **Third currencies are refused.** Only the trip currency and the home currency can be recorded.
+- **A typed rate is yours.** For a currency with no published rate, the bot uses whatever you
+  reply with, for that expense only.
 - **SGD figures depend on ECB reference rates**, published once per business day; they are not
   the rate your card or money changer used.
 - Receipt reading can be wrong; check the total on the card before confirming.

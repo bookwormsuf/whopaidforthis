@@ -29,7 +29,8 @@ from pydantic import ValidationError
 
 from app.models.receipt import CandidateTotal, Receipt, ReceiptLineItem
 from app.models.trip import Trip
-from app.services.currencies import decimals_for
+from app.services.conversion import rescale_minor
+from app.services.currencies import decimals_for, is_iso_code
 from app.services.images import PreparedImage
 from app.services.llm_schemas import ReceiptExtraction
 
@@ -488,12 +489,44 @@ def resolve_transaction_date(
 
 
 def resolve_receipt_currency(extraction_currency: str | None, trip: Trip) -> str | None:
-    """Missing currency -> trip currency. Otherwise must be the trip or home currency
-    (case-insensitive); returns `None` to mean "refuse" (spec §4/§7).
+    """Missing currency -> trip currency. Otherwise any ISO 4217 code
+    (case-insensitive; a third currency since sprint 15); returns `None` to mean
+    "refuse" for anything that is not a currency code (spec §4/§7).
     """
     if not extraction_currency:
         return trip.trip_currency
     code = extraction_currency.strip().upper()
-    if code == trip.trip_currency or code == trip.home_currency:
-        return code
+    if code == trip.trip_currency or code == trip.home_currency or is_iso_code(code):
+        return code  # a third currency is checked with the payer (sprint 15)
     return None
+
+
+def rescale_receipt(receipt: Receipt, currency: str) -> Receipt:
+    """The same reading in another currency (sprint 15, `It's THB` on the "Is that
+    right?" card): every amount keeps its printed value, so it is rescaled when the
+    two currencies' decimals differ.
+    """
+
+    def scaled(amount: int | None) -> int | None:
+        if amount is None:
+            return None
+        return rescale_minor(amount, receipt.currency, currency)
+
+    return receipt.model_copy(
+        update={
+            "currency": currency,
+            "line_items": [
+                item.model_copy(
+                    update={
+                        "amount_minor": scaled(item.amount_minor),
+                        "unit_amount_minor": scaled(item.unit_amount_minor),
+                    }
+                )
+                for item in receipt.line_items
+            ],
+            "candidate_totals": [
+                c.model_copy(update={"amount_minor": scaled(c.amount_minor)})
+                for c in receipt.candidate_totals
+            ],
+        }
+    )

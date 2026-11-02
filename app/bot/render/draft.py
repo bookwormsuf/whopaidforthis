@@ -21,6 +21,7 @@ from app.bot.formatting import (
 from app.bot.keyboards.items import UNIT_SUFFIX, fix_list_keyboard, walk_keyboard
 from app.bot.keyboards.receipt import (
     choose_total_keyboard,
+    confirm_currency_keyboard,
     manual_amount_keyboard,
     reconcile_keyboard,
 )
@@ -34,6 +35,7 @@ from app.bot.keyboards.split import (
     who_paid_keyboard,
 )
 from app.models.trip import Trip
+from app.services.currencies import name_for, symbol_for
 from app.services.drafts import (
     MAX_CLAIMABLE_ITEMS,
     UNLISTED_DESCRIPTION,
@@ -43,6 +45,7 @@ from app.services.drafts import (
     claimable_indices,
     draft_items_split,
     draft_shares,
+    is_third_currency,
     left_out_still_charged,
     original_total,
     person_for,
@@ -100,11 +103,62 @@ def render_draft(
         return _render_preview(draft, trip, save_error=save_error)
     if draft.state == "rate_failed":
         return _render_rate_failed(draft, trip)
+    if draft.state == "confirm_currency":
+        return _render_confirm_currency(draft, trip)
+    if draft.state == "typed_rate":
+        return _render_typed_rate(draft, trip)
     if draft.state == "committed":
         return _render_committed(draft, trip), None
     if draft.state == "cancelled":
         return "Cancelled.", None
     raise ValueError(f"no card for draft state {draft.state}")
+
+
+def _rate_line(draft: Draft, trip: Trip) -> str:
+    """`Rate 1 JPY = 0.00810 SGD (19 Sep)`; a third-currency expense names its own
+    rate first, `Rate 1 MYR = 7.08 THB (typed) · 1 THB = 0.0406 SGD (1 Nov)`
+    (sprint 15).
+    """
+    assert draft.rate is not None
+    trip_to_home = (
+        f"1 {trip.trip_currency} = {fmt_rate(draft.rate.rate)} {trip.home_currency} "
+        f"({fmt_date_short(draft.rate.rate_date)})"
+    )
+    original = draft.original_rate
+    if original is None or not is_third_currency(draft.currency, trip):
+        return f"Rate {trip_to_home}"
+    when = "typed" if original.provider == "typed" else fmt_date_short(original.rate_date)
+    first = f"1 {draft.currency} = {fmt_rate(original.rate)} {trip.trip_currency} ({when})"
+    if trip.trip_currency == trip.home_currency:
+        return f"Rate {first}"
+    return f"Rate {first} · {trip_to_home}"
+
+
+def _render_confirm_currency(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    """ "This receipt looks like it's in Malaysian ringgit (RM). Is that right?"
+    (sprint 15), before the total step.
+    """
+    text = (
+        f"🧾 <b>{escape(draft.description)}</b>\n"
+        f"This receipt looks like it's in {escape(name_for(draft.currency))}. Is that right?"
+    )
+    return text, confirm_currency_keyboard(draft.draft_id, draft.currency, trip)
+
+
+def _render_typed_rate(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
+    """No published rate for the expense's currency (sprint 15): ask for one."""
+    trip_symbol = symbol_for(trip.trip_currency).strip()
+    lines = [
+        f"🧾 <b>{escape(draft.description)}</b> · {fmt_money(draft.amount_minor, draft.currency)}",
+        "",
+        f"No exchange rate for {escape(draft.currency)}. Reply to this message with what "
+        f"1 {escape(draft.currency)} is in {escape(trip_symbol)}, e.g. <code>0.25</code>, "
+        f"or with the total in {escape(trip_symbol)}, e.g. "
+        f"<code>{escape(fmt_money(85000, trip.trip_currency))}</code>.",
+    ]
+    if draft.typed_rate_error:
+        lines.append(f"⚠️ {escape(draft.typed_rate_error, quote=False)}")
+    return "\n".join(lines), _buttons(draft.draft_id, ("Cancel", "cancel"))
 
 
 def _render_who_paid(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarkup]:
@@ -132,10 +186,7 @@ def _render_detected(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboardMarku
         count = len([i for i in draft.line_items if i.kind == "item"])
         lines.append(f"{count} item{'s' if count != 1 else ''} on the receipt")
     if draft.currency != trip.home_currency:
-        lines.append(
-            f"<i>Rate 1 {trip.trip_currency} = {fmt_rate(draft.rate.rate)} "
-            f"{trip.home_currency} ({fmt_date_short(draft.rate.rate_date)})</i>"
-        )
+        lines.append(f"<i>{_rate_line(draft, trip)}</i>")
     lines += ["", "Who should share this?"]
     return "\n".join(lines), detected_keyboard(draft)
 
@@ -188,7 +239,7 @@ def _render_manual_amount(draft: Draft, trip: Trip) -> tuple[str, InlineKeyboard
 
 def _amount(draft: Draft, trip: Trip) -> str:
     return format_expense_amount(
-        trip, draft.currency, draft.trip_amount_minor, draft.home_amount_minor
+        trip, draft.currency, draft.trip_amount_minor, draft.home_amount_minor, draft.amount_minor
     )
 
 

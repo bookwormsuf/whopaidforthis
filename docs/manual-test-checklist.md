@@ -45,8 +45,8 @@ Result is `pass`, or `fail` with the step numbers. Fixes go in `STATUS.md`.
 8. `I paid ¥4,850 for dinner`, `taxi 3200`, `750 coffee` all parse. `S$12 grab` reads
    `Grab — S$12.00`, home currency only; confirm it and check its Expenses row has Original
    Currency `SGD` and SGD Amount 12.00. Cancel the others.
-9. `lol that ramen was so good` → silence. `500 baht massage` → "I can only record JPY or SGD
-   for this trip."
+9. `lol that ramen was so good` → silence. `500 baht massage` → a card in baht with yen
+   and SGD (a third currency since Sprint 15). Cancel.
 10. `6000 split dinner` → "Dinner" with Just me / Everyone / Choose people. Cancel.
 11. `/recent`, `/today`, `/summary` match the Sheet.
 12. Send an expense and tap **Cancel**: nothing is written. Tap a button on an old saved card:
@@ -121,3 +121,10 @@ reads "Joined so far: A, B" and "(2 joined)").
     the paid figure, **Continue**, go item by item, tap **🚫 Not on this bill** on the dishes
     someone else paid for. The check card lists them under "Not on this bill" and the shares add
     up to what you paid.
+
+### Other currencies (Sprint 15)
+37. A receipt in a third currency → "This receipt looks like it's in …" → **Yes** → split → the
+    card shows the original amount, then trip and home, and both rates → **Confirm**.
+38. A receipt read in the wrong currency → **It's <trip currency>** → amounts re-read.
+39. `50 usd taxi` → a card in US$ with trip and home. `100000 vnd pho` → the typed-rate card;
+    reply `0.0013` → the card shows the converted amounts.

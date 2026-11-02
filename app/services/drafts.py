@@ -16,7 +16,10 @@ Spec references: pinned-decisions §3, §8, sprint 2, 4 and 5 pins. States:
   to pick one and re-answer it, then back to `preview`;
 - `preview` -> `Confirm` (commit) / `Edit` (back to `participants`) / `Cancel`;
 - receipt-only states `choose_total`, `reconcile`, `manual_amount` (sprint 4) and
-  `rate_failed`.
+  `rate_failed`;
+- sprint 15, an expense in a third currency: `confirm_currency` (a receipt read in
+  it: "Is that right?") and `typed_rate` (no published rate: the payer replies with
+  one).
 
 `Draft` is source-neutral. Every draft-flow method returns the updated `Draft` or
 raises a typed error (`DraftExpired`, `NotInitiator`, `AlreadySaved`,
@@ -42,16 +45,17 @@ from app.models.exchange_rate import ExchangeRate
 from app.models.expense import Expense, ExpenseSplit
 from app.models.receipt import CandidateTotal, Receipt, ReceiptLineItem
 from app.models.trip import Trip
-from app.services.conversion import both_amounts
-from app.services.currencies import symbol_for
+from app.services.conversion import expense_amounts, parse_rate, rate_from_amounts
+from app.services.currencies import has_published_rate, symbol_for
 from app.services.exchange_rates import RateService, RateUnavailable
-from app.services.expense_parser import ParsedExpense, parse_custom_line
+from app.services.expense_parser import ParsedExpense, parse_amount_only, parse_custom_line
 from app.services.ledger_store import LedgerStore, LedgerUnavailable
 from app.services.names import Person, is_everyone, resolve_name, resolve_names
 from app.services.receipt_parser import (
     line_item_sums,
     needs_reconciliation,
     reconcile,
+    rescale_receipt,
     select_total,
 )
 from app.services.splitting import (
@@ -84,6 +88,8 @@ DraftState = Literal[
     "manual_amount",
     "preview",
     "rate_failed",
+    "confirm_currency",
+    "typed_rate",
     "committing",
     "committed",
     "cancelled",
@@ -209,6 +215,9 @@ class Draft:
     # someone else paid for them. Only an itemised split leaves them out.
     left_out: frozenset[int] = frozenset()
     rate: ExchangeRate | None = None
+    # A third-currency expense (sprint 15): its rate to the trip currency, fetched
+    # or typed. `None` for an expense in the trip or home currency.
+    original_rate: ExchangeRate | None = None
     trip_amount_minor: int = 0
     home_amount_minor: int = 0
     transaction_date: date = field(default_factory=lambda: datetime.now(UTC).date())
@@ -231,6 +240,10 @@ class Draft:
     reading_receipt: bool = False
     # The receipt reader service failed (not the photo): "out of API credit" etc.
     read_problem: str | None = None
+    # `confirm_currency` (sprint 15): the reading, kept until the currency is settled.
+    pending_receipt: Receipt | None = None
+    # `typed_rate`: why the last reply could not be used, shown on the card.
+    typed_rate_error: str | None = None
 
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -247,11 +260,18 @@ def person_for(draft: Draft, user_id: int) -> Person:
     return Person(user_id, f"User {user_id}", None)
 
 
+def is_third_currency(currency: str, trip: Trip) -> bool:
+    """Neither the trip's nor the home currency (sprint 15)."""
+    return currency not in (trip.trip_currency, trip.home_currency)
+
+
 def original_total(draft: Draft, trip: Trip) -> int:
     """The expense amount in its original currency, minor units."""
     if draft.currency == trip.trip_currency:
         return draft.trip_amount_minor
-    return draft.home_amount_minor
+    if draft.currency == trip.home_currency:
+        return draft.home_amount_minor
+    return draft.amount_minor
 
 
 def claimable_indices(draft: Draft) -> list[int]:
@@ -478,6 +498,7 @@ def draft_shares(draft: Draft, trip: Trip) -> dict[int, tuple[int, int]]:
         trip_amount_minor=draft.trip_amount_minor,
         home_amount_minor=draft.home_amount_minor,
         payer_id=draft.payer_id,
+        original_to_trip_rate=draft.original_rate.rate if draft.original_rate else None,
     )
     return {pid: (trip_shares[pid], home_shares[pid]) for pid in shares}
 
@@ -634,25 +655,89 @@ class DraftService:
             pending_payer_text=parsed.payer_text,
         )
 
-        try:
-            rate = await self._rates.rate_for(trip, transaction_date)
-        except RateUnavailable:
-            draft = Draft(state="rate_failed", participant_ids=[initiator_id], **common)
-            await self._drafts.put(draft)
-            return draft
+        draft = Draft(state="rate_failed", participant_ids=[initiator_id], **common)
+        return await self._price(draft, trip)
 
-        trip_amount_minor, home_amount_minor = both_amounts(
-            parsed.amount_minor, parsed.currency, trip.trip_currency, trip.home_currency, rate.rate
+    async def _price(self, draft: Draft, trip: Trip) -> Draft:
+        """The amount is settled: fetch the rates, work out the trip and home amounts,
+        then on to the card (`detected`, after any clauses). A third currency also
+        needs its rate to the trip currency (sprint 15): fetched when the provider
+        publishes one, else the card asks for it (`typed_rate`). A fetch failure is
+        `rate_failed`, with `Retry`.
+        """
+        third = is_third_currency(draft.currency, trip)
+        original_rate = draft.original_rate if third else None
+        try:
+            rate = await self._rates.rate_for(trip, draft.transaction_date)
+            if third and original_rate is None:
+                if not (
+                    has_published_rate(draft.currency) and has_published_rate(trip.trip_currency)
+                ):
+                    updated = replace(draft, state="typed_rate", rate=rate)
+                    await self._drafts.put(updated)
+                    return updated
+                original_rate = await self._rates.rate_between(
+                    trip, draft.currency, trip.trip_currency, draft.transaction_date
+                )
+        except RateUnavailable:
+            updated = replace(draft, state="rate_failed")
+            await self._drafts.put(updated)
+            return updated
+
+        trip_amount_minor, home_amount_minor = expense_amounts(
+            draft.amount_minor,
+            draft.currency,
+            trip.trip_currency,
+            trip.home_currency,
+            rate.rate,
+            original_rate.rate if original_rate is not None else None,
         )
-        draft = Draft(
+        updated = replace(
+            draft,
             state="detected",
             rate=rate,
+            original_rate=original_rate,
             trip_amount_minor=trip_amount_minor,
             home_amount_minor=home_amount_minor,
-            participant_ids=[initiator_id],
-            **common,
+            typed_rate_error=None,
         )
-        return await self._apply_clauses(draft, trip)
+        return await self._apply_clauses(updated, trip)
+
+    async def set_typed_rate(self, draft_id: str, presser_id: int, trip: Trip, text: str) -> Draft:
+        """A reply to the `typed_rate` card (sprint 15): what 1 unit of the expense's
+        currency is in the trip currency (`0.0013`), or the total in the trip
+        currency (`฿850`, `850 thb`). Used for this expense only, never cached.
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "typed_rate":
+            raise DraftError(f"cannot take a rate in state {draft.state}")
+        rate = parse_rate(text)
+        if rate is None:
+            total = parse_amount_only(text, trip.trip_currency, trip.home_currency)
+            if total is not None and total[1] == trip.trip_currency and total[0] > 0:
+                rate = rate_from_amounts(
+                    draft.amount_minor, draft.currency, total[0], trip.trip_currency
+                )
+        if rate is None:
+            updated = replace(
+                draft,
+                typed_rate_error=(
+                    f"Couldn't read '{text.strip()}'. Reply with a number like 0.25, "
+                    f"or the total in {symbol_for(trip.trip_currency).strip()}."
+                ),
+            )
+            await self._drafts.put(updated)
+            return updated
+        typed = ExchangeRate(
+            base=draft.currency,
+            quote=trip.trip_currency,
+            requested_date=draft.transaction_date,
+            rate_date=draft.transaction_date,
+            rate=rate,
+            provider="typed",
+            retrieved_at=datetime.now(UTC),
+        )
+        return await self._price(replace(draft, original_rate=typed), trip)
 
     async def choose_just_me(self, draft_id: str, presser_id: int) -> Draft:
         draft = await self._get_active(draft_id, presser_id)
@@ -711,6 +796,9 @@ class DraftService:
             cancelled_at=None,
             notes=None,
             splits=splits,
+            original_rate=draft.original_rate.rate if draft.original_rate else None,
+            original_rate_date=draft.original_rate.rate_date if draft.original_rate else None,
+            original_rate_provider=draft.original_rate.provider if draft.original_rate else None,
         )
 
     @staticmethod
@@ -774,26 +862,7 @@ class DraftService:
         if draft.state != "rate_failed":
             raise DraftError(f"cannot retry_rate from state {draft.state}")
         trip = await self._trip_for(draft)
-        try:
-            rate = await self._rates.rate_for(trip, draft.transaction_date)
-        except RateUnavailable:
-            return draft
-
-        trip_amount_minor, home_amount_minor = both_amounts(
-            draft.amount_minor,
-            draft.currency,
-            trip.trip_currency,
-            trip.home_currency,
-            rate.rate,
-        )
-        updated = replace(
-            draft,
-            state="detected",
-            rate=rate,
-            trip_amount_minor=trip_amount_minor,
-            home_amount_minor=home_amount_minor,
-        )
-        return await self._apply_clauses(updated, trip)
+        return await self._price(draft, trip)
 
     # -- Participants, split method, names (sprint 5, spec §3/§8) -------------
 
@@ -1340,7 +1409,20 @@ class DraftService:
             currency=receipt.currency,
         )
 
-    async def _start_total_selection(self, base: dict, trip: Trip, receipt: Receipt) -> Draft:
+    async def _start_total_selection(
+        self, base: dict, trip: Trip, receipt: Receipt, currency_confirmed: bool = False
+    ) -> Draft:
+        if not currency_confirmed and is_third_currency(receipt.currency, trip):
+            # Read in a third currency: check it with the payer first (sprint 15).
+            draft = Draft(
+                state="confirm_currency",
+                amount_minor=0,
+                participant_ids=[base["initiator_id"]],
+                pending_receipt=receipt,
+                **base,
+            )
+            await self._drafts.put(draft)
+            return draft
         decision = select_total(receipt)
         if decision.status == "ask":
             draft = Draft(
@@ -1487,32 +1569,14 @@ class DraftService:
         rounding` adjustment line (sprint 13 pin), then the rate.
         """
         base = {**base, "line_items": with_unlisted_line(base["line_items"], amount_minor)}
-        try:
-            rate = await self._rates.rate_for(trip, base["transaction_date"])
-        except RateUnavailable:
-            draft = Draft(
-                state="rate_failed",
-                amount_minor=amount_minor,
-                participant_ids=[base["initiator_id"]],
-                **base,
-            )
-            await self._drafts.put(draft)
-            return draft
-
-        trip_amount_minor, home_amount_minor = both_amounts(
-            amount_minor, base["currency"], trip.trip_currency, trip.home_currency, rate.rate
-        )
         draft = Draft(
-            state="detected",
-            rate=rate,
+            state="rate_failed",
             amount_minor=amount_minor,
-            trip_amount_minor=trip_amount_minor,
-            home_amount_minor=home_amount_minor,
             participant_ids=[base["initiator_id"]],
             **base,
         )
-        # A caption's "split ..."/"paid by ..." apply now, as for a text expense.
-        return await self._apply_clauses(draft, trip)
+        # A caption's "split ..."/"paid by ..." apply once priced, as for a text expense.
+        return await self._price(draft, trip)
 
     async def choose_total(self, draft_id: str, presser_id: int, index: int) -> Draft:
         """The initiator picked one of the candidate totals. A picked total that does
@@ -1551,6 +1615,27 @@ class DraftService:
         return await self._finalize_receipt_amount(
             self._base_from_draft(draft), trip, draft.amount_minor
         )
+
+    async def confirm_currency(
+        self, draft_id: str, presser_id: int, currency: str | None = None
+    ) -> Draft:
+        """The "Is that right?" card on a third-currency receipt (sprint 15): `Yes`
+        (`currency=None`) keeps the reading; `It's THB` / `It's SGD` re-read its
+        amounts in that currency, rescaled when the decimals differ, and carry on
+        with no third currency.
+        """
+        draft = await self._get_active(draft_id, presser_id)
+        if draft.state != "confirm_currency" or draft.pending_receipt is None:
+            raise DraftUnchanged()
+        trip = await self._trip_for(draft)
+        receipt = draft.pending_receipt
+        base = self._base_from_draft(draft)
+        if currency is not None:
+            if currency not in (trip.trip_currency, trip.home_currency):
+                raise DraftError(f"not this trip's currency: {currency}")
+            receipt = rescale_receipt(receipt, currency)
+            base.update(**self._receipt_fields(receipt, draft.caption_override))
+        return await self._start_total_selection(base, trip, receipt, currency_confirmed=True)
 
     async def check_retry(self, draft_id: str, presser_id: int) -> Draft:
         """Validates a `Try again` press (initiator, right state, no read already in

@@ -28,7 +28,7 @@ from app.models.expense import Expense, ExpenseRecord, SplitRecord
 from app.models.receipt import LineItemRecord, ReceiptLineItem
 from app.models.trip import Trip
 from app.models.user import TripUser
-from app.services.conversion import both_amounts
+from app.services.conversion import amount_in_trip_currency
 from app.services.ledger_store import LedgerUnavailable
 
 logger = logging.getLogger(__name__)
@@ -286,9 +286,10 @@ class PostgresLedgerStore:
                          description, merchant, category, original_amount_minor,
                          original_currency, trip_amount_minor, home_amount_minor,
                          rate, rate_date, transaction_date, source_type,
-                         split_method, status, created_at, cancelled_at, notes)
+                         split_method, status, created_at, cancelled_at, notes,
+                         original_rate, original_rate_date, original_rate_provider)
                     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                            $14, $15, $16, $17, $18, $19, $20, $21, $22)
+                            $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
                     """,
                     expense.expense_id,
                     trip.id,
@@ -312,6 +313,9 @@ class PostgresLedgerStore:
                     expense.created_at,
                     expense.cancelled_at,
                     expense.notes,
+                    expense.original_rate,
+                    expense.original_rate_date,
+                    expense.original_rate_provider,
                 )
                 for split in expense.splits:
                     await conn.execute(
@@ -330,15 +334,16 @@ class PostgresLedgerStore:
                 for index, item in enumerate(line_items):
                     assigned, method = (assignments or {}).get(index, ([], "unassigned"))
                     # Items are in the receipt's currency (expense.original_currency);
-                    # Amount <T> is always the trip currency, so a home-currency
-                    # receipt's items are converted at the expense's own rate,
-                    # rounded half-even per item (spec §10).
-                    amount_trip_minor, _ = both_amounts(
+                    # Amount <T> is always the trip currency, so a home- or
+                    # third-currency receipt's items are converted at the expense's
+                    # own rates, rounded half-even per item (spec §10, sprint 15).
+                    amount_trip_minor = amount_in_trip_currency(
                         item.amount_minor,
                         expense.original_currency,
                         expense.trip_currency,
                         expense.home_currency,
                         expense.rate,
+                        expense.original_rate,
                     )
                     await conn.execute(
                         """
@@ -580,6 +585,9 @@ def _row_to_expense_record(row: asyncpg.Record) -> ExpenseRecord:
         status=row["status"],
         cancelled_at=row["cancelled_at"],
         notes=row["notes"],
+        original_rate=(Decimal(row["original_rate"]) if row["original_rate"] is not None else None),
+        original_rate_date=row["original_rate_date"],
+        original_rate_provider=row["original_rate_provider"],
     )
 
 

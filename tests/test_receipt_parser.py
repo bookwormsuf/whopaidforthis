@@ -180,8 +180,11 @@ def test_trip_or_home_currency_is_accepted() -> None:
     assert resolve_receipt_currency("sgd", trip) == "SGD"
 
 
-def test_other_currency_is_refused() -> None:
-    assert resolve_receipt_currency("USD", _trip()) is None
+def test_other_currency_is_kept_for_the_payer_to_confirm() -> None:
+    # Sprint 15: any ISO code is a third currency; anything else is refused.
+    assert resolve_receipt_currency("USD", _trip()) == "USD"
+    assert resolve_receipt_currency("vnd", _trip()) == "VND"
+    assert resolve_receipt_currency("RMB", _trip()) is None
 
 
 # -- AnthropicReceiptReader: retry-once behaviour ----------------------------

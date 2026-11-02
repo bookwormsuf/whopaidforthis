@@ -83,6 +83,17 @@ currency gets "I can only record THB or SGD for this trip" and nothing else happ
 - `/balances`, `/settle`, `/mine`, export summary: home currency, unchanged. `/export` adds
   nothing new; `Original Amount`/`Original Currency` already exist.
 
+### Settled at build (agent's calls, open to change)
+- Rates on cards show five decimals, as the existing trip → home rate does:
+  `Rate 1 MYR = 7.08000 THB (2 Nov) · 1 THB = 0.04060 SGD (2 Nov)`; a typed rate says
+  `(typed)` in place of the date.
+- Codes that are also English words count only in capitals: ALL BAM BOB CAD COP CUP GEL MAD
+  MOP NAD PEN RON RUB SOS TOP TRY.
+- A glued code (`Dinner RM120 for 3`) is that currency's amount; before Sprint 15 it was refused.
+  `Hotel rm12 6000` still reads ฿6,000 (room 12).
+- A spaced `rm` is ringgit too (`lunch 120 rm`), as `120 baht` is baht.
+- A receipt whose correction button is pressed (`It's THB`) is not asked about again.
+
 ## Agent builds
 1. Migration: `original_rate`, `original_rate_date`, `original_rate_provider` on `expenses`
    (nullable). Model, both stores, export.

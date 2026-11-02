@@ -158,7 +158,11 @@ async def run_undo(deps: Deps, chat: Chat, user: User, send: SendFn) -> None:
         return
     latest = max(candidates, key=lambda e: e.created_at)
     amount = format_expense_amount(
-        trip, latest.original_currency, latest.trip_amount_minor, latest.home_amount_minor
+        trip,
+        latest.original_currency,
+        latest.trip_amount_minor,
+        latest.home_amount_minor,
+        latest.original_amount_minor,
     )
     text = f"Cancel this? {escape(latest.description)} {amount}"
     await send(text, reply_markup=_undo_keyboard(latest.expense_id))
@@ -254,7 +258,11 @@ async def undo_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     await query.answer()
     amount = format_expense_amount(
-        trip, expense.original_currency, expense.trip_amount_minor, expense.home_amount_minor
+        trip,
+        expense.original_currency,
+        expense.trip_amount_minor,
+        expense.home_amount_minor,
+        expense.original_amount_minor,
     )
     text = f"Cancelled ✅ {escape(expense.description)} {amount}"
     await query.edit_message_text(text, parse_mode="HTML")
