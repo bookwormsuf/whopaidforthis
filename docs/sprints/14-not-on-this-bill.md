@@ -145,6 +145,6 @@ Starts only after Sprint 13 is signed off.
 7. A normal receipt with nothing left out behaves as in Sprint 13.
 
 ## Exit criteria
-- [ ] Checklist passes
-- [ ] Tests, ruff green; `/review` findings addressed
-- [ ] `STATUS.md` entry with your sign-off
+- [x] Checklist passes
+- [x] Tests, ruff green; `/review` findings addressed
+- [x] `STATUS.md` entry with your sign-off
