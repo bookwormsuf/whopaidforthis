@@ -211,3 +211,11 @@ Decided with Sufyan after the post-trip review. ADR 0003 records the why; `docs/
 - One read is one attempt (new photo or `Try again`); the reader's internal retry is not a second read. Allowed attempts count even if the read fails; refused attempts never count.
 - The check runs after the trip gate and before the photo is downloaded. Global cap is checked before the chat cap. Refusal texts, the once-a-day five-left warning and the log line are pinned verbatim in `docs/sprints/12-receipt-read-budget.md`.
 - Text expenses and every other command are never capped.
+
+## 21. Feedback and the owner (added 2026-11-12, Sprint 16)
+- The **owner** is one Telegram User ID in the optional setting `OWNER_USER_ID`. Unset means feedback is off. It is the only identity the bot treats differently from any other user.
+- `/feedback <text>` works in groups and private chats with no trip needed, and sends the text to the owner's private chat with the sender's first name, `@username` if any, and `from a group` or `from a DM`. No group name, chat ID or trip data. Feedback is never stored and its text is never logged.
+- Bare `/feedback` waits for the next text message only in a private chat (30 minutes, in memory). In a group it replies with a one-line hint and waits for nothing, so chat is never misread.
+- Text only, at most 1,000 characters, 5 delivered messages per user per calendar day in `Asia/Singapore`, counted in memory. A failed or refused message never counts.
+- After `Close this trip` succeeds the bot posts a feedback prompt in the group, every time; not when `/settrip` closes a trip. Texts are pinned verbatim in `docs/sprints/16-feedback.md`.
+- User-visible text names the bot **Who Paid For This**. The repo, package, Fly app and logs keep `whopaid`.

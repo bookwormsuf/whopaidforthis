@@ -22,6 +22,7 @@ sprint and points at the master spec sections it implements.
 | 13 | [Guided item split](13-guided-item-split.md) | "Who had this?" one item at a time; shared dishes by ticking two names; no typing | Yes, ~2 min (non-initiator tap) |
 | 14 | [Not on this bill](14-not-on-this-bill.md) | Leave out dishes someone else paid for on a group order; amount is "you paid" | No |
 | 15 | [Other currencies](15-other-currencies.md) | A receipt or `50 usd taxi` in a third currency: confirmed, converted, split | No |
+| 16 | [Feedback](16-feedback.md) | `/feedback` reaches you; a prompt after a trip closes; the bot is "Who Paid For This" | No |
 
 ## How a sprint runs
 

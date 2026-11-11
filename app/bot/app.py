@@ -40,6 +40,13 @@ from app.bot.handlers.basic import help_command, start_command
 from app.bot.handlers.callbacks import join_button_callback
 from app.bot.handlers.deletetrip import deletetrip_callback, deletetrip_command
 from app.bot.handlers.export import export_command
+from app.bot.handlers.feedback import (
+    AwaitingFeedback,
+    drop_feedback_wait,
+    feedback_command,
+    feedback_non_text_handler,
+    feedback_text_handler,
+)
 from app.bot.handlers.join import (
     CLOSED_TRIP_TEXT,
     UNBOUND_TEXT,
@@ -95,6 +102,7 @@ _COMMANDS: tuple[tuple[str, Any, filters.BaseFilter | None], ...] = (
     ("settle", settle_command, None),
     ("export", export_command, None),
     ("deletetrip", deletetrip_command, None),
+    ("feedback", feedback_command, None),
 )
 
 _KNOWN_COMMANDS = {name for name, _, _ in _COMMANDS}
@@ -221,6 +229,21 @@ def build_application(token: str, deps: Deps) -> Application:
             application.add_handler(CommandHandler(name, callback))
         else:
             application.add_handler(CommandHandler(name, callback, filters=cmd_filters))
+    # Feedback wait (sprint 16): a private-chat text or non-text message from a user who
+    # sent a bare /feedback. Registered before the settrip awaiting-text handler; a
+    # command always ends the wait first (see the group -2 handler below).
+    # UpdateType.MESSAGE: an edited older message must not be sent as feedback.
+    awaiting_feedback = (
+        filters.UpdateType.MESSAGE
+        & filters.ChatType.PRIVATE
+        & AwaitingFeedback(deps.feedback_waits)
+    )
+    application.add_handler(
+        MessageHandler(awaiting_feedback & filters.TEXT & ~filters.COMMAND, feedback_text_handler)
+    )
+    application.add_handler(
+        MessageHandler(awaiting_feedback & ~filters.TEXT, feedback_non_text_handler)
+    )
     application.add_handler(CallbackQueryHandler(settrip_callback, pattern=r"^st:"))
     application.add_handler(CallbackQueryHandler(join_button_callback, pattern=r"^join:"))
     application.add_handler(CallbackQueryHandler(undo_callback, pattern=r"^undo:"))
@@ -267,6 +290,15 @@ def build_application(token: str, deps: Deps) -> Application:
     # Fallback gate for any other command in an unbound group (spec §13).
     application.add_handler(MessageHandler(filters.COMMAND, _unbound_gate), group=1)
 
+    # Any command in a private chat ends a feedback wait (sprint 16). Its own group,
+    # earlier than the seen-user upsert's, because PTB runs one handler per group; it
+    # blocks, so the wait is gone before the command's handler (which may start a new
+    # one, as /feedback does) runs.
+    application.add_handler(
+        MessageHandler(filters.COMMAND & filters.ChatType.PRIVATE, drop_feedback_wait),
+        group=-2,
+    )
+
     # Seen-user upsert: never blocks, never replaces another handler.
     application.add_handler(TypeHandler(Update, upsert_seen_user, block=False), group=-1)
 
@@ -294,6 +326,7 @@ def run(settings: Settings) -> None:
             chat_cap=settings.receipt_reads_per_chat_per_day,
             global_cap=settings.receipt_reads_per_day,
         ),
+        owner_user_id=settings.owner_user_id,
     )
     application = build_application(settings.telegram_bot_token.get_secret_value(), deps)
     application.run_polling(

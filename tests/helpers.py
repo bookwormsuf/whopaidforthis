@@ -45,6 +45,7 @@ def make_deps(
     rate_date: date = date(2026, 9, 19),
     receipt_reader: ReceiptReader | None = None,
     receipt_budget: ReceiptReadBudget | None = None,
+    owner_user_id: int | None = None,
 ) -> Deps:
     ledger = ledger or InMemoryLedgerStore()
     provider = StaticRateProvider(rate, rate_date)
@@ -57,4 +58,5 @@ def make_deps(
         draft_service=draft_service,
         receipt_reader=receipt_reader or FakeReceiptReader(),
         receipt_budget=receipt_budget or ReceiptReadBudget(),
+        owner_user_id=owner_user_id,
     )

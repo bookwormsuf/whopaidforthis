@@ -94,6 +94,32 @@ class SettripSessionStore:
         return None
 
 
+class FeedbackWaitStore:
+    """Users whose next private text message is feedback (`/feedback` with no text in a
+    private chat). In memory, TTL 30 minutes, keyed on user ID. Callers may pass `now`
+    for tests; it defaults to the clock.
+    """
+
+    def __init__(self, ttl: timedelta = _SESSION_TTL) -> None:
+        self._ttl = ttl
+        self._started: dict[int, datetime] = {}
+
+    def start(self, user_id: int, now: datetime | None = None) -> None:
+        self._started[user_id] = now or datetime.now(UTC)
+
+    def is_waiting(self, user_id: int, now: datetime | None = None) -> bool:
+        started = self._started.get(user_id)
+        if started is None:
+            return False
+        if (now or datetime.now(UTC)) - started > self._ttl:
+            del self._started[user_id]
+            return False
+        return True
+
+    def clear(self, user_id: int) -> None:
+        self._started.pop(user_id, None)
+
+
 class SeenUsersThrottle:
     """At most one "seen but not joined" upsert per user per chat per hour."""
 

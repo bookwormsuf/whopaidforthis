@@ -318,7 +318,7 @@ async def test_help_command_footer_shows_bot_version() -> None:
     await help_command(update, context)
 
     reply_text = update.message.reply_text.await_args.args[0]
-    assert "whopaid abc1234" in reply_text
+    assert "Who Paid For This abc1234" in reply_text
 
 
 def test_build_application_registers_error_handler() -> None:

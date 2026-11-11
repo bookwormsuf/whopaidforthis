@@ -22,7 +22,7 @@ from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
 logger = logging.getLogger(__name__)
 
 HELP_TEXT = (
-    "<b>whopaid</b> — records trip expenses for the group.\n"
+    "<b>Who Paid For This</b> — records trip expenses for the group.\n"
     "Say what you spent, and it converts it to your home currency at the "
     "day's rate, splits the receipt between whoever was there, and tracks "
     "who owes whom.\n\n"
@@ -42,6 +42,7 @@ HELP_TEXT = (
     "/undo — cancel your last expense\n"
     "/export — download this trip's records\n"
     "/deletetrip — delete this trip and its expenses\n"
+    "/feedback — tell the person who built this what to fix\n"
     "/help — this message"
 )
 
@@ -49,7 +50,7 @@ HELP_TEXT = (
 def _help_text(context: ContextTypes.DEFAULT_TYPE) -> str:
     """HELP_TEXT with the running build's version appended (sprint 3 pin)."""
     version = get_deps(context).bot_version
-    return f"{HELP_TEXT}\n\nwhopaid {version}"
+    return f"{HELP_TEXT}\n\nWho Paid For This {version}"
 
 
 async def _private_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
