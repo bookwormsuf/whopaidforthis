@@ -93,7 +93,9 @@ async def read_receipt_photo(
         return ReceiptOutcome("unreadable")
 
     try:
-        extraction = await deps.receipt_reader.read(image, trip=trip)
+        extraction = await deps.receipt_reader.read(
+            image, trip_currency=trip.trip_currency, home_currency=trip.home_currency
+        )
     except ReceiptServiceUnavailable as exc:
         return ReceiptOutcome("unreadable", problem=exc.reason)
     except ReceiptUnreadable:

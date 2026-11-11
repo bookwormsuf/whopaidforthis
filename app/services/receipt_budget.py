@@ -72,6 +72,17 @@ class ReceiptReadBudget:
         self._chat_counts[chat_id] = self._chat_counts.get(chat_id, 0) + 1
         return Allowed
 
+    def try_take_global(self, now: datetime) -> _Result:
+        """Consumes one read from the bot-wide count only, for a private chat (spec §23):
+        the per-chat cap does not apply there and no chat count is kept. A refusal
+        never counts. `try_take`, which the group path uses, is unchanged.
+        """
+        self._roll(now)
+        if self._global_count >= self.global_cap:
+            return GlobalCapped
+        self._global_count += 1
+        return Allowed
+
     def remaining(self, chat_id: int, now: datetime) -> int:
         """How many more reads this chat can take today, never negative."""
         self._roll(now)

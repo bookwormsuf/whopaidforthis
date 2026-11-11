@@ -5,6 +5,8 @@ refuses an edit that changes nothing.
 
 from __future__ import annotations
 
+import asyncio
+import io
 import logging
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -12,6 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from PIL import Image
 from telegram import Chat, Message, MessageEntity, PhotoSize, Update, User
 from telegram.error import BadRequest
 
@@ -36,16 +39,21 @@ from app.bot.render import oneoff as render
 from app.services.oneoff import (
     BillLine,
     EqualSplit,
+    ItemsSplit,
     OneOffBill,
     OneOffStore,
     TypedSplit,
     set_bill_line,
     set_count,
 )
-from tests.helpers import make_deps
+from tests import receipt_fixtures
+from tests.helpers import FakeReceiptReader, make_deps
 
 OWNER_ID = 999000111
 START = datetime(2026, 11, 12, 12, 0, tzinfo=UTC)
+
+# Step 1's prompt, as Sprint 18 pinned it (docs/sprints/18-one-off-receipt-photos.md).
+START_PROMPT = "Send the bill, like <code>84.50 dinner</code>, or a photo of the receipt."
 
 # The pinned example, character for character (docs/sprints/17-one-off-bill.md).
 TITLE = "🧾 <b>Dinner</b> · S$84.50"
@@ -79,6 +87,13 @@ AMOUNTS_CARD_ALI_20 = (
 # ---- harness ------------------------------------------------------------------
 
 
+def _jpeg_bytes() -> bytes:
+    image = Image.new("RGB", (100, 100), color=(10, 20, 30))
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG")
+    return buffer.getvalue()
+
+
 def _keyboard(markup) -> list[list[tuple[str, str]]] | None:
     if markup is None:
         return None
@@ -97,9 +112,28 @@ class FakeBot:
         self._next = 100
         self.deleted: set[int] = set()  # edits to these raise, as for a deleted message
         self.send_message = AsyncMock(side_effect=self._send)
+        self.get_file = AsyncMock(side_effect=self._get_file)
+        self.downloads = 0
+        self.yield_on_send = False  # a send that lets other tasks run, as a real one does
+
+    async def _yield(self, *_args) -> None:
+        """A real Telegram call lets other tasks run; with `yield_on_send` so does this."""
+        if self.yield_on_send:
+            await asyncio.sleep(0)
+
+    async def _get_file(self, file_id):
+        await self._yield()
+
+        async def download():
+            await self._yield()
+            self.downloads += 1
+            return bytearray(_jpeg_bytes())
+
+        return SimpleNamespace(file_size=1000, download_as_bytearray=download)
 
     async def _send(self, chat_id, text, parse_mode=None, reply_markup=None, **_):
         assert parse_mode == "HTML"
+        await self._yield()
         self._next += 1
         self.messages[self._next] = {
             "chat_id": chat_id,
@@ -113,6 +147,7 @@ class FakeBot:
         self, text, chat_id=None, message_id=None, parse_mode=None, reply_markup=None, **_
     ):
         assert parse_mode == "HTML"
+        await self._yield()
         if message_id in self.deleted:
             raise BadRequest("Message to edit not found")
         message = self.messages[message_id]
@@ -184,10 +219,20 @@ class Chatter:
         await oneoff_text_handler(update, self.context)
         return True
 
-    async def photo(self) -> bool:
+    async def photo(
+        self, *, file_id: str = "photo-1", file_size: int | None = 1000, caption: str | None = None
+    ) -> bool:
+        """Sends a compressed photo; like the application, only a bill at the bill-line
+        step (or reading) hears it.
+        """
         if not self.store.wants_photo(self.user.id, self.now):
             return False
-        update = SimpleNamespace(effective_chat=self.chat, effective_user=self.user)
+        message = SimpleNamespace(
+            photo=[SimpleNamespace(file_id=file_id, file_size=file_size)], caption=caption
+        )
+        update = SimpleNamespace(
+            effective_chat=self.chat, effective_user=self.user, effective_message=message
+        )
         await oneoff_photo_handler(update, self.context)
         return True
 
@@ -199,7 +244,7 @@ class Chatter:
             data=data,
             from_user=from_user or self.user,
             message=SimpleNamespace(message_id=message_id, chat_id=self.chat.id),
-            answer=AsyncMock(),
+            answer=AsyncMock(side_effect=self.bot._yield),
             edit_message_reply_markup=AsyncMock(side_effect=clear),
         )
         update = SimpleNamespace(
@@ -255,7 +300,7 @@ def chat(monkeypatch) -> Chatter:
 
 async def test_whole_path_equal_split_renders_every_pinned_text(chat: Chatter) -> None:
     await chat.command()
-    assert chat.bot.texts() == ["Send the bill, like <code>84.50 dinner</code>."]
+    assert chat.bot.texts() == [START_PROMPT]
     assert chat.bot.messages[chat.bot.sent[0]]["keyboard"] is None
 
     await chat.say("84.50 dinner")
@@ -416,13 +461,13 @@ async def test_the_description_is_escaped(chat: Chatter) -> None:
     assert chat.card().splitlines()[0] == "🧾 <b>&lt;B&gt;X&lt;/B&gt;</b> · S$84.50"
 
 
-async def test_a_photo_at_the_bill_line_step_gets_the_pinned_text(chat: Chatter) -> None:
+async def test_the_sprint_17_photo_reply_is_retired(chat: Chatter) -> None:
+    """A photo at the bill-line step is read now (sprint 18): the old "Photos aren't read
+    here yet" reply is gone. (The read itself is tested in tests/test_oneoff_receipt.py.)
+    """
     await chat.command()
     assert await chat.photo()
-    assert chat.bot.texts()[-1] == (
-        "Photos aren't read here yet. Type the amount, like <code>84.50 dinner</code>."
-    )
-    assert chat.bill.state == "awaiting_bill"
+    assert not any("aren't read here yet" in text for text in chat.bot.texts())
 
 
 # ---- how many -----------------------------------------------------------------
@@ -706,7 +751,7 @@ async def test_a_second_start_asks_to_drop_the_bill_yes(chat: Chatter) -> None:
     await chat.press("Yes, start again")
     assert chat.bot.messages[old.message_id]["text"] == "Cancelled."
     assert chat.bot.messages[old.message_id]["keyboard"] is None
-    assert chat.bot.messages[question]["text"] == "Send the bill, like <code>84.50 dinner</code>."
+    assert chat.bot.messages[question]["text"] == START_PROMPT
     assert chat.bot.messages[question]["keyboard"] is None
     assert chat.bill.bill_id != old.bill_id and chat.bill.state == "awaiting_bill"
     await chat.say("10 taxi")
@@ -1026,8 +1071,14 @@ def test_one_callback_handler_covers_every_oneoff_button() -> None:
     handlers = [
         h for h in application.handlers[0] if getattr(h, "callback", None) is oneoff_callback
     ]
-    assert len(handlers) == 1
-    pattern = handlers[0].pattern
+    # `Try again` has its own non-blocking handler (sprint 18); every other button goes
+    # to the general one, which blocks as before.
+    retry, general = handlers
+    assert retry.block is False and bool(general.block)
+    assert retry.pattern.match("oneoff:abc123:retry") and not retry.pattern.match(
+        "oneoff:abc123:drop:yes"
+    )
+    pattern = general.pattern
     assert pattern.match("oneoff:start") and pattern.match("oneoff:abc123:drop:yes")
     assert not pattern.match("menu:join") and not pattern.match("st:abc")
 
@@ -1134,8 +1185,8 @@ async def test_no_ledger_or_store_call_is_made_anywhere_on_the_path(monkeypatch)
         currencies=Exploding(),
         bot_version="test",
         draft_service=Exploding(),
-        receipt_reader=Exploding(),
-        receipt_budget=Exploding(),
+        # The photo path reads a receipt, so the reader and the budget are real here.
+        receipt_reader=FakeReceiptReader(extraction=receipt_fixtures.dinner()),
         settrip_sessions=Exploding(),
         feedback_limiter=Exploding(),
     )
@@ -1226,6 +1277,75 @@ def test_callback_data_stays_under_64_bytes_for_every_button() -> None:
         longest = max(longest, len(button.callback_data.encode()))
     assert longest == len("oneoff:") + len(bill.bill_id) + len(":payer:20") == 7 + 8 + 9
     assert len(keyboards.START_CALLBACK) == 12
+
+
+def test_receipt_callback_data_and_button_counts_with_forty_items_and_twenty_persons() -> None:
+    """Sprint 18: every receipt card, at the worst case the bill allows (40 items, 20
+    persons), keeps callback data within 64 bytes and the buttons within Telegram's 100.
+    """
+    from app.models.receipt import CandidateTotal, ReceiptLineItem
+
+    lines = tuple(
+        ReceiptLineItem(
+            description=f"Dish number {n} with a very long name indeed",
+            quantity=1,
+            amount_minor=1000 + n,
+            kind="item",
+        )
+        for n in range(40)
+    )
+    candidates = tuple(
+        CandidateTotal(label_as_printed="Total", amount_minor=1000 * n, is_grand_total_guess=False)
+        for n in (1, 2, 3)
+    )
+    names = ("Sufyan", *(f"{'N' * 28}{n:02d}" for n in range(2, 21)))
+    total = sum(i.amount_minor for i in lines)
+    base = OneOffBill(
+        bill_id="abcdefgh",
+        user_id=1,
+        chat_id=1,
+        first_name="Sufyan",
+        message_id=1,
+        amount_minor=total,
+        count=20,
+        names=names,
+        payer=1,
+        photo_file_id="f",
+        line_items=lines,
+        candidates=candidates,
+        read_problem="temporarily down",
+    )
+    claims = {n: tuple(range(1, 21)) for n in range(40)}
+    cards = {
+        "couldnt_read": base,
+        "choose_total": base,
+        "reconcile": base,
+        "count": base,
+        "method": base,
+        "item_walk": replace(base, split=ItemsSplit(walk_index=39)),
+        "fix_list": replace(base, claims=claims, split=ItemsSplit()),
+        "preview": replace(base, claims=claims, split=ItemsSplit()),
+    }
+    longest = most = 0
+    for state, bill in cards.items():
+        card = replace(bill, state=state)
+        _text, markup = render.render_card(card)
+        buttons = [b for row in markup.inline_keyboard for b in row]
+        assert len(buttons) <= 100, state
+        most = max(most, len(buttons))
+        for button in buttons:
+            size = len(button.callback_data.encode())
+            assert size <= 64, (state, button.callback_data)
+            longest = max(longest, size)
+    # the longest is a toggle on the last of 40 items for the 20th person
+    assert longest == len("oneoff:abcdefgh:wtoggle:39,20") == 29
+    # a 40-item fix list: one button per item plus `Back to summary`
+    assert most == 41
+    walk = render.render_card(replace(cards["item_walk"], state="item_walk"))[1]
+    assert (
+        sum(len(row) for row in walk.inline_keyboard) == 24
+    )  # 20 + Everyone + Back + Next + Cancel
+    assert [len(row) for row in walk.inline_keyboard] == [3] * 6 + [2, 1, 2, 1]
 
 
 # ---- review B: "3 people" at the how-many step --------------------------------

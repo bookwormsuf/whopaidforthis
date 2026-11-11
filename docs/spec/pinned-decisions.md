@@ -229,3 +229,11 @@ Decided with Sufyan after the post-trip review. ADR 0003 records the why; `docs/
 - Output: one summary the user forwards, naming the user by Telegram first name and listing who owes the payer what. Flow, card texts and the summary are pinned verbatim in `docs/sprints/17-one-off-bill.md`.
 - Built beside the group flow, not inside it: `DraftService`, the ledger and the stores are not imported or edited.
 - Private text and photos are read only while a one-off bill or a feedback wait (§21) is waiting for them. The private `/start` leads with the trip and offers the one-off bill second.
+
+## 23. Receipt photos on a one-off bill (added 2026-11-12, Sprint 18)
+- A one-off bill can start from a receipt photo, sent at its first step only. The receipt is read as in groups (same reader, same image preparation, nothing on disk) and the bill can then be split item by item among its persons: "Who had this?", shared items, tax and service shared in proportion, `Fix an item`. No `Not on this bill`.
+- **Photo allowance**: in a private chat each user who is not the owner may have 1 successful receipt read and 3 attempts per calendar day in `Asia/Singapore`. The owner (§21) is never refused by it. Counts are in memory behind a three-call interface, so a Postgres-backed store can replace them later.
+- Every attempt that reaches the model in a private chat, the owner's included, takes one from the bot-wide daily cap (§20). The per-chat cap does not apply in private chats. A refused attempt counts nowhere. Group reads and their rules are unchanged.
+- Before a user's first allowed read since the bot started, the bot says: `I read receipts with an AI model. The photo isn't stored.`
+- The reader takes two currency codes instead of a trip; its prompt is unchanged. A private chat passes SGD for both. The receipt's currency is trusted if it is an ISO code, else SGD; no confirm step, no conversion.
+- Cards and texts are pinned verbatim in `docs/sprints/18-one-off-receipt-photos.md`. Still no database access on the one-off path.

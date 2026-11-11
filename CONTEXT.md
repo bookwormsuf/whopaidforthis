@@ -48,6 +48,7 @@ Terms used throughout the code, the spec and the export. Implementation details 
 - **Reconciliation** — the check that line items plus adjustments equal the receipt total, and that shares sum to the expense amount.
 - **Receipt read** — one attempt to have the model read a receipt photo, whether a new photo or `Try again`.
 - **Receipt read budget** — the daily number of receipt reads allowed per chat and across all chats; resets at midnight Singapore time.
+- **Photo allowance** — the daily number of receipt reads one user may have in a private chat (one-off bills): one successful read, three attempts. The owner is exempt. Separate from the receipt read budget, whose bot-wide cap still applies.
 
 ## Balances
 

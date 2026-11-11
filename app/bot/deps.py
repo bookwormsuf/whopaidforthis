@@ -21,6 +21,7 @@ from app.services.drafts import DraftService
 from app.services.feedback import FeedbackLimiter
 from app.services.ledger_store import LedgerStore
 from app.services.oneoff import OneOffStore
+from app.services.photo_allowance import InFlightReads, PhotoAllowance, PhotoNotices
 from app.services.receipt_budget import ReceiptReadBudget
 from app.services.receipt_parser import ReceiptReader
 
@@ -46,6 +47,9 @@ class Deps:
     feedback_limiter: FeedbackLimiter = field(default_factory=FeedbackLimiter)
     feedback_waits: FeedbackWaitStore = field(default_factory=FeedbackWaitStore)
     oneoff_bills: OneOffStore = field(default_factory=OneOffStore)
+    photo_allowance: PhotoAllowance = field(default_factory=PhotoAllowance)
+    photo_notices: PhotoNotices = field(default_factory=PhotoNotices)
+    photo_in_flight: InFlightReads = field(default_factory=InFlightReads)
 
 
 def get_deps(context: ContextTypes.DEFAULT_TYPE) -> Deps:

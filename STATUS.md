@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-11-12 (sprint 15 signed off; sprints 16 and 17 built)
+Updated: 2026-11-12 (sprint 15 signed off; sprints 16, 17 and 18 built)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -27,6 +27,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 15 Other currencies | written 2026-11-02 (+ §4/§6/§7/§12/§18 amendments) | done | green (567; 23 against Postgres) | 2026-11-02, findings fixed (one changed the plan) | 2026-11-12, on Sufyan's word; no step reported individually | 2026-11-12 | Sprint 15 closed. Next: run sprint 16 / agent |
 | 16 Feedback | written 2026-11-12 | done | green (637) | 2026-11-12, findings fixed (one deferred to sprint 17) | — | — | Merge PR, set `OWNER_USER_ID`, run the six-step checklist / Sufyan |
 | 17 One-off bill | written 2026-11-12 (+ steps 3/6/7 amended at review) | done | green (869) | 2026-11-12, findings fixed | — | — | Merge PR after sprint 16, BotFather `/setcommands`, run the seven-step checklist / Sufyan |
+| 18 Receipt photos on a one-off bill | written 2026-11-12 (+ allowance order, per-user guard, `Edit` amended at review) | done | green (1058) | 2026-11-12, findings fixed (one left for later) | — | — | Merge PR after sprint 17, run the six-step checklist (needs a second account) / Sufyan |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -1191,3 +1192,39 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Limits: not run against Telegram; no token on the build machine.
 - Next action / owner: merge after sprint 16; BotFather `/setcommands` (`split`); run the
   seven-step checklist / Sufyan.
+
+### 2026-11-12 — Sprint 18 planned and built: receipt photos on a one-off bill
+
+- Performed by: Claude (Fable 5.2) with Sufyan; a Sonnet build agent; four Opus review agents.
+- Trigger: Sufyan wanted receipt photos on one-off bills, limited so a public bot cannot run
+  up the model bill: one photo a day for anyone, no limit for himself.
+- Decided (seven questions, 2026-11-12): only a successful read uses the day's photo, with two
+  more tries after a failure; the item walk with shared items and proportional tax and
+  service, without `Not on this bill`; the receipt's currency is trusted; the group's
+  which-total card; a one-line notice that an AI model reads the photo and it is not stored;
+  the owner's reads still count toward the bot-wide 400. Pins in
+  `docs/sprints/18-one-off-receipt-photos.md`, spec §23, CONTEXT.md (*photo allowance*).
+- Built: receipt states and an items split in `app/services/oneoff.py`; `PhotoAllowance`
+  (async three-call interface, in memory); a receipt gate that owns the order of checks and
+  the counting; a global-only take on `ReceiptReadBudget`; the private photo handler. The
+  group photo path changed in call shape only: the reader takes two currency codes instead of
+  a trip, and a test freezes its prompt byte for byte. `drafts.py` is not edited; its unit and
+  unlisted-line rules are copied, with parity tests.
+- `/review` (standards, spec, architecture, divergent): two ways around the daily limit were
+  reproduced and fixed. A double tap on `Try again` made four model calls where one was
+  allowed, and photo, `/cancel`, `/split`, photo during a read gave one user three reads in a
+  day. Cause: the guard was per bill and the try was only counted when the read ended; the
+  tests missed it because the fake bot and reader never yielded. Fixed: one read at a time per
+  user, marked before the first await; the test doubles now yield. Also fixed: the bot-wide
+  cap was taken before the download, so failures that never reached the model spent it; a
+  failed `Reading…` send left a bill stuck in reading; `Edit` dropped who had what (claims now
+  belong to the receipt); `1 items`; two tests that could hang. Left for later, Sufyan's call:
+  moving the copied rules into a shared module would mean editing the group draft engine.
+- Known behaviour: when the bot-wide cap refuses, the notice and `Reading the receipt…` have
+  already been sent, because the cap is taken immediately before the model call.
+- Tests: 1058 passed (Postgres tests included); ruff check and format clean. Mutation checks on
+  the shares sum, the daily refusal, the owner exemption, cancel during a read, the in-flight
+  mark, the cap order and the release in `finally`.
+- Limits: not run against Telegram or the model; tests use a fake reader. The allowance
+  resets on every deploy, as pinned.
+- Next action / owner: merge after sprint 17; run the six-step checklist / Sufyan.

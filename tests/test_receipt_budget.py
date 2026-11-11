@@ -70,3 +70,53 @@ def test_zero_caps_refuse_everything() -> None:
     budget = ReceiptReadBudget(chat_cap=0, global_cap=0)
     assert budget.try_take(CHAT_A, NOW) is GlobalCapped
     assert budget.remaining(CHAT_A, NOW) == 0
+
+
+# -- try_take_global: a private chat takes from the bot-wide count only (sprint 18) ----
+
+
+def test_try_take_global_allows_up_to_the_global_cap_then_refuses() -> None:
+    budget = ReceiptReadBudget(chat_cap=0, global_cap=3)  # a chat cap of 0 does not matter
+    for _ in range(3):
+        assert budget.try_take_global(NOW) is Allowed
+    assert budget.try_take_global(NOW) is GlobalCapped
+
+
+def test_try_take_global_leaves_every_chat_count_alone() -> None:
+    budget = ReceiptReadBudget(chat_cap=2, global_cap=400)
+    budget.try_take_global(NOW)
+    budget.try_take_global(NOW)
+    assert budget.remaining(CHAT_A, NOW) == 2  # no chat was charged
+    assert budget.try_take(CHAT_A, NOW) is Allowed and budget.try_take(CHAT_A, NOW) is Allowed
+    assert budget.try_take(CHAT_A, NOW) is ChatCapped
+
+
+def test_private_and_group_reads_share_the_one_global_count() -> None:
+    budget = ReceiptReadBudget(chat_cap=40, global_cap=3)
+    assert budget.try_take_global(NOW) is Allowed
+    assert budget.try_take(CHAT_A, NOW) is Allowed
+    assert budget.try_take_global(NOW) is Allowed
+    assert budget.try_take(CHAT_B, NOW) is GlobalCapped
+    assert budget.try_take_global(NOW) is GlobalCapped
+
+
+def test_a_refused_global_take_does_not_count() -> None:
+    budget = ReceiptReadBudget(chat_cap=40, global_cap=1)
+    assert budget.try_take_global(NOW) is Allowed
+    for _ in range(3):
+        assert budget.try_take_global(NOW) is GlobalCapped
+    later = datetime(2026, 10, 17, 4, 0, tzinfo=UTC)  # the next Singapore day
+    assert budget.try_take_global(later) is Allowed
+
+
+def test_try_take_global_resets_on_the_singapore_date_rollover() -> None:
+    budget = ReceiptReadBudget(global_cap=1)
+    before = datetime(2026, 10, 16, 15, 59, tzinfo=UTC)  # 23:59 in Singapore
+    after = datetime(2026, 10, 16, 16, 1, tzinfo=UTC)  # 00:01 the next day
+    assert budget.try_take_global(before) is Allowed
+    assert budget.try_take_global(before) is GlobalCapped
+    assert budget.try_take_global(after) is Allowed
+
+
+def test_a_global_cap_of_zero_refuses_every_private_read() -> None:
+    assert ReceiptReadBudget(global_cap=0).try_take_global(NOW) is GlobalCapped

@@ -19,8 +19,8 @@ from app.services.receipt_parser import ReceiptReader
 
 class FakeReceiptReader:
     """A `ReceiptReader` that returns a fixed `ReceiptExtraction` (or raises a fixed
-    exception), never calling the real Anthropic API. `calls` records every `trip`
-    passed in, for tests that assert on call count.
+    exception), never calling the real Anthropic API. `calls` records every
+    `(trip_currency, home_currency)` pair passed in, for tests that assert on call count.
     """
 
     def __init__(self, extraction: ReceiptExtraction | None = None, error: Exception | None = None):
@@ -28,8 +28,8 @@ class FakeReceiptReader:
         self._error = error
         self.calls: list[object] = []
 
-    async def read(self, image, *, trip) -> ReceiptExtraction:
-        self.calls.append(trip)
+    async def read(self, image, *, trip_currency, home_currency) -> ReceiptExtraction:
+        self.calls.append((trip_currency, home_currency))
         if self._error is not None:
             raise self._error
         assert self._extraction is not None
