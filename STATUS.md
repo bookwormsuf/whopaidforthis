@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-11-12 (sprint 15 signed off; sprint 16 built)
+Updated: 2026-11-12 (sprint 15 signed off; sprints 16 and 17 built)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -26,6 +26,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 14 Not on this bill | written 2026-11-01 (+ §7/§9 amendments) | done | green (528) | 2026-11-01, findings fixed (one noted) | 2026-11-02, on Sufyan's word; no step reported individually | 2026-11-02 | Sprint 14 closed. Next: run sprint 15 / agent |
 | 15 Other currencies | written 2026-11-02 (+ §4/§6/§7/§12/§18 amendments) | done | green (567; 23 against Postgres) | 2026-11-02, findings fixed (one changed the plan) | 2026-11-12, on Sufyan's word; no step reported individually | 2026-11-12 | Sprint 15 closed. Next: run sprint 16 / agent |
 | 16 Feedback | written 2026-11-12 | done | green (637) | 2026-11-12, findings fixed (one deferred to sprint 17) | — | — | Merge PR, set `OWNER_USER_ID`, run the six-step checklist / Sufyan |
+| 17 One-off bill | written 2026-11-12 (+ steps 3/6/7 amended at review) | done | green (869) | 2026-11-12, findings fixed | — | — | Merge PR after sprint 16, BotFather `/setcommands`, run the seven-step checklist / Sufyan |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -1159,3 +1160,34 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   renders of the real strings, not live captures.
 - Next action / owner: merge the PR; `fly secrets set OWNER_USER_ID=…`; add `OWNER_USER_ID=`
   to `.env.example`; BotFather `/setcommands`; run the six-step checklist / Sufyan.
+
+### 2026-11-12 — Sprint 17 planned and built: one-off bill
+
+- Performed by: Claude (Fable 5.2) with Sufyan; a Sonnet build agent; four Opus review agents.
+- Trigger: Sufyan wanted to split a single bill through the bot without adding it to a group.
+- Decided (grilling, 2026-11-12): private chat only, one bill at a time, 2 to 20 numbered
+  persons with optional names, the user first; one currency as typed, SGD by default, no
+  conversion; equal or typed amounts; a summary to forward; never saved, in memory for 30
+  minutes; built beside the group draft engine, not inside it; the private `/start` leads with
+  the trip. Pins in `docs/sprints/17-one-off-bill.md`, spec §22, CONTEXT.md (*one-off bill*,
+  *person*). Receipt photos and the item split were moved to sprint 18.
+- Built: `app/services/oneoff.py` (bill, transitions, in-memory store, line parsers; no
+  Telegram import, no clock read), render, keyboards and handlers for it; `/split`; a private
+  `/cancel` for an open bill; the private `/start` text and two buttons. The group flow,
+  `DraftService`, the ledger and the stores are not edited or imported; three existing tests
+  that asserted the old private button were updated.
+- `/review` (standards, spec, architecture, divergent): 16 findings, all addressed. Behaviour:
+  typed amounts now match the person's name first, so `me 500 yen` and `Ali 20 sgd` read;
+  `3 people` at the how-many step is a count, not a S$3.00 bill (a hole in the pin, amended);
+  an edited `/cancel` no longer cancels a bill; a deleted card is re-sent instead of stranding
+  the user; long pasted text can no longer push the card past Telegram's limit. Shape, ahead
+  of sprint 18: the store refuses to save a bill that is gone, one table decides which steps
+  read text, and the split's data is one field. Tests: two that could not fail were replaced;
+  keyboard rows are asserted. CONTEXT.md now says *payer* and *share* cover persons.
+- Known wart: the typed-amounts parser imports the private `_locate_amount` from
+  `expense_parser`, because the public helper does not say whether it consumed the whole text.
+- Tests: 869 passed (Postgres tests included); ruff check and format clean. Mutation checks on
+  the summary text, the no-ledger guard, the feedback-first routing order and HTML escaping.
+- Limits: not run against Telegram; no token on the build machine.
+- Next action / owner: merge after sprint 16; BotFather `/setcommands` (`split`); run the
+  seven-step checklist / Sufyan.

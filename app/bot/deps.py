@@ -20,6 +20,7 @@ from app.services.currencies import CurrencyCatalog
 from app.services.drafts import DraftService
 from app.services.feedback import FeedbackLimiter
 from app.services.ledger_store import LedgerStore
+from app.services.oneoff import OneOffStore
 from app.services.receipt_budget import ReceiptReadBudget
 from app.services.receipt_parser import ReceiptReader
 
@@ -44,6 +45,7 @@ class Deps:
     owner_user_id: int | None = None
     feedback_limiter: FeedbackLimiter = field(default_factory=FeedbackLimiter)
     feedback_waits: FeedbackWaitStore = field(default_factory=FeedbackWaitStore)
+    oneoff_bills: OneOffStore = field(default_factory=OneOffStore)
 
 
 def get_deps(context: ContextTypes.DEFAULT_TYPE) -> Deps:

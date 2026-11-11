@@ -12,6 +12,7 @@ Terms used throughout the code, the spec and the export. Implementation details 
 - **Participant** — a trip user who consumed part of an expense and therefore owes a share of it.
 - **Owner** — the one person who runs this bot. Receives feedback. Not a trip role: the owner may be in no trip at all.
 - **Feedback** — a text message a user sends to the owner through the bot. Delivered once, never stored.
+- **Person** — a named slot on a one-off bill. A label only: no Telegram account behind it, cannot be tagged or messaged, never stored. Not a trip user. On a one-off bill, *payer* means the person who paid it and *share* means a person's portion of it, in the bill's one currency.
 
 ## Trips and money
 
@@ -35,6 +36,7 @@ Terms used throughout the code, the spec and the export. Implementation details 
 
 - **Expense** — a confirmed, saved record of one payment by one payer, split among participants. Has a status of `confirmed` or `cancelled`. Never deleted.
 - **Draft** — an expense that is still being built through the button flow. Lives in memory only, expires after 30 minutes, never appears in the ledger.
+- **One-off bill** — a single bill split among persons in a private chat with the bot, outside any trip. Never saved: it exists only while it is being built, and ends as a summary message the user forwards. Not an expense and not a draft.
 - **Share** — the portion of an expense that belongs to one participant, in both currencies. Shares of an expense always sum exactly to the expense amount.
 - **Split method** — how shares were derived: `equal`, `custom`, `items`. Percentage is a planned future method.
 - **Line item** — one priced line from a receipt. Regular items are claimable. **Adjustment lines** (tax, service charge, discount) are never claimable and are allocated proportionally.

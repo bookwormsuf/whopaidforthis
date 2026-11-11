@@ -23,6 +23,7 @@ sprint and points at the master spec sections it implements.
 | 14 | [Not on this bill](14-not-on-this-bill.md) | Leave out dishes someone else paid for on a group order; amount is "you paid" | No |
 | 15 | [Other currencies](15-other-currencies.md) | A receipt or `50 usd taxi` in a third currency: confirmed, converted, split | No |
 | 16 | [Feedback](16-feedback.md) | `/feedback` reaches you; a prompt after a trip closes; the bot is "Who Paid For This" | No |
+| 17 | [One-off bill](17-one-off-bill.md) | Split one bill in a private chat with the bot and forward the summary; nothing saved | No |
 
 ## How a sprint runs
 

@@ -5,6 +5,10 @@ Sprint 10 (docs/sprints/10-start-menu.md, pinned-decisions §19, amended
 on being added and when typed); `/help` in a group posts the help text with
 the menu underneath it, not pinned. In private chat both still show the help
 text, now with an `Add me to a group` URL button.
+
+Sprint 17 (docs/sprints/17-one-off-bill.md): private `/start` leads with the trip and
+offers the one-off bill second; private `/start` and `/help` carry two buttons, `Add me
+to a group for a trip` and `Split a bill now`.
 """
 
 from __future__ import annotations
@@ -42,8 +46,16 @@ HELP_TEXT = (
     "/undo — cancel your last expense\n"
     "/export — download this trip's records\n"
     "/deletetrip — delete this trip and its expenses\n"
+    "/split — split one bill in a private chat, no group needed\n"
     "/feedback — tell the person who built this what to fix\n"
     "/help — this message"
+)
+
+
+PRIVATE_START_TEXT = (
+    "<b>Who Paid For This</b> tracks who paid for what on a group trip, then works out "
+    "who owes whom. Add me to your trip group to start.\n\n"
+    "Just one bill to split? You can do that right here."
 )
 
 
@@ -54,7 +66,7 @@ def _help_text(context: ContextTypes.DEFAULT_TYPE) -> str:
 
 
 async def _private_help(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Shows the help text with the `Add me to a group` button (sprint 10 pin)."""
+    """Shows the help text with the two private buttons (sprint 10 pin, sprint 17)."""
     await update.message.reply_text(
         _help_text(context),
         parse_mode="HTML",
@@ -87,9 +99,20 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await _private_help(update, context)
 
 
+async def _private_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """The private `/start`: the trip first, the one-off bill second (sprint 17 pin)."""
+    version = get_deps(context).bot_version
+    await update.message.reply_text(
+        f"{PRIVATE_START_TEXT}\n\nWho Paid For This {version}",
+        parse_mode="HTML",
+        reply_markup=private_start_keyboard(context.bot.username),
+    )
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """In a group, posts the welcome menu; /start no longer behaves as /join
-    (sprint 10 pin, superseding spec §12). In private, it shows help.
+    (sprint 10 pin, superseding spec §12). In private, it shows the trip-first intro and
+    the `Split a bill now` button (sprint 17).
 
     Telegram's `?startgroup=true` "Add me to a group" link adds the bot (which
     already triggers the welcome via `bot_added_to_group`) and then immediately
@@ -106,4 +129,4 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         except Exception:  # noqa: BLE001 - a failed welcome must not crash the handler
             logger.exception("could not post the welcome message")
         return
-    await _private_help(update, context)
+    await _private_start(update, context)
