@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-11-02 (sprint 14 signed off; sprint 15 built)
+Updated: 2026-11-12 (sprint 15 signed off)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -24,7 +24,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 12 Receipt read budget | written 2026-10-16 (+ warning wording amended after review) | done | green (513) | 2026-10-16, findings fixed | 2026-10-16, on Sufyan's word; no step reported individually | 2026-10-16 | Sprint 12 closed. Repo public. Watch `fly logs` for refusals after the launch post / Sufyan |
 | 13 Guided item split | written 2026-11-01 (+ §7/§8/§9 amendments) | done | green (497) | 2026-11-01, findings fixed (one declined) | 2026-11-01, on Sufyan's word; no step reported individually | 2026-11-01 | Sprint 13 closed. Next: run sprint 14 / agent |
 | 14 Not on this bill | written 2026-11-01 (+ §7/§9 amendments) | done | green (528) | 2026-11-01, findings fixed (one noted) | 2026-11-02, on Sufyan's word; no step reported individually | 2026-11-02 | Sprint 14 closed. Next: run sprint 15 / agent |
-| 15 Other currencies | written 2026-11-02 (+ §4/§6/§7/§12/§18 amendments) | done | green (567; 23 against Postgres) | 2026-11-02, findings fixed (one changed the plan) | — | — | Merge PR, deploy, run the seven-step checklist / Sufyan |
+| 15 Other currencies | written 2026-11-02 (+ §4/§6/§7/§12/§18 amendments) | done | green (567; 23 against Postgres) | 2026-11-02, findings fixed (one changed the plan) | 2026-11-12, on Sufyan's word; no step reported individually | 2026-11-12 | Sprint 15 closed. Next: run sprint 16 / agent |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -1123,3 +1123,9 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Tests: 567 passed, 23 Postgres tests passed against a local Postgres 16 (migration included);
   ruff clean.
 - Next action / owner: merge the PR, deploy, run the seven-step checklist / Sufyan.
+
+### 2026-11-12 — Sprint 15 sign-off
+
+- Sufyan: "sure sign off" (sprint 15), and confirmed the seven-step checklist was run on the
+  live bot. Steps not reported individually; recorded on Sufyan's word.
+- Next action / owner: run sprint 16 (feedback) / agent.
