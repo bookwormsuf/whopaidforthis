@@ -150,6 +150,6 @@ currency gets "I can only record THB or SGD for this trip" and nothing else happ
 7. A normal ฿ receipt and `200 baht taxi` behave as before.
 
 ## Exit criteria
-- [ ] Checklist passes
-- [ ] Tests, ruff green; `/review` findings addressed
-- [ ] `STATUS.md` entry with your sign-off
+- [x] Checklist passes
+- [x] Tests, ruff green; `/review` findings addressed
+- [x] `STATUS.md` entry with your sign-off
