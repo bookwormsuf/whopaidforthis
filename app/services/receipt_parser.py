@@ -130,7 +130,9 @@ class ReceiptServiceUnavailable(ReceiptUnreadable):
 
 
 class ReceiptReader(Protocol):
-    async def read(self, image: PreparedImage, *, trip: Trip) -> ReceiptExtraction: ...
+    async def read(
+        self, image: PreparedImage, *, trip_currency: str, home_currency: str
+    ) -> ReceiptExtraction: ...
 
 
 class AnthropicReceiptReader:
@@ -169,9 +171,11 @@ class AnthropicReceiptReader:
             raise ValueError(f"no parsed output (stop_reason={response.stop_reason})")
         return response.parsed_output
 
-    async def read(self, image: PreparedImage, *, trip: Trip) -> ReceiptExtraction:
+    async def read(
+        self, image: PreparedImage, *, trip_currency: str, home_currency: str
+    ) -> ReceiptExtraction:
         system = SYSTEM_PROMPT_TEMPLATE.format(
-            trip_currency=trip.trip_currency, home_currency=trip.home_currency
+            trip_currency=trip_currency, home_currency=home_currency
         )
         image_block = {
             "type": "image",

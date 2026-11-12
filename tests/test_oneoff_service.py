@@ -569,7 +569,7 @@ def test_put_after_expiry_is_refused() -> None:
 
 def test_every_text_state_has_a_reader_and_no_other_state_does() -> None:
     assert TEXT_STATES == frozenset(TEXT_READERS)
-    assert TEXT_STATES == {"awaiting_bill", "count", "names", "amounts"}
+    assert TEXT_STATES == {"awaiting_bill", "count", "names", "amounts", "other_amount"}
 
 
 def test_read_text_refuses_a_state_with_no_reader() -> None:

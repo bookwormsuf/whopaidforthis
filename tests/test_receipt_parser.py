@@ -217,7 +217,7 @@ async def test_reader_retries_once_then_succeeds() -> None:
     client = _FakeAnthropicClient([ValueError("bad json"), good])
     reader = AnthropicReceiptReader(client)
 
-    result = await reader.read(_tiny_image(), trip=_trip())
+    result = await reader.read(_tiny_image(), trip_currency="JPY", home_currency="SGD")
     assert result == good
     assert client.messages.calls == 2
 
@@ -227,7 +227,7 @@ async def test_reader_gives_up_after_second_failure() -> None:
     reader = AnthropicReceiptReader(client)
 
     with pytest.raises(ReceiptUnreadable):
-        await reader.read(_tiny_image(), trip=_trip())
+        await reader.read(_tiny_image(), trip_currency="JPY", home_currency="SGD")
     assert client.messages.calls == 2
 
 
@@ -238,11 +238,13 @@ async def test_reader_retries_when_no_parsed_output() -> None:
     good = _fixture("clean_konbini_jpy.json")
     client = _FakeAnthropicClient([None, good])
     reader = AnthropicReceiptReader(client)
-    assert await reader.read(_tiny_image(), trip=_trip()) == good
+    assert await reader.read(_tiny_image(), trip_currency="JPY", home_currency="SGD") == good
 
     client = _FakeAnthropicClient([None, None])
     with pytest.raises(ReceiptUnreadable):
-        await AnthropicReceiptReader(client).read(_tiny_image(), trip=_trip())
+        await AnthropicReceiptReader(client).read(
+            _tiny_image(), trip_currency="JPY", home_currency="SGD"
+        )
 
 
 def test_unparseable_printed_date_becomes_none() -> None:
@@ -262,7 +264,7 @@ async def test_no_image_bytes_in_log_records(caplog: pytest.LogCaptureFixture) -
     reader = AnthropicReceiptReader(client)
 
     with caplog.at_level(logging.DEBUG):
-        await reader.read(image, trip=_trip())
+        await reader.read(image, trip_currency="JPY", home_currency="SGD")
 
     for record in caplog.records:
         formatted = record.getMessage()
@@ -532,3 +534,78 @@ def test_a_refused_image_is_a_photo_problem_not_the_service() -> None:
         "returning an error (400)"
     )
     assert _service_problem(status_error(404, "model not found")) == "returning an error (404)"
+
+
+# -- The system prompt for two currency codes (sprint 18 regression) ---------
+
+# Rendered by the code as it was before the reader took two codes in place of a Trip
+# (captured with trip_currency="JPY", home_currency="SGD"), then frozen here.
+_PROMPT_JPY_SGD = """You are reading a photograph of a receipt for a trip expense tracker.
+
+Trip currency: JPY. Home currency: SGD. If the receipt does
+not show a currency explicitly, assume JPY.
+
+List every number printed on the receipt that could plausibly be the grand total, in
+`candidate_totals`, even ones you are not sure about. Set `is_grand_total_guess=true`
+on the one you believe is the actual total the customer paid, if you can tell.
+Group orders: if the receipt says the order was split so each person paid their own
+part, and prints this person's part as well as the order total (wording such as "your
+share", "you paid" or คุณจ่าย, below an order total it is smaller than), list both and set
+`is_grand_total_guess=true` on this person's part only. This is not cash or a card amount
+handed over for the whole bill (お預り, "Cash", "Tendered", "Paid"): on an ordinary receipt
+the grand total is still the guess.
+
+Japanese receipt conventions, when this is a Japanese receipt:
+- 税込 (zeikomi) means tax is already included in the shown amount.
+- 小計 (shokei) is the subtotal, before tax or service charge -- not the total.
+- 合計 (goukei) is the total.
+- お預り (oazukari) is the cash handed over by the customer -- never the total.
+- お釣り (otsuri) is the change given back -- never the total.
+- A tax amount printed as already included -- 内税, (内 消費税等), 税込, "incl. tax" --
+  is part of the item prices. Do not list it as a `tax` line item; only list tax that is
+  added on top of the items.
+
+Amounts (`amount_minor`, `unit_amount_minor`) are integers in the currency's smallest
+unit. JPY has no smaller unit: ¥6,850 is 6850, never 685000. SGD and USD have cents:
+S$12.50 is 1250. For each candidate total, also copy the amount exactly as printed into
+`amount_as_printed`, e.g. "¥6,850".
+
+`description` is a short title for the expense list: at most 4 words, the shop name plus
+what kind of place or purchase it is, e.g. "Moon Coffee", "Lawson snacks", "Hotel
+Granvia". Not a sentence, and not the items.
+
+List every priced line as a line item, with a `kind`: `item` for a regular purchased
+item, `tax` for a tax line, `service_charge` for a service charge, `discount` for a
+discount or coupon (its amount should be positive; the sign is handled downstream).
+
+If the photo is blurry, not a receipt, or otherwise unreadable, still return your
+best-effort guess: a low `confidence`, an empty `candidate_totals` list if you cannot
+read any number with any confidence, and a `notes` field explaining what's wrong.
+"""
+
+
+class _RecordingMessages(_FakeAnthropicMessages):
+    def parse(self, **kwargs):
+        self.systems = [*getattr(self, "systems", []), kwargs["system"]]
+        return super().parse(**kwargs)
+
+
+async def test_reader_prompt_for_two_codes_is_byte_for_byte_what_it_was() -> None:
+    client = _FakeAnthropicClient([_fixture("clean_konbini_jpy.json")])
+    client.messages = _RecordingMessages([_fixture("clean_konbini_jpy.json")])
+    await AnthropicReceiptReader(client).read(
+        _tiny_image(), trip_currency="JPY", home_currency="SGD"
+    )
+    assert client.messages.systems == [_PROMPT_JPY_SGD]
+    assert len(_PROMPT_JPY_SGD.encode("utf-8")) == 2554
+
+
+async def test_reader_prompt_uses_the_codes_it_is_given() -> None:
+    client = _FakeAnthropicClient([])
+    client.messages = _RecordingMessages([_fixture("clean_konbini_jpy.json")])
+    await AnthropicReceiptReader(client).read(
+        _tiny_image(), trip_currency="SGD", home_currency="SGD"
+    )
+    system = client.messages.systems[0]
+    assert "Trip currency: SGD. Home currency: SGD." in system
+    assert "assume SGD." in system

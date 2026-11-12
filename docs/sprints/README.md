@@ -24,6 +24,7 @@ sprint and points at the master spec sections it implements.
 | 15 | [Other currencies](15-other-currencies.md) | A receipt or `50 usd taxi` in a third currency: confirmed, converted, split | No |
 | 16 | [Feedback](16-feedback.md) | `/feedback` reaches you; a prompt after a trip closes; the bot is "Who Paid For This" | No |
 | 17 | [One-off bill](17-one-off-bill.md) | Split one bill in a private chat with the bot and forward the summary; nothing saved | No |
+| 18 | [Receipt photos on a one-off bill](18-one-off-receipt-photos.md) | Start a one-off bill from a receipt photo and split it item by item; one photo a day each | Yes, ~5 min (a second account for the limit) |
 
 ## How a sprint runs
 

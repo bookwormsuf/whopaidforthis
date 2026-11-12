@@ -56,6 +56,7 @@ from app.bot.handlers.join import (
 from app.bot.handlers.menu import bot_added_to_group, menu_callback
 from app.bot.handlers.oneoff import (
     ONEOFF_CALLBACK_PATTERN,
+    ONEOFF_RETRY_PATTERN,
     BillWaitingForPhoto,
     BillWaitingForText,
     HasOneOffBill,
@@ -290,11 +291,21 @@ def build_application(token: str, deps: Deps) -> Application:
             oneoff_text_handler,
         )
     )
+    # A receipt photo (sprint 18) is read at the bill-line step only. Non-blocking, like
+    # the group's photo handler: a read takes seconds to tens of seconds and PTB would
+    # otherwise stall every other update. The handler marks the bill as reading before
+    # its first await, so a second photo that overlaps gets "One receipt at a time".
     application.add_handler(
         MessageHandler(
             oneoff_message & filters.PHOTO & BillWaitingForPhoto(deps.oneoff_bills),
             oneoff_photo_handler,
+            block=False,
         )
+    )
+    # `Try again` on the couldn't-read card re-reads the photo: non-blocking for the same
+    # reason, registered before the general one-off handler, which would match it first.
+    application.add_handler(
+        CallbackQueryHandler(oneoff_callback, pattern=ONEOFF_RETRY_PATTERN, block=False)
     )
     application.add_handler(CallbackQueryHandler(oneoff_callback, pattern=ONEOFF_CALLBACK_PATTERN))
     application.add_handler(CallbackQueryHandler(settrip_callback, pattern=r"^st:"))
