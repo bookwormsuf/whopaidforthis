@@ -16,6 +16,7 @@ from telegram.ext import ContextTypes
 
 from app.bot.deps import Deps, get_deps
 from app.bot.formatting import fmt_expense_bullet, fmt_money
+from app.bot.handlers.feedback import FEEDBACK_PROMPT_TEXT
 from app.bot.handlers.join import require_trip_send
 from app.bot.keyboards.settrip import close_trip_keyboard
 from app.bot.send import SendFn, build_send
@@ -277,3 +278,11 @@ async def close_trip_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
         except Exception:  # noqa: BLE001 - editing an already-changed message is not fatal
             logger.debug("close_trip_callback: could not edit message")
+
+    # Sprint 16: ask the group for feedback, outside the edit's try so a failed edit
+    # doesn't block it. A failure here is logged and swallowed; the trip stays closed.
+    if deps.owner_user_id is not None:
+        try:
+            await context.bot.send_message(chat.id, FEEDBACK_PROMPT_TEXT, parse_mode="HTML")
+        except Exception:  # noqa: BLE001 - the trip is already closed
+            logger.warning("close_trip_callback: could not post the feedback prompt")

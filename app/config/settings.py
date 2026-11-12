@@ -26,6 +26,13 @@ class Settings(BaseSettings):
         default="dev",
         description="Short git SHA baked into the image via the BOT_VERSION build arg.",
     )
+    owner_user_id: int | None = Field(
+        default=None,
+        description=(
+            "Telegram User ID of the person who runs the bot; receives /feedback. "
+            "Unset turns feedback off. Set as a Fly secret, never committed."
+        ),
+    )
     receipt_reads_per_chat_per_day: int = Field(
         default=40,
         ge=0,

@@ -10,6 +10,8 @@ Terms used throughout the code, the spec and the export. Implementation details 
 - **Creator** — the trip user who sent the message that produced the expense. Usually the payer, not always.
 - **Initiator** — the creator of a draft; the only person allowed to move that draft through participants, split method, item by item, Confirm, Edit and Cancel.
 - **Participant** — a trip user who consumed part of an expense and therefore owes a share of it.
+- **Owner** — the one person who runs this bot. Receives feedback. Not a trip role: the owner may be in no trip at all.
+- **Feedback** — a text message a user sends to the owner through the bot. Delivered once, never stored.
 
 ## Trips and money
 

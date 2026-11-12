@@ -45,7 +45,7 @@ CLOSED_TRIP_LINE = "The last trip is closed. Start a new one or export it."
 PIN_HINT = "\n\nPin this message so everyone can find the buttons."
 
 WELCOME_HEADER = (
-    "<b>whopaid</b> records this group's trip expenses.\n"
+    "<b>Who Paid For This</b> records this group's trip expenses.\n"
     "Type what you spent, like <code>1200 yen ramen</code>, or send a photo of a receipt. "
     "I convert it to your home currency at the day's rate, split it between whoever was "
     "there, and track who owes whom."

@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-11-12 (sprint 15 signed off)
+Updated: 2026-11-12 (sprint 15 signed off; sprint 16 built)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -25,6 +25,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 13 Guided item split | written 2026-11-01 (+ §7/§8/§9 amendments) | done | green (497) | 2026-11-01, findings fixed (one declined) | 2026-11-01, on Sufyan's word; no step reported individually | 2026-11-01 | Sprint 13 closed. Next: run sprint 14 / agent |
 | 14 Not on this bill | written 2026-11-01 (+ §7/§9 amendments) | done | green (528) | 2026-11-01, findings fixed (one noted) | 2026-11-02, on Sufyan's word; no step reported individually | 2026-11-02 | Sprint 14 closed. Next: run sprint 15 / agent |
 | 15 Other currencies | written 2026-11-02 (+ §4/§6/§7/§12/§18 amendments) | done | green (567; 23 against Postgres) | 2026-11-02, findings fixed (one changed the plan) | 2026-11-12, on Sufyan's word; no step reported individually | 2026-11-12 | Sprint 15 closed. Next: run sprint 16 / agent |
+| 16 Feedback | written 2026-11-12 | done | green (637) | 2026-11-12, findings fixed (one deferred to sprint 17) | — | — | Merge PR, set `OWNER_USER_ID`, run the six-step checklist / Sufyan |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -1129,3 +1130,32 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Sufyan: "sure sign off" (sprint 15), and confirmed the seven-step checklist was run on the
   live bot. Steps not reported individually; recorded on Sufyan's word.
 - Next action / owner: run sprint 16 (feedback) / agent.
+
+### 2026-11-12 — Sprint 16 planned and built: feedback
+
+- Performed by: Claude (Fable 5.2) with Sufyan; a Sonnet build agent; four Opus review agents.
+- Trigger: Sufyan wanted a way to hear from people after a trip ends. First asked for an email
+  address in the message; changed during grilling to a `/feedback` command that reaches him
+  through the bot, so neither his email nor his handle is shown.
+- Decided (grilling, 2026-11-12): `/feedback` in groups and private chats, text only, 1,000
+  characters, 5 delivered a day per user, nothing stored; a prompt in the group after every
+  `Close this trip` (not after a `/settrip` close); one optional `OWNER_USER_ID` setting; the
+  bot is named "Who Paid For This" in what users read. Pins in `docs/sprints/16-feedback.md`,
+  spec §21, CONTEXT.md (*owner*, *feedback*).
+- Built: `app/services/feedback.py` (daily limiter, validation, owner message),
+  `app/bot/handlers/feedback.py`, a private-chat wait store, a group -2 handler so any private
+  command ends a wait, the prompt in `close_trip_callback`, the name in the help header,
+  version line and welcome.
+- `/review` (standards, spec, architecture, divergent): 8 findings. Fixed: a failing reply
+  could chain the owner-send error, and the owner's ID in it, into the error log; `/feedback
+  <text>` in a group ended that user's private wait; an edited message could be taken as
+  feedback; blank text sent an empty message; two tests that could not fail; a guard test for
+  the numbers in the pinned texts. Deferred to sprint 17: one shared private-wait mechanism
+  for feedback and the one-off bill. Not changed: `query.answer()` raising before the prompt
+  (existing line, low likelihood).
+- Tests: 637 passed (Postgres tests included); ruff check and format clean. Mutation checks
+  on the limiter, the unset-owner guard, the command registration and the group -2 handler.
+- Limits: not run against Telegram; no token on the build machine. Message screenshots are
+  renders of the real strings, not live captures.
+- Next action / owner: merge the PR; `fly secrets set OWNER_USER_ID=…`; add `OWNER_USER_ID=`
+  to `.env.example`; BotFather `/setcommands`; run the six-step checklist / Sufyan.

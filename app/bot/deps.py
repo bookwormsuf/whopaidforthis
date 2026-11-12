@@ -10,9 +10,15 @@ from dataclasses import dataclass, field
 
 from telegram.ext import ContextTypes
 
-from app.bot.session_state import RecentUpdates, SeenUsersThrottle, SettripSessionStore
+from app.bot.session_state import (
+    FeedbackWaitStore,
+    RecentUpdates,
+    SeenUsersThrottle,
+    SettripSessionStore,
+)
 from app.services.currencies import CurrencyCatalog
 from app.services.drafts import DraftService
+from app.services.feedback import FeedbackLimiter
 from app.services.ledger_store import LedgerStore
 from app.services.receipt_budget import ReceiptReadBudget
 from app.services.receipt_parser import ReceiptReader
@@ -35,6 +41,9 @@ class Deps:
     seen_users: SeenUsersThrottle = field(default_factory=SeenUsersThrottle)
     recent_updates: RecentUpdates = field(default_factory=RecentUpdates)
     receipt_budget: ReceiptReadBudget = field(default_factory=ReceiptReadBudget)
+    owner_user_id: int | None = None
+    feedback_limiter: FeedbackLimiter = field(default_factory=FeedbackLimiter)
+    feedback_waits: FeedbackWaitStore = field(default_factory=FeedbackWaitStore)
 
 
 def get_deps(context: ContextTypes.DEFAULT_TYPE) -> Deps:
