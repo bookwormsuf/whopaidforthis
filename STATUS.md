@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-11-12 (sprint 15 signed off; sprints 16, 17 and 18 built; README rewritten)
+Updated: 2026-11-13 (sprints 16, 17 and 18 merged and deployed, awaiting checklists; private-chat fallback built)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -1246,3 +1246,23 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   that others started. Existing behaviour since sprint 9; a product question for Sufyan.
 - Missing: the bot's public @username is not in the repo, so the README has no link to it.
 - Next action / owner: give the bot's username for the README; decide on `/deletetrip` / Sufyan.
+
+### 2026-11-13 — Private chat: a stray message gets the intro
+
+- Performed by: Claude (Fable 5.2) with Sufyan; four Opus reviewers (`/review`).
+- Scope: Sufyan typed a plain greeting to the deployed bot in a private chat and got no
+  reply, which read as a dead bot. Any message in a private chat with no one-off bill open,
+  an unknown command included, now gets the private `/start` intro and its two buttons.
+  With a bill open, an unexpected message still gets no reply.
+- Pins amended and dated: spec §22; sprint 16 (a second text after feedback), sprint 17
+  (no-bill text, expiry, registration order, checklist step 7), sprint 18 (a photo with no
+  bill). The old rule in each was "no reply".
+- Review: no blocking findings. Fixed: the handler is now the last of its group and a test
+  checks that; unknown private commands are answered too; a photo after an expired bill no
+  longer leads to a late expiry notice (the intro replaces it); stale comments and docs.
+  Not changed: a service message of a kind the bot library does not know yet would get the
+  intro (low risk).
+- Tests: 1063 passed; ruff check and format clean. Mutation checks on the unknown-command
+  and expiry tests.
+- Limits: not run against Telegram.
+- Next action / owner: merge the PR, then send a greeting to the bot in a private chat / Sufyan.

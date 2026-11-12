@@ -37,7 +37,9 @@ Sufyan on 2026-11-12.
 - `/split` in a group replies ``/split works in a private chat with me. In this group, type
   the expense, like <code>1200 yen ramen</code>.`` and does nothing else. It needs no trip.
 - Plain text and photos in a private chat are read only while a one-off bill (or Sprint 16's
-  feedback wait) is waiting for them. Otherwise they get no reply, as today.
+  feedback wait) is waiting for them. Otherwise, with no bill open, they get the private
+  `/start` intro and its two buttons (amended 2026-11-13; was: no reply). With a bill open, a message
+  the current step does not expect still gets no reply.
 - If both a feedback wait and a bill exist, the next text is the feedback; the bill is kept.
   `/split` drops a feedback wait, like any other command.
 
@@ -193,8 +195,9 @@ Split with @<bot username>
   longer exists (expired, finished, cancelled, replaced, or lost in a restart) answers with a
   new message `That bill expired. Tap Split a bill now to start again.` carrying a
   `Split a bill now` button, and removes the buttons from the pressed card.
-- Text sent after a bill expired in the same process gets the same message once. After a
-  restart, text gets no reply (the bot no longer knows there was a bill).
+- Text sent after a bill expired in the same process gets the same message once. A photo or
+  an unknown command sent first gets the `/start` intro, which replaces that message (amended 2026-11-13). After a
+  restart, text gets the `/start` intro (amended 2026-11-13; the bot no longer knows there was a bill).
 
 ### Structure
 - New files only, plus registration and the private `/start`/`/help` change:
@@ -243,7 +246,7 @@ Split with @<bot username>
 - The user's own typed messages are left in the chat, never deleted.
 - A stale press also clears the user's pending expiry notice, so one expiry never produces two stale messages. Expired bills are noticed lazily (on a press, a text, or a sweep when any user starts a bill); the in-memory notice list holds only user IDs.
 - `/cancel` with a bill open is handled by a separate `CommandHandler` registered before the `_COMMANDS` loop and filtered to a private chat with a live bill, so `cancel_command` is untouched and does not also run. With no bill (or an expired one) the ordinary `/cancel` runs.
-- Registration order in group 0: the feedback handlers, then the bill's text and photo handlers, then the `oneoff:` callback handler, then `settrip`'s awaiting-text handler. A user with a bill and a private `/settrip` text wait would have the bill read the text first (private `/settrip` only replies that it needs a group, so this cannot happen in practice).
+- Registration order in group 0: the feedback handlers, then the bill's text and photo handlers, then the `oneoff:` callback handler, then `settrip`'s awaiting-text handler, and last of all the private fallback that sends the `/start` intro (amended 2026-11-13; it must stay the last handler of group 0). A user with a bill and a private `/settrip` text wait would have the bill read the text first (private `/settrip` only replies that it needs a group, so this cannot happen in practice).
 - `Deps` gains one field, `oneoff_bills: OneOffStore`, as Sprint 16 added `feedback_waits`. `/split` is added to `_COMMANDS`, so the unbound-group gate leaves it alone.
 - Private `/start` and `/help` use `private_start_keyboard` in `menu.py` (relabelled, plus the second button). Tests that asserted the old label or one button were updated: `tests/test_smoke.py::test_help_command_replies_with_html_and_mentions_balances`, `tests/test_menu.py::test_private_start_keyboard_builds_startgroup_url`, `tests/test_join.py::test_start_in_private_shows_the_add_to_group_url_button_first` (renamed).
 
@@ -288,7 +291,7 @@ Nothing.
 - A second `Split a bill now` with a bill open: both answers.
 - Expiry: 30 minutes sliding; a stale button gets the pinned message and loses its buttons; a
   text after expiry gets it once; a press on a finished bill's button.
-- Private text and photos with no bill: no reply (regression). A photo at the bill-line step:
+- Private text and photos with no bill: the `/start` intro (amended 2026-11-13; was: no reply). A photo at the bill-line step:
   the pinned text.
 - `/split` in a group: the pinned text; group text expenses still work (regression).
 - Feedback wait and bill together: the text goes to feedback, the bill survives.
@@ -307,7 +310,8 @@ Nothing.
 4. Start a bill, then `Split a bill now` again: `Drop the bill you started?` both ways.
 5. Start a bill, wait 31 minutes, press a button: `That bill expired…`.
 6. In a trip group: `/split` gives the hint; `1200 yen ramen` still makes an expense card.
-7. Send plain text to the bot in the private chat with no bill open: no reply.
+7. Send plain text to the bot in the private chat with no bill open: the `/start` intro with
+   both buttons (amended 2026-11-13; was: no reply).
 
 ## Exit criteria
 - [ ] Checklist passes

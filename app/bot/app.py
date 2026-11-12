@@ -36,7 +36,7 @@ from app.bot.handlers.balances import (
     mine_command,
     settle_command,
 )
-from app.bot.handlers.basic import help_command, start_command
+from app.bot.handlers.basic import help_command, private_fallback_handler, start_command
 from app.bot.handlers.callbacks import join_button_callback
 from app.bot.handlers.deletetrip import deletetrip_callback, deletetrip_command
 from app.bot.handlers.export import export_command
@@ -348,6 +348,23 @@ def build_application(token: str, deps: Deps) -> Application:
         MessageHandler(
             filters.StatusUpdate.NEW_CHAT_MEMBERS | filters.StatusUpdate.CHAT_CREATED,
             bot_added_to_group,
+        )
+    )
+
+    # Anything else sent in a private chat gets the `/start` intro, so a first "hi" or a
+    # mistyped command is not met with silence (spec §22, amended 2026-11-13). It matches
+    # nearly every private message, so it MUST stay the last handler of group 0: PTB runs
+    # the first match only, and every wait above (feedback, trip setup, a bill step) and
+    # every known command must be offered the message first. A handler added below this
+    # one would never fire in a private chat (tests/test_oneoff.py checks it is last).
+    # Never while a bill is open: there an unexpected message stays unanswered (sprint 17).
+    application.add_handler(
+        MessageHandler(
+            filters.UpdateType.MESSAGE
+            & filters.ChatType.PRIVATE
+            & ~filters.StatusUpdate.ALL
+            & ~HasOneOffBill(deps.oneoff_bills),
+            private_fallback_handler,
         )
     )
 

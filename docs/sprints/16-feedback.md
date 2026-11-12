@@ -133,7 +133,8 @@ Nothing. The build needs no secret.
 - Bare `/feedback` in a group: the one-line hint, and the next text message is still read as an
   expense (regression).
 - Bare `/feedback` in a private chat: the question, then the next text is sent; the wait is
-  gone afterwards; a second plain text gets no reply.
+  gone afterwards; a second plain text is not sent as feedback (it gets the private `/start`
+  intro; amended 2026-11-13, was: no reply).
 - While waiting: a photo gets `Text only for now.` and the wait continues; `/cancel` drops the
   wait; the wait expires after 30 minutes.
 - 1,001 characters: refused, nothing sent, not counted. Exactly 1,000: sent.

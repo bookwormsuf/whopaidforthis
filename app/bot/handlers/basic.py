@@ -9,6 +9,9 @@ text, now with an `Add me to a group` URL button.
 Sprint 17 (docs/sprints/17-one-off-bill.md): private `/start` leads with the trip and
 offers the one-off bill second; private `/start` and `/help` carry two buttons, `Add me
 to a group for a trip` and `Split a bill now`.
+
+2026-11-13 (pinned-decisions §22, amended): any other message in a private chat with no
+one-off bill open, an unknown command included, gets the private `/start` intro.
 """
 
 from __future__ import annotations
@@ -107,6 +110,25 @@ async def _private_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         parse_mode="HTML",
         reply_markup=private_start_keyboard(context.bot.username),
     )
+
+
+async def private_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Any other message in a private chat gets the `/start` intro and its two buttons.
+
+    Registered last, and never while a one-off bill is open, so anything that is waiting
+    for the user's next message hears it first (decided with Sufyan, 2026-11-13). Unknown
+    commands land here too.
+
+    A bill that expired may still owe its one "expired" notice (a photo or an unknown
+    command does not collect it). The intro replaces that notice, so it is dropped here:
+    otherwise the user's next text would be told about a bill after being shown the intro.
+    """
+    if update.message is None:
+        return
+    user = update.effective_user
+    if user is not None:
+        get_deps(context).oneoff_bills.take_expired_notice(user.id)
+    await _private_start(update, context)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

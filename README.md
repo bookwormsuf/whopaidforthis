@@ -521,7 +521,7 @@ The owner is one Telegram user ID, set in `OWNER_USER_ID`. It is the only identi
 ### Limitations
 
 - **Single machine only.** Exactly one bot process may poll Telegram. Two (for example a laptop and Fly) make both stop receiving messages.
-- **Drafts and one-off bills are lost on restart.** A trip card that was mid-way when the bot restarted says "This expense expired, please send it again". A one-off bill is gone, and text sent after a restart gets no reply.
+- **Drafts and one-off bills are lost on restart.** A trip card that was mid-way when the bot restarted says "This expense expired, please send it again". A one-off bill is gone, and text sent after a restart gets the welcome message again.
 - **Counts reset on restart.** The receipt budget, the photo allowance and the feedback limit are in memory.
 - **Albums are separate drafts.** Several photos sent together each become their own expense.
 - **A typed rate is yours.** For a currency with no published rate, the bot uses whatever you reply with, for that expense only.
