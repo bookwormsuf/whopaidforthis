@@ -1,6 +1,6 @@
 # whopaid — status log
 
-Updated: 2026-11-12 (sprint 15 signed off; sprints 16, 17 and 18 built)
+Updated: 2026-11-12 (sprint 15 signed off; sprints 16, 17 and 18 built; README rewritten)
 
 This file is committed and may become public. Content rule: no real names of testers or friends
 (use "tester A"), no chat IDs, no Sheet IDs, no amounts or merchants from real receipts, no key
@@ -1228,3 +1228,21 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Limits: not run against Telegram or the model; tests use a fake reader. The allowance
   resets on every deploy, as pinned.
 - Next action / owner: merge after sprint 17; run the six-step checklist / Sufyan.
+
+### 2026-11-12 — README rewritten
+
+- Performed by: Claude (Fable 5.2) with Sufyan; a Sonnet agent wrote it, an Opus agent
+  fact-checked it against the code.
+- Scope: Sufyan asked for the README to carry the latest details. Reordered for three readers:
+  using the bot, running your own copy, how it works. Added the one-off bill, receipt photos
+  and their limits, `/feedback`, `OWNER_USER_ID`, one complete command table and the full
+  BotFather list. The title is now "Who Paid For This".
+- Corrected: `/start` in a group does not join; `/export` exists; `Close this trip` and the
+  `/settrip` rebind; what the tests do without Postgres; what CI runs and skips.
+- Fact-check: 16 findings fixed. Two statements were false (`/deletetrip` deletes every trip
+  in the group, not one; the delete cascade). Commands and settings were compared with the
+  code by script, not by eye.
+- Noted, not changed: `/deletetrip` lets the starter of the current trip remove earlier trips
+  that others started. Existing behaviour since sprint 9; a product question for Sufyan.
+- Missing: the bot's public @username is not in the repo, so the README has no link to it.
+- Next action / owner: give the bot's username for the README; decide on `/deletetrip` / Sufyan.
