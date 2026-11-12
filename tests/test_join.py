@@ -238,7 +238,7 @@ async def test_start_in_private_shows_help() -> None:
     assert kwargs.get("parse_mode") == "HTML"
 
 
-async def test_start_in_private_shows_single_add_to_group_url_button() -> None:
+async def test_start_in_private_shows_the_add_to_group_url_button_first() -> None:
     ledger = InMemoryLedgerStore()
     deps = _deps(ledger)
     context = _context(deps)
@@ -250,8 +250,8 @@ async def test_start_in_private_shows_single_add_to_group_url_button() -> None:
     update.message.reply_text.assert_awaited_once()
     _, kwargs = update.message.reply_text.call_args
     markup = kwargs["reply_markup"]
-    assert len(markup.inline_keyboard) == 1
-    assert len(markup.inline_keyboard[0]) == 1
+    # Sprint 17: two buttons, one per row; the trip button stays first.
+    assert [len(row) for row in markup.inline_keyboard] == [1, 1]
     button = markup.inline_keyboard[0][0]
     assert button.url == "https://t.me/livebot?startgroup=true"
 

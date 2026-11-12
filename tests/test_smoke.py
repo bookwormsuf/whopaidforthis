@@ -305,7 +305,8 @@ async def test_help_command_replies_with_html_and_mentions_balances() -> None:
     assert reply_text.startswith(HELP_TEXT)
     kwargs = update.message.reply_text.await_args.kwargs
     assert kwargs["parse_mode"] == "HTML"
-    assert kwargs["reply_markup"].inline_keyboard[0][0].text == "Add me to a group"
+    keyboard = kwargs["reply_markup"].inline_keyboard
+    assert [row[0].text for row in keyboard] == ["Add me to a group for a trip", "Split a bill now"]
     assert "/balances" in HELP_TEXT
 
 

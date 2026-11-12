@@ -510,5 +510,7 @@ async def test_post_welcome_pin_forbidden_also_appends_the_pin_line() -> None:
 def test_private_start_keyboard_builds_startgroup_url() -> None:
     markup = private_start_keyboard("whopaidbot")
     button = markup.inline_keyboard[0][0]
-    assert button.text == "Add me to a group"
+    assert button.text == "Add me to a group for a trip"
     assert button.url == "https://t.me/whopaidbot?startgroup=true"
+    split = markup.inline_keyboard[1][0]
+    assert (split.text, split.callback_data) == ("Split a bill now", "oneoff:start")

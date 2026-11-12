@@ -27,6 +27,7 @@ from app.bot.handlers.deletetrip import run_deletetrip
 from app.bot.handlers.export import run_export
 from app.bot.handlers.join import resolve_trip_status, run_join
 from app.bot.handlers.reads import run_recent, run_summary, run_today, run_undo
+from app.bot.keyboards.oneoff import START_CALLBACK, START_LABEL
 from app.bot.send import (
     SOMETHING_WENT_WRONG_TEXT,
     SendFn,
@@ -248,7 +249,17 @@ async def bot_added_to_group(update: Update, context: ContextTypes.DEFAULT_TYPE)
         logger.exception("bot_added_to_group: could not post the welcome message")
 
 
+ADD_TO_GROUP_LABEL = "Add me to a group for a trip"
+
+
 def private_start_keyboard(bot_username: str) -> InlineKeyboardMarkup:
-    """One URL button, `Add me to a group`, for private-chat `/start`/`/help`."""
+    """Two buttons, one per row, for private-chat `/start`/`/help`: the URL button that
+    adds the bot to a trip group, then `Split a bill now` (sprint 17, one-off bill).
+    """
     url = f"https://t.me/{bot_username}?startgroup=true"
-    return InlineKeyboardMarkup([[InlineKeyboardButton("Add me to a group", url=url)]])
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(ADD_TO_GROUP_LABEL, url=url)],
+            [InlineKeyboardButton(START_LABEL, callback_data=START_CALLBACK)],
+        ]
+    )

@@ -219,3 +219,13 @@ Decided with Sufyan after the post-trip review. ADR 0003 records the why; `docs/
 - Text only, at most 1,000 characters, 5 delivered messages per user per calendar day in `Asia/Singapore`, counted in memory. A failed or refused message never counts.
 - After `Close this trip` succeeds the bot posts a feedback prompt in the group, every time; not when `/settrip` closes a trip. Texts are pinned verbatim in `docs/sprints/16-feedback.md`.
 - User-visible text names the bot **Who Paid For This**. The repo, package, Fly app and logs keep `whopaid`.
+
+## 22. One-off bill (added 2026-11-12, Sprint 17)
+- A **one-off bill** is a single bill split in a private chat with the bot: no group, no trip, no `/join`. Started with `/split` or `Split a bill now` on the private `/start` and `/help`. One per user at a time.
+- It is never saved. It lives in process memory, expires 30 minutes after the last accepted action, and is removed on `Done`, `Cancel`, `/cancel` or restart. No database access happens on this path. The summary message in the user's chat is the only record.
+- Its people are **persons**: numbered slots 1 to N (2 to 20), the user first, the others named `Person 2`… or renamed by the user. A person is a label, not a trip user.
+- One currency per bill, as typed, SGD by default. No rates, no conversion.
+- Splits: equal (`split_equal`, same leftover rule as trips) or typed amounts (`split_custom`). No item split, no receipt photos (Sprint 18).
+- Output: one summary the user forwards, naming the user by Telegram first name and listing who owes the payer what. Flow, card texts and the summary are pinned verbatim in `docs/sprints/17-one-off-bill.md`.
+- Built beside the group flow, not inside it: `DraftService`, the ledger and the stores are not imported or edited.
+- Private text and photos are read only while a one-off bill or a feedback wait (§21) is waiting for them. The private `/start` leads with the trip and offers the one-off bill second.

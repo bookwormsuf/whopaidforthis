@@ -54,6 +54,17 @@ from app.bot.handlers.join import (
     resolve_trip_status,
 )
 from app.bot.handlers.menu import bot_added_to_group, menu_callback
+from app.bot.handlers.oneoff import (
+    ONEOFF_CALLBACK_PATTERN,
+    BillWaitingForPhoto,
+    BillWaitingForText,
+    HasOneOffBill,
+    oneoff_callback,
+    oneoff_cancel_command,
+    oneoff_photo_handler,
+    oneoff_text_handler,
+    split_command,
+)
 from app.bot.handlers.photo_expense import PHOTO_EXPENSE_FILTER, photo_expense_handler
 from app.bot.handlers.reads import (
     recent_command,
@@ -103,6 +114,7 @@ _COMMANDS: tuple[tuple[str, Any, filters.BaseFilter | None], ...] = (
     ("export", export_command, None),
     ("deletetrip", deletetrip_command, None),
     ("feedback", feedback_command, None),
+    ("split", split_command, None),
 )
 
 _KNOWN_COMMANDS = {name for name, _, _ in _COMMANDS}
@@ -224,6 +236,23 @@ def build_application(token: str, deps: Deps) -> Application:
     application.bot_data["deps"] = deps
     application.add_error_handler(_error_handler)
 
+    # `/cancel` in a private chat with a one-off bill open (sprint 17): cancels the bill
+    # and nothing else. Registered before the `_COMMANDS` loop so that, with a bill open,
+    # it is the one `/cancel` handler PTB runs in group 0 (the ordinary `cancel_command`
+    # is skipped); with no bill the filter is false and the ordinary one runs.
+    # UpdateType.MESSAGE is spelled out because custom filters replace PTB's default: an
+    # edited message must not cancel a bill.
+    application.add_handler(
+        CommandHandler(
+            "cancel",
+            oneoff_cancel_command,
+            filters=(
+                filters.UpdateType.MESSAGE
+                & filters.ChatType.PRIVATE
+                & HasOneOffBill(deps.oneoff_bills)
+            ),
+        )
+    )
     for name, callback, cmd_filters in _COMMANDS:
         if cmd_filters is None:
             application.add_handler(CommandHandler(name, callback))
@@ -244,6 +273,30 @@ def build_application(token: str, deps: Deps) -> Application:
     application.add_handler(
         MessageHandler(awaiting_feedback & ~filters.TEXT, feedback_non_text_handler)
     )
+    # Private waits (sprint 17). Two things can wait for the next private text: the
+    # feedback wait above and a one-off bill below. PTB runs only the first matching
+    # handler of a group, so registration order decides: feedback handlers first, then
+    # the bill's. A user with both has the next text taken as feedback and keeps the bill
+    # (pinned by tests/test_oneoff.py). Both require UpdateType.MESSAGE so an edited
+    # message is never taken as input. Commands never reach these (~filters.COMMAND);
+    # they end a feedback wait in group -2 but leave a bill open.
+    oneoff_message = filters.UpdateType.MESSAGE & filters.ChatType.PRIVATE
+    application.add_handler(
+        MessageHandler(
+            oneoff_message
+            & filters.TEXT
+            & ~filters.COMMAND
+            & BillWaitingForText(deps.oneoff_bills),
+            oneoff_text_handler,
+        )
+    )
+    application.add_handler(
+        MessageHandler(
+            oneoff_message & filters.PHOTO & BillWaitingForPhoto(deps.oneoff_bills),
+            oneoff_photo_handler,
+        )
+    )
+    application.add_handler(CallbackQueryHandler(oneoff_callback, pattern=ONEOFF_CALLBACK_PATTERN))
     application.add_handler(CallbackQueryHandler(settrip_callback, pattern=r"^st:"))
     application.add_handler(CallbackQueryHandler(join_button_callback, pattern=r"^join:"))
     application.add_handler(CallbackQueryHandler(undo_callback, pattern=r"^undo:"))
