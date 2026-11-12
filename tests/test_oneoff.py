@@ -955,29 +955,68 @@ def test_the_start_intro_fallback_stays_out_of_the_way() -> None:
 
     assert not falls_back(_text_update("hi", chat_type="supergroup"))
     assert not falls_back(_text_update("hi", edited=True))
-    assert not falls_back(_text_update("/nosuchcommand", command=True))
     deps.feedback_waits.start(1, datetime.now(UTC))
     assert feedback_text_handler in _matching(application, _text_update("hi"))
     assert not falls_back(_text_update("hi"))
     deps.feedback_waits.clear(1)
     _open_bill(deps, at_count=True)
     assert not falls_back(_photo_update())  # a bill is open: unexpected messages stay quiet
+    assert not falls_back(_text_update("/nosuchcommand", command=True))
     assert falls_back(_text_update("hi", user_id=2))
+
+
+def test_the_fallback_is_the_last_handler_of_its_group() -> None:
+    # It matches nearly every private message, so anything registered after it would
+    # never fire in a private chat.
+    application = _application(make_deps())
+    assert application.handlers[0][-1].callback is private_fallback_handler
+
+
+def test_an_unknown_private_command_gets_the_intro_and_known_ones_keep_their_handler() -> None:
+    application = _application(make_deps(owner_user_id=OWNER_ID))
+    unknown = _matching(application, _text_update("/strat", command=True))
+    assert private_fallback_handler in unknown
+    for name, _callback, _filters in bot_app._COMMANDS:
+        callbacks = _matching(application, _text_update(f"/{name}", command=True))
+        assert private_fallback_handler not in callbacks, name
+    assert private_fallback_handler not in _matching(
+        application, _text_update("/strat", command=True, chat_type="supergroup")
+    )
+
+
+def _fallback_context(deps):
+    return SimpleNamespace(
+        bot=_bot_stub(), application=SimpleNamespace(bot_data={"deps": deps}), args=[]
+    )
 
 
 async def test_the_fallback_sends_the_start_text_and_both_buttons() -> None:
     deps = make_deps()
     message = SimpleNamespace(reply_text=AsyncMock())
-    update = SimpleNamespace(message=message)
-    context = SimpleNamespace(
-        bot=_bot_stub(), application=SimpleNamespace(bot_data={"deps": deps}), args=[]
-    )
-    await private_fallback_handler(update, context)
+    update = SimpleNamespace(message=message, effective_user=SimpleNamespace(id=1))
+    await private_fallback_handler(update, _fallback_context(deps))
     text = message.reply_text.await_args.args[0]
     assert text.startswith(PRIVATE_START_TEXT)
     markup = message.reply_text.await_args.kwargs["reply_markup"]
     labels = [b.text for row in markup.inline_keyboard for b in row]
     assert labels == ["Add me to a group for a trip", "Split a bill now"]
+
+
+async def test_a_photo_after_a_bill_expired_gets_the_intro_and_no_late_expiry_notice() -> None:
+    deps = make_deps()
+    application = _application(deps)
+    start = datetime.now(UTC) - timedelta(hours=2)
+    deps.oneoff_bills.create(user_id=1, chat_id=1, first_name="Ada", now=start)
+    # The photo is not read (the bill is gone) and falls through to the intro.
+    callbacks = _matching(application, _photo_update())
+    assert oneoff_photo_handler not in callbacks and private_fallback_handler in callbacks
+    assert deps.oneoff_bills.has_expired_notice(1)
+    message = SimpleNamespace(reply_text=AsyncMock())
+    update = SimpleNamespace(message=message, effective_user=SimpleNamespace(id=1))
+    await private_fallback_handler(update, _fallback_context(deps))
+    # The intro stood in for the notice: the next text is not told about an old bill.
+    assert not deps.oneoff_bills.has_expired_notice(1)
+    assert oneoff_text_handler not in _matching(application, _text_update("hi"))
 
 
 def test_a_bill_hears_private_text_and_a_photo_only_at_the_bill_line_step() -> None:

@@ -195,7 +195,8 @@ Split with @<bot username>
   longer exists (expired, finished, cancelled, replaced, or lost in a restart) answers with a
   new message `That bill expired. Tap Split a bill now to start again.` carrying a
   `Split a bill now` button, and removes the buttons from the pressed card.
-- Text sent after a bill expired in the same process gets the same message once. After a
+- Text sent after a bill expired in the same process gets the same message once. A photo or
+  an unknown command sent first gets the `/start` intro, which replaces that message (amended 2026-11-13). After a
   restart, text gets the `/start` intro (amended 2026-11-13; the bot no longer knows there was a bill).
 
 ### Structure
@@ -245,7 +246,7 @@ Split with @<bot username>
 - The user's own typed messages are left in the chat, never deleted.
 - A stale press also clears the user's pending expiry notice, so one expiry never produces two stale messages. Expired bills are noticed lazily (on a press, a text, or a sweep when any user starts a bill); the in-memory notice list holds only user IDs.
 - `/cancel` with a bill open is handled by a separate `CommandHandler` registered before the `_COMMANDS` loop and filtered to a private chat with a live bill, so `cancel_command` is untouched and does not also run. With no bill (or an expired one) the ordinary `/cancel` runs.
-- Registration order in group 0: the feedback handlers, then the bill's text and photo handlers, then the `oneoff:` callback handler, then `settrip`'s awaiting-text handler. A user with a bill and a private `/settrip` text wait would have the bill read the text first (private `/settrip` only replies that it needs a group, so this cannot happen in practice).
+- Registration order in group 0: the feedback handlers, then the bill's text and photo handlers, then the `oneoff:` callback handler, then `settrip`'s awaiting-text handler, and last of all the private fallback that sends the `/start` intro (amended 2026-11-13; it must stay the last handler of group 0). A user with a bill and a private `/settrip` text wait would have the bill read the text first (private `/settrip` only replies that it needs a group, so this cannot happen in practice).
 - `Deps` gains one field, `oneoff_bills: OneOffStore`, as Sprint 16 added `feedback_waits`. `/split` is added to `_COMMANDS`, so the unbound-group gate leaves it alone.
 - Private `/start` and `/help` use `private_start_keyboard` in `menu.py` (relabelled, plus the second button). Tests that asserted the old label or one button were updated: `tests/test_smoke.py::test_help_command_replies_with_html_and_mentions_balances`, `tests/test_menu.py::test_private_start_keyboard_builds_startgroup_url`, `tests/test_join.py::test_start_in_private_shows_the_add_to_group_url_button_first` (renamed).
 

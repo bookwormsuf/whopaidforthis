@@ -123,7 +123,9 @@ class BillWaitingForPhoto(MessageFilter):
 
 
 class HasOneOffBill(MessageFilter):
-    """True while the sender has a live bill (for `/cancel`)."""
+    """True while the sender has a live bill. Used for `/cancel`, and negated for the
+    private fallback in `app.py`, which stays quiet while a bill is open.
+    """
 
     def __init__(self, store: OneOffStore) -> None:
         super().__init__(name="HasOneOffBill")

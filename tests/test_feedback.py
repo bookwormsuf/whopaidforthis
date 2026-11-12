@@ -219,7 +219,8 @@ async def test_bare_feedback_in_a_dm_asks_then_takes_the_next_text() -> None:
     assert context.bot.send_message.await_args.args[1].endswith("the app is great")
     assert not deps.feedback_waits.is_waiting(1)
 
-    # A second plain text: the wait is gone, so no handler takes it.
+    # A second plain text: the wait is gone, so it is not sent as feedback (it gets the
+    # private `/start` intro like any other stray message).
     application = _application(deps)
     second = _real_text_update("anything", chat_type="private")
     assert feedback_text_handler not in _matching_callbacks(application, second)
