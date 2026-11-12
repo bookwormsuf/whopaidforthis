@@ -16,7 +16,7 @@ limit. Decided with Sufyan on 2026-11-12.
 ## Out of scope
 - `Not on this bill` (left-out items) on a one-off bill.
 - Photos sent as files (documents), captions, several photos for one bill.
-- Starting a bill by sending a photo with no bill open (a photo then gets no reply, as today).
+- Starting a bill by sending a photo with no bill open (a photo then gets the `/start` intro; amended 2026-11-13, was: no reply).
 - Currency conversion, a confirm-the-currency step, typed rates.
 - Storing the allowance in Postgres. It is in memory, built so that swap is one class.
 - Any change to group behaviour. The group photo flow, its budget rules and its texts stay.
@@ -28,7 +28,8 @@ limit. Decided with Sufyan on 2026-11-12.
 - Only at step 1 of a one-off bill, where the bot is waiting for the bill line. The step 1
   prompt becomes ``Send the bill, like <code>84.50 dinner</code>, or a photo of the receipt.``
   Sprint 17's "Photos aren't read here yet…" reply is retired.
-- A photo at any other step, or with no bill open, gets no reply.
+- A photo at any other step gets no reply. With no bill open it gets the private `/start`
+  intro (amended 2026-11-13; was: no reply).
 - Compressed photos only (as in groups). Over 10 MB: the group's text, unchanged: `That
   photo's too large (over 10 MB), please send a smaller one.` Not counted.
 - The caption is ignored.

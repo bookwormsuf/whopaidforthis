@@ -36,7 +36,7 @@ from app.bot.handlers.balances import (
     mine_command,
     settle_command,
 )
-from app.bot.handlers.basic import help_command, start_command
+from app.bot.handlers.basic import help_command, private_fallback_handler, start_command
 from app.bot.handlers.callbacks import join_button_callback
 from app.bot.handlers.deletetrip import deletetrip_callback, deletetrip_command
 from app.bot.handlers.export import export_command
@@ -337,6 +337,21 @@ def build_application(token: str, deps: Deps) -> Application:
     # updates one at a time, so a blocking read would stall every other chat.
     application.add_handler(
         MessageHandler(PHOTO_EXPENSE_FILTER, photo_expense_handler, block=False)
+    )
+
+    # Anything else typed or sent in a private chat gets the `/start` intro, so a first
+    # "hi" is not met with silence. Last of the private message handlers, so a feedback
+    # wait, a trip setup or a bill step waiting for this message wins; and never while a
+    # bill is open, where an unexpected message stays unanswered as pinned in sprint 17.
+    application.add_handler(
+        MessageHandler(
+            filters.UpdateType.MESSAGE
+            & filters.ChatType.PRIVATE
+            & ~filters.COMMAND
+            & ~filters.StatusUpdate.ALL
+            & ~HasOneOffBill(deps.oneoff_bills),
+            private_fallback_handler,
+        )
     )
 
     # Bot added to a group (sprint 10 pin): posts the welcome, pinning it, when

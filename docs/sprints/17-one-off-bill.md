@@ -37,7 +37,9 @@ Sufyan on 2026-11-12.
 - `/split` in a group replies ``/split works in a private chat with me. In this group, type
   the expense, like <code>1200 yen ramen</code>.`` and does nothing else. It needs no trip.
 - Plain text and photos in a private chat are read only while a one-off bill (or Sprint 16's
-  feedback wait) is waiting for them. Otherwise they get no reply, as today.
+  feedback wait) is waiting for them. Otherwise, with no bill open, they get the private
+  `/start` intro and its two buttons (amended 2026-11-13; was: no reply). With a bill open, a message
+  the current step does not expect still gets no reply.
 - If both a feedback wait and a bill exist, the next text is the feedback; the bill is kept.
   `/split` drops a feedback wait, like any other command.
 
@@ -194,7 +196,7 @@ Split with @<bot username>
   new message `That bill expired. Tap Split a bill now to start again.` carrying a
   `Split a bill now` button, and removes the buttons from the pressed card.
 - Text sent after a bill expired in the same process gets the same message once. After a
-  restart, text gets no reply (the bot no longer knows there was a bill).
+  restart, text gets the `/start` intro (amended 2026-11-13; the bot no longer knows there was a bill).
 
 ### Structure
 - New files only, plus registration and the private `/start`/`/help` change:
@@ -288,7 +290,7 @@ Nothing.
 - A second `Split a bill now` with a bill open: both answers.
 - Expiry: 30 minutes sliding; a stale button gets the pinned message and loses its buttons; a
   text after expiry gets it once; a press on a finished bill's button.
-- Private text and photos with no bill: no reply (regression). A photo at the bill-line step:
+- Private text and photos with no bill: the `/start` intro (amended 2026-11-13; was: no reply). A photo at the bill-line step:
   the pinned text.
 - `/split` in a group: the pinned text; group text expenses still work (regression).
 - Feedback wait and bill together: the text goes to feedback, the bill survives.
@@ -307,7 +309,8 @@ Nothing.
 4. Start a bill, then `Split a bill now` again: `Drop the bill you started?` both ways.
 5. Start a bill, wait 31 minutes, press a button: `That bill expired…`.
 6. In a trip group: `/split` gives the hint; `1200 yen ramen` still makes an expense card.
-7. Send plain text to the bot in the private chat with no bill open: no reply.
+7. Send plain text to the bot in the private chat with no bill open: the `/start` intro with
+   both buttons (amended 2026-11-13; was: no reply).
 
 ## Exit criteria
 - [ ] Checklist passes

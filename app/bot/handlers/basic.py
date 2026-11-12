@@ -109,6 +109,17 @@ async def _private_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
 
 
+async def private_fallback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Any other message in a private chat gets the `/start` intro and its two buttons.
+
+    Registered last, and never while a one-off bill is open, so anything that is waiting
+    for the user's next message hears it first (decided with Sufyan, 2026-11-13).
+    """
+    if update.message is None:
+        return
+    await _private_start(update, context)
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """In a group, posts the welcome menu; /start no longer behaves as /join
     (sprint 10 pin, superseding spec §12). In private, it shows the trip-first intro and

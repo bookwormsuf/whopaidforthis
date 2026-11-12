@@ -23,7 +23,13 @@ from app.bot.app import build_application
 from app.bot.conversations import settrip
 from app.bot.deps import Deps
 from app.bot.handlers import oneoff as oneoff_handlers
-from app.bot.handlers.basic import HELP_TEXT, help_command, start_command
+from app.bot.handlers.basic import (
+    HELP_TEXT,
+    PRIVATE_START_TEXT,
+    help_command,
+    private_fallback_handler,
+    start_command,
+)
 from app.bot.handlers.feedback import drop_feedback_wait, feedback_text_handler
 from app.bot.handlers.oneoff import (
     oneoff_callback,
@@ -931,14 +937,47 @@ def _open_bill(deps, user_id: int = 1, *, at_count: bool = False) -> None:
         deps.oneoff_bills.put(set_bill_line(bill, BillLine("Dinner", 8450, "SGD")), now)
 
 
-def test_private_text_and_photos_with_no_bill_get_no_reply() -> None:
+def test_private_text_and_photos_with_no_bill_get_the_start_intro() -> None:
     deps = make_deps(owner_user_id=OWNER_ID)
     application = _application(deps)
     for update in (_text_update("hello there"), _text_update("84.50 dinner"), _photo_update()):
         callbacks = _matching(application, update)
         assert oneoff_text_handler not in callbacks and oneoff_photo_handler not in callbacks
-        # Only the silent seen-user upsert runs, as before this sprint.
-        assert [c.__name__ for c in callbacks] == ["upsert_seen_user"]
+        assert [c.__name__ for c in callbacks] == ["upsert_seen_user", "private_fallback_handler"]
+
+
+def test_the_start_intro_fallback_stays_out_of_the_way() -> None:
+    deps = make_deps(owner_user_id=OWNER_ID)
+    application = _application(deps)
+
+    def falls_back(update: Update) -> bool:
+        return private_fallback_handler in _matching(application, update)
+
+    assert not falls_back(_text_update("hi", chat_type="supergroup"))
+    assert not falls_back(_text_update("hi", edited=True))
+    assert not falls_back(_text_update("/nosuchcommand", command=True))
+    deps.feedback_waits.start(1, datetime.now(UTC))
+    assert feedback_text_handler in _matching(application, _text_update("hi"))
+    assert not falls_back(_text_update("hi"))
+    deps.feedback_waits.clear(1)
+    _open_bill(deps, at_count=True)
+    assert not falls_back(_photo_update())  # a bill is open: unexpected messages stay quiet
+    assert falls_back(_text_update("hi", user_id=2))
+
+
+async def test_the_fallback_sends_the_start_text_and_both_buttons() -> None:
+    deps = make_deps()
+    message = SimpleNamespace(reply_text=AsyncMock())
+    update = SimpleNamespace(message=message)
+    context = SimpleNamespace(
+        bot=_bot_stub(), application=SimpleNamespace(bot_data={"deps": deps}), args=[]
+    )
+    await private_fallback_handler(update, context)
+    text = message.reply_text.await_args.args[0]
+    assert text.startswith(PRIVATE_START_TEXT)
+    markup = message.reply_text.await_args.kwargs["reply_markup"]
+    labels = [b.text for row in markup.inline_keyboard for b in row]
+    assert labels == ["Add me to a group for a trip", "Split a bill now"]
 
 
 def test_a_bill_hears_private_text_and_a_photo_only_at_the_bill_line_step() -> None:

@@ -228,7 +228,7 @@ Decided with Sufyan after the post-trip review. ADR 0003 records the why; `docs/
 - Splits: equal (`split_equal`, same leftover rule as trips) or typed amounts (`split_custom`). No item split, no receipt photos (Sprint 18).
 - Output: one summary the user forwards, naming the user by Telegram first name and listing who owes the payer what. Flow, card texts and the summary are pinned verbatim in `docs/sprints/17-one-off-bill.md`.
 - Built beside the group flow, not inside it: `DraftService`, the ledger and the stores are not imported or edited.
-- Private text and photos are read only while a one-off bill or a feedback wait (§21) is waiting for them. The private `/start` leads with the trip and offers the one-off bill second.
+- Private text and photos are read only while a one-off bill or a feedback wait (§21) is waiting for them. Any other message in a private chat with no bill open (not a command, not an edit) gets the private `/start` intro and its two buttons, so a first "hi" is answered (amended 2026-11-13; before, it got no reply). With a bill open, a message the step does not expect still gets no reply. The private `/start` leads with the trip and offers the one-off bill second.
 
 ## 23. Receipt photos on a one-off bill (added 2026-11-12, Sprint 18)
 - A one-off bill can start from a receipt photo, sent at its first step only. The receipt is read as in groups (same reader, same image preparation, nothing on disk) and the bill can then be split item by item among its persons: "Who had this?", shared items, tax and service shared in proportion, `Fix an item`. No `Not on this bill`.
