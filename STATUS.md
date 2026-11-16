@@ -28,6 +28,8 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 16 Feedback | written 2026-11-12 | done | green (637) | 2026-11-12, findings fixed (one deferred to sprint 17) | — | — | Merge PR, set `OWNER_USER_ID`, run the six-step checklist / Sufyan |
 | 17 One-off bill | written 2026-11-12 (+ steps 3/6/7 amended at review) | done | green (869) | 2026-11-12, findings fixed | — | — | Merge PR after sprint 16, BotFather `/setcommands`, run the seven-step checklist / Sufyan |
 | 18 Receipt photos on a one-off bill | written 2026-11-12 (+ allowance order, per-user guard, `Edit` amended at review) | done | green (1058) | 2026-11-12, findings fixed (one left for later) | — | — | Merge PR after sprint 17, run the six-step checklist (needs a second account) / Sufyan |
+| 19 Easier trip setup | written 2026-11-17 | done | green (1070) | 2026-11-17, findings fixed (one deferred) | — | — | Merge PR, run the eight-step checklist / Sufyan |
+| 20 Commands card and menu | written 2026-11-17 | not started | — | — | — | — | Build after sprint 19 / agent |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -1266,3 +1268,25 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
   and expiry tests.
 - Limits: not run against Telegram.
 - Next action / owner: merge the PR, then send a greeting to the bot in a private chat / Sufyan.
+
+### 2026-11-17 — Sprints 19 and 20 planned; sprint 19 built: easier trip setup
+
+- Performed by: Claude (Opus 5.5) with Sufyan; a Sonnet agent built; four Opus reviewers
+  (`/review`).
+- Scope and reason: tester feedback. Groups got stuck at the currency questions (did not know
+  what to type, "home currency" unclear) and forgot the commands. Grilled into two sprints:
+  19 (setup) and 20 (pinned commands card, quiet pins, one-time admin ask, `setMyCommands`).
+- Evidence / outputs: `docs/sprints/19-easier-trip-setup.md`, `docs/sprints/20-commands-card-and-menu.md`,
+  spec §18 amendment, CONTEXT.md (*trip currency*, *home currency*, *summary card*). Sprint 20's
+  spec and glossary wording waits for its own branch.
+- Sprint 19 build: new question wording ("spend" / "pay each other back"), `Other…` is a page of
+  buttons (no typed code), no timezone step, a summary card with `Change` buttons, timezone lists
+  for currencies that span several timezones, case-insensitive typed timezone.
+- Review: spec match clean. Fixed: the timezone default now lives in one function; the currency
+  page is sorted once; `Other…` and `Back` end a typed-timezone wait (mutation-checked); sprint 20
+  wording moved out of the shared docs. Deferred: pulling the setup flow rules into one pure
+  function (about the size of the sprint; behaviour is covered by tests).
+- Tests: 1070 passed, 23 skipped; ruff check and format clean.
+- Limits: not run against Telegram; the checklist is Sufyan's.
+- Next action / owner: merge the sprint 19 PR, run its checklist / Sufyan; build sprint 20 / agent.
+

@@ -1,21 +1,24 @@
 """Inline keyboards for the `/settrip` conversation.
 
 Callback data format: `"st:{session_id}:{step}:{value}"`. ULID is 26 chars, so this
-comfortably fits Telegram's 64-byte callback_data limit.
+comfortably fits Telegram's 64-byte callback_data limit. Timezone buttons carry a list
+index (`tzi:{n}`), not the name.
 """
 
 from __future__ import annotations
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-# Sprint 9 pin (spec §18), then "Other…" (a 3-letter code by reply). Amended
+# Sprint 9 pin (spec §18), then "Other…" (a page of every supported code). Amended
 # 2026-11-01: the trip currency offers THB in SGD's place, since SGD is the home
 # currency rather than somewhere a trip goes; the home currency keeps SGD.
 TRIP_CCY_CHOICES: list[str] = ["THB", "MYR", "JPY", "CNY"]
 HOME_CCY_CHOICES: list[str] = ["SGD", "MYR", "JPY", "CNY"]
 
 _OTHER = "Other…"
+_BACK = "◂ Back"
 _ROW_WIDTH = 3
+_PAGE_ROW_WIDTH = 4
 
 
 def _callback(session_id: str, step: str, value: str) -> str:
@@ -44,22 +47,60 @@ def home_currency_keyboard(session_id: str) -> InlineKeyboardMarkup:
     return _currency_keyboard(session_id, "home_ccy", HOME_CCY_CHOICES)
 
 
-def timezone_keyboard(session_id: str, default_timezone: str) -> InlineKeyboardMarkup:
+def currency_page_keyboard(session_id: str, step: str, codes: list[str]) -> InlineKeyboardMarkup:
+    """The `Other…` page: every supported code, A to Z, 4 per row, then `◂ Back`."""
+    ordered = sorted(codes)
+    rows = [
+        [
+            InlineKeyboardButton(code, callback_data=_callback(session_id, step, code))
+            for code in ordered[i : i + _PAGE_ROW_WIDTH]
+        ]
+        for i in range(0, len(ordered), _PAGE_ROW_WIDTH)
+    ]
+    rows.append([InlineKeyboardButton(_BACK, callback_data=_callback(session_id, step, "back"))])
+    return InlineKeyboardMarkup(rows)
+
+
+def _timezone_label(name: str) -> str:
+    return f"{name} (Bali)" if name == "Asia/Makassar" else name
+
+
+def timezone_list_keyboard(session_id: str, choices: list[str]) -> InlineKeyboardMarkup:
+    """One button per timezone (by list index, so long names fit Telegram's 64-byte
+    limit), then `Type it`, then `◂ Back`."""
+    rows = [
+        [
+            InlineKeyboardButton(
+                _timezone_label(name), callback_data=_callback(session_id, "tzi", str(i))
+            )
+        ]
+        for i, name in enumerate(choices)
+    ]
+    rows.append(
+        [InlineKeyboardButton("Type it", callback_data=_callback(session_id, "tz", "type"))]
+    )
+    rows.append([InlineKeyboardButton(_BACK, callback_data=_callback(session_id, "tz", "back"))])
+    return InlineKeyboardMarkup(rows)
+
+
+def summary_keyboard(session_id: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
-                    default_timezone, callback_data=_callback(session_id, "tz", default_timezone)
+                    "Change spend currency", callback_data=_callback(session_id, "chg", "trip")
                 )
             ],
-            [InlineKeyboardButton(_OTHER, callback_data=_callback(session_id, "tz", "other"))],
-        ]
-    )
-
-
-def confirm_keyboard(session_id: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
+            [
+                InlineKeyboardButton(
+                    "Change pay-back currency", callback_data=_callback(session_id, "chg", "home")
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "Change timezone", callback_data=_callback(session_id, "chg", "tz")
+                )
+            ],
             [
                 InlineKeyboardButton(
                     "Start trip", callback_data=_callback(session_id, "confirm", "yes")
@@ -67,7 +108,7 @@ def confirm_keyboard(session_id: str) -> InlineKeyboardMarkup:
                 InlineKeyboardButton(
                     "Cancel", callback_data=_callback(session_id, "confirm", "cancel")
                 ),
-            ]
+            ],
         ]
     )
 
