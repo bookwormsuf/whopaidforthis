@@ -9,7 +9,12 @@ from typing import Any
 
 import anthropic
 import httpx
-from telegram import Update
+from telegram import (
+    BotCommand,
+    BotCommandScopeAllGroupChats,
+    BotCommandScopeAllPrivateChats,
+    Update,
+)
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -120,6 +125,39 @@ _COMMANDS: tuple[tuple[str, Any, filters.BaseFilter | None], ...] = (
 
 _KNOWN_COMMANDS = {name for name, _, _ in _COMMANDS}
 
+# The command menu Telegram shows on "/" (sprint 20). Set in `_post_init`. Each name
+# must be in `_COMMANDS` (guarded by a test). The default scope is left alone.
+GROUP_MENU_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("balances", "Everyone's balances"),
+    ("mine", "What you paid and owe"),
+    ("settle", "Who pays whom"),
+    ("recent", "Last 5 expenses"),
+    ("undo", "Remove your last expense"),
+    ("settrip", "Start a trip for this group"),
+    ("help", "Everything else"),
+)
+PRIVATE_MENU_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("split", "Split one bill"),
+    ("feedback", "Tell the person who built this what to fix"),
+    ("help", "What this bot does"),
+)
+
+
+async def _set_command_menu(application: Application) -> None:
+    """One list for groups, one for private chats. A failure is logged as a
+    warning; typed commands still work and startup continues."""
+    for commands, scope in (
+        (GROUP_MENU_COMMANDS, BotCommandScopeAllGroupChats()),
+        (PRIVATE_MENU_COMMANDS, BotCommandScopeAllPrivateChats()),
+    ):
+        try:
+            await application.bot.set_my_commands(
+                [BotCommand(name, text) for name, text in commands], scope=scope
+            )
+        except Exception:  # noqa: BLE001 - the menu is a nicety, never block startup
+            logger.warning("could not set the command menu for %s", type(scope).__name__)
+
+
 # Pinned explicitly (sprint 3) rather than left to PTB's platform-dependent default, so
 # SIGTERM is guaranteed to stop polling and exit within fly.toml's kill_timeout.
 STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGABRT)
@@ -148,6 +186,7 @@ async def _post_init(application: Application) -> None:
         "whopaid started",
         extra={"bot_username": application.bot.username, "version": deps.bot_version},
     )
+    await _set_command_menu(application)
 
 
 async def _post_shutdown(application: Application) -> None:

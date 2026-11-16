@@ -629,8 +629,11 @@ async def test_settrip_closing_a_trip_posts_no_prompt() -> None:
         cb.callback_query.from_user = SimpleNamespace(id=STARTER_ID)
         cb.callback_query.answer = AsyncMock()
         cb.callback_query.edit_message_text = AsyncMock()
+        cb.effective_chat = SimpleNamespace(id=CHAT_ID, type="supergroup", title="Trip")
         return cb
 
+    context.bot.send_message = AsyncMock(return_value=SimpleNamespace(message_id=7))
+    context.bot.pin_chat_message = AsyncMock()
     for step, value in (
         ("rebind", "yes"),
         ("trip_ccy", "THB"),
@@ -643,7 +646,9 @@ async def test_settrip_closing_a_trip_posts_no_prompt() -> None:
     # The old trip was closed by the new one, and no feedback prompt went out.
     trips = await ledger.list_trips(CHAT_ID)
     assert len(trips) == 2 and sum(t.closed_at is not None for t in trips) == 1
-    context.bot.send_message.assert_not_awaited()
+    # The only message is the commands card (sprint 20), never a feedback prompt.
+    context.bot.send_message.assert_awaited_once()
+    assert "How to use Who Paid For This" in context.bot.send_message.call_args.args[1]
 
 
 # ---- help --------------------------------------------------------------------

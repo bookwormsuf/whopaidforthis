@@ -9,8 +9,11 @@ trip` moves on to the currency buttons and `save_binding` closes the old trip,
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from app.bot.conversations import settrip
 from app.bot.deps import Deps
@@ -19,23 +22,33 @@ from app.services.ledger_store import InMemoryLedgerStore, LedgerUnavailable
 from tests.helpers import make_deps
 
 
+def _yielding() -> AsyncMock:
+    """An async double that yields to the event loop, as a real Telegram call does."""
+
+    async def _yield(*args: object, **kwargs: object) -> SimpleNamespace:
+        await asyncio.sleep(0)
+        return SimpleNamespace(message_id=42)
+
+    return AsyncMock(side_effect=_yield)
+
+
 def _deps(ledger: InMemoryLedgerStore | None = None) -> Deps:
     return make_deps(
         ledger or InMemoryLedgerStore(),
-        currencies=StaticCurrencyCatalog(frozenset({"JPY", "SGD", "THB"})),
+        currencies=StaticCurrencyCatalog(frozenset({"JPY", "SGD", "THB", "USD", "CAD", "IDR"})),
     )
 
 
 def _context(deps: Deps) -> MagicMock:
     context = MagicMock()
     context.application.bot_data = {"deps": deps}
-    context.bot.edit_message_text = AsyncMock()
+    context.bot.edit_message_text = _yielding()
     return context
 
 
 def _command_update(chat_id: int = -100, title: str = "Japan Trip") -> MagicMock:
     update = MagicMock()
-    update.effective_message.reply_text = AsyncMock(return_value=SimpleNamespace(message_id=42))
+    update.effective_message.reply_text = _yielding()
     update.effective_chat = SimpleNamespace(id=chat_id, title=title, type="supergroup")
     update.effective_user = SimpleNamespace(id=1, first_name="Ada", last_name=None, username="ada")
     return update
@@ -49,8 +62,8 @@ def _callback_update(session_id: str, step: str, value: str, user_id: int = 1) -
     cb_update = MagicMock()
     cb_update.callback_query.data = f"st:{session_id}:{step}:{value}"
     cb_update.callback_query.from_user = SimpleNamespace(id=user_id)
-    cb_update.callback_query.answer = AsyncMock()
-    cb_update.callback_query.edit_message_text = AsyncMock()
+    cb_update.callback_query.answer = _yielding()
+    cb_update.callback_query.edit_message_text = _yielding()
     return cb_update
 
 
@@ -63,7 +76,7 @@ async def test_settrip_goes_straight_to_trip_currency_buttons() -> None:
 
     update.effective_message.reply_text.assert_awaited_once()
     (text,), kwargs = update.effective_message.reply_text.call_args
-    assert text == "Trip currency?"
+    assert text == settrip.TRIP_CCY_TEXT
     buttons = [b.text for row in kwargs["reply_markup"].inline_keyboard for b in row]
     # Spec §18 pin, amended 2026-11-01: THB in SGD's place for the trip currency.
     assert buttons == ["THB", "MYR", "JPY", "CNY", "Other…"]
@@ -95,7 +108,6 @@ async def test_settrip_happy_path_creates_trip() -> None:
 
     await settrip.settrip_callback(_callback_update(session_id, "trip_ccy", "JPY"), context)
     await settrip.settrip_callback(_callback_update(session_id, "home_ccy", "SGD"), context)
-    await settrip.settrip_callback(_callback_update(session_id, "tz", "Asia/Tokyo"), context)
 
     confirm_update = _callback_update(session_id, "confirm", "yes")
     confirm_update.effective_chat = SimpleNamespace(id=-100, title="Japan Trip", type="supergroup")
@@ -106,8 +118,12 @@ async def test_settrip_happy_path_creates_trip() -> None:
     confirm_update.callback_query.edit_message_text.assert_awaited_once()
     (text,), kwargs = confirm_update.callback_query.edit_message_text.call_args
     assert text.startswith("Connected ✅ Japan Trip")
-    # Sprint 10 amendment: the menu follows `Everyone's in`, not Connected.
-    context.bot.send_message.assert_not_awaited()
+    # Sprint 20: the commands card follows Connected, pinned quietly.
+    context.bot.send_message.assert_awaited_once()
+    assert context.bot.send_message.call_args.args[1].startswith(
+        "📌 <b>How to use Who Paid For This</b>"
+    )
+    context.bot.pin_chat_message.assert_awaited_once_with(-100, 7, disable_notification=True)
     assert "JPY → SGD" in text
     assert "Asia/Tokyo" in text
     assert kwargs["reply_markup"] is not None
@@ -129,7 +145,6 @@ async def _complete_settrip(deps: Deps, context: MagicMock, *, skip_rebind: bool
         await settrip.settrip_callback(_callback_update(session_id, "rebind", "yes"), context)
     await settrip.settrip_callback(_callback_update(session_id, "trip_ccy", "JPY"), context)
     await settrip.settrip_callback(_callback_update(session_id, "home_ccy", "SGD"), context)
-    await settrip.settrip_callback(_callback_update(session_id, "tz", "Asia/Tokyo"), context)
     await settrip.settrip_callback(_callback_update(session_id, "confirm", "yes"), context)
 
 
@@ -196,7 +211,7 @@ async def test_settrip_start_new_trip_moves_on_to_currency_buttons() -> None:
 
     start_new_update.callback_query.edit_message_text.assert_awaited_once()
     (text,), kwargs = start_new_update.callback_query.edit_message_text.call_args
-    assert text == "Trip currency?"
+    assert text == settrip.TRIP_CCY_TEXT
     buttons = [b.text for row in kwargs["reply_markup"].inline_keyboard for b in row]
     assert buttons == ["THB", "MYR", "JPY", "CNY", "Other…"]
 
@@ -247,7 +262,6 @@ async def test_settrip_confirm_ledger_unavailable_shows_retry_button() -> None:
 
     await settrip.settrip_callback(_callback_update(session_id, "trip_ccy", "JPY"), context)
     await settrip.settrip_callback(_callback_update(session_id, "home_ccy", "SGD"), context)
-    await settrip.settrip_callback(_callback_update(session_id, "tz", "Asia/Tokyo"), context)
     confirm_update = _callback_update(session_id, "confirm", "yes")
 
     await settrip.settrip_callback(confirm_update, context)
@@ -292,32 +306,6 @@ async def test_settrip_unknown_session_reports_expired() -> None:
     )
 
 
-async def test_settrip_other_currency_waits_for_text_then_validates() -> None:
-    ledger = InMemoryLedgerStore()
-    deps = _deps(ledger)
-    context = _context(deps)
-    update = _command_update()
-    await settrip.settrip_command(update, context)
-    session_id = _only_session_id(deps)
-
-    other_update = _callback_update(session_id, "trip_ccy", "other")
-    await settrip.settrip_callback(other_update, context)
-
-    text_update = MagicMock()
-    text_update.effective_message.text = "unknown-code"
-    text_update.effective_message.reply_text = AsyncMock()
-    text_update.effective_chat = SimpleNamespace(id=-100)
-    text_update.effective_user = SimpleNamespace(id=1)
-    await settrip.settrip_text_handler(text_update, context)
-    text_update.effective_message.reply_text.assert_awaited_once_with(
-        "Unknown currency code. Try again or /cancel.", parse_mode="HTML"
-    )
-
-    text_update.effective_message.text = "thb"
-    await settrip.settrip_text_handler(text_update, context)
-    context.bot.edit_message_text.assert_awaited()
-
-
 def test_awaiting_settrip_text_filter_true_only_when_session_awaits_text() -> None:
     from app.bot.session_state import SettripSessionStore
 
@@ -334,7 +322,7 @@ def test_awaiting_settrip_text_filter_true_only_when_session_awaits_text() -> No
     message = SimpleNamespace(chat=SimpleNamespace(id=-100), from_user=SimpleNamespace(id=1))
     assert filt.filter(message) is False  # not awaiting text yet
 
-    store.update(session.session_id, awaiting_text_for="trip_ccy")
+    store.update(session.session_id, awaiting_text_for="tz")
     assert filt.filter(message) is True
 
     other_user_message = SimpleNamespace(
@@ -355,12 +343,17 @@ async def test_run_settrip_sends_trip_currency_buttons_with_a_fake_send() -> Non
 
     await settrip.run_settrip(deps, chat, user, fake_send)
 
-    assert sent[0][0] == "Trip currency?"
+    assert sent[0][0] == settrip.TRIP_CCY_TEXT
     assert len(deps.settrip_sessions._sessions) == 1
 
 
 # -- Stale setups (fixed 2026-11-01): a leftover setup waiting on typed text swallowed
 # the group's messages, a receipt photo included, for the rest of its 30 minutes.
+
+
+async def _to_summary(deps: Deps, context: MagicMock, session_id: str) -> None:
+    await settrip.settrip_callback(_callback_update(session_id, "trip_ccy", "JPY"), context)
+    await settrip.settrip_callback(_callback_update(session_id, "home_ccy", "SGD"), context)
 
 
 def _awaiting_text(deps: Deps) -> list[str]:
@@ -372,7 +365,9 @@ async def test_a_second_settrip_replaces_the_first_left_waiting_on_text() -> Non
     context = _context(deps)
     await settrip.settrip_command(_command_update(), context)
     first = _only_session_id(deps)
-    await settrip.settrip_callback(_callback_update(first, "trip_ccy", "other"), context)
+    await _to_summary(deps, context, first)
+    await settrip.settrip_callback(_callback_update(first, "chg", "tz"), context)
+    await settrip.settrip_callback(_callback_update(first, "tz", "type"), context)
     assert _awaiting_text(deps) == [first]
 
     await settrip.settrip_command(_command_update(), context)
@@ -389,7 +384,7 @@ async def test_creating_the_trip_drops_every_other_setup_in_the_chat() -> None:
     bo = deps.settrip_sessions.create(
         chat_id=-100, initiator_id=2, initiator_name="Bo", trip_name="Trip", step="trip_ccy"
     )
-    deps.settrip_sessions.update(bo.session_id, awaiting_text_for="trip_ccy")
+    deps.settrip_sessions.update(bo.session_id, awaiting_text_for="tz")
     # A setup in another chat is left alone.
     elsewhere = deps.settrip_sessions.create(
         chat_id=-200, initiator_id=2, initiator_name="Bo", trip_name="Trip", step="trip_ccy"
@@ -397,7 +392,7 @@ async def test_creating_the_trip_drops_every_other_setup_in_the_chat() -> None:
 
     await settrip.settrip_command(_command_update(), context)
     ada = next(s for s in deps.settrip_sessions._sessions.values() if s.initiator_id == 1)
-    for step, value in (("trip_ccy", "JPY"), ("home_ccy", "SGD"), ("tz", "Asia/Tokyo")):
+    for step, value in (("trip_ccy", "JPY"), ("home_ccy", "SGD")):
         await settrip.settrip_callback(_callback_update(ada.session_id, step, value), context)
     await settrip.settrip_callback(_callback_update(ada.session_id, "confirm", "yes"), context)
 
@@ -417,7 +412,7 @@ def test_a_photo_is_never_taken_by_a_setup_waiting_on_text() -> None:
     session = deps.settrip_sessions.create(
         chat_id=-100, initiator_id=1, initiator_name="Ada", trip_name="Trip", step="trip_ccy"
     )
-    deps.settrip_sessions.update(session.session_id, awaiting_text_for="trip_ccy")
+    deps.settrip_sessions.update(session.session_id, awaiting_text_for="tz")
     application = build_application("123456:fake-token", deps)
     (handler,) = [
         h
@@ -439,3 +434,389 @@ def test_a_photo_is_never_taken_by_a_setup_waiting_on_text() -> None:
     text = Message(message_id=2, date=now, chat=chat, from_user=user, text="thb")
     assert not handler.check_update(Update(update_id=1, message=photo))
     assert handler.check_update(Update(update_id=2, message=text))
+
+
+# -- Sprint 19: easier setup (spend / pay back wording, Other… page, summary card).
+
+
+def _buttons(markup) -> list[list[str]]:
+    return [[b.text for b in row] for row in markup.inline_keyboard]
+
+
+def _last_edit(context: MagicMock) -> tuple[str, list[list[str]]]:
+    kwargs = context.bot.edit_message_text.call_args.kwargs
+    return kwargs["text"], _buttons(kwargs["reply_markup"])
+
+
+async def _press(context: MagicMock, session_id: str, step: str, value: str, user_id: int = 1):
+    update = _callback_update(session_id, step, value, user_id=user_id)
+    await settrip.settrip_callback(update, context)
+    return update
+
+
+async def _started(ledger: InMemoryLedgerStore | None = None) -> tuple[Deps, MagicMock, str]:
+    deps = _deps(ledger)
+    context = _context(deps)
+    await settrip.settrip_command(_command_update(), context)
+    return deps, context, _only_session_id(deps)
+
+
+async def _summary(
+    trip: str = "JPY", home: str = "SGD"
+) -> tuple[Deps, MagicMock, str, InMemoryLedgerStore]:
+    ledger = InMemoryLedgerStore()
+    deps, context, sid = await _started(ledger)
+    await _press(context, sid, "trip_ccy", trip)
+    await _press(context, sid, "home_ccy", home)
+    return deps, context, sid, ledger
+
+
+async def test_step_texts_are_pinned_and_flow_goes_straight_to_the_summary_card() -> None:
+    ledger = InMemoryLedgerStore()
+    deps = _deps(ledger)
+    context = _context(deps)
+    update = _command_update()
+    await settrip.settrip_command(update, context)
+    assert update.effective_message.reply_text.call_args.args[0] == (
+        "Which currency will you spend on this trip?"
+    )
+    sid = _only_session_id(deps)
+
+    await _press(context, sid, "trip_ccy", "JPY")
+    text, buttons = _last_edit(context)
+    assert text == "Which currency do you want to use to pay each other back?"
+    assert buttons == [["SGD", "MYR", "JPY"], ["CNY"], ["Other…"]]
+
+    await _press(context, sid, "home_ccy", "SGD")
+    text, buttons = _last_edit(context)
+    assert text == "<b>Japan Trip</b>\nSpend in: JPY\nPay back in: SGD\nTimezone: Asia/Tokyo"
+    assert buttons == [
+        ["Change spend currency"],
+        ["Change pay-back currency"],
+        ["Change timezone"],
+        ["Start trip", "Cancel"],
+    ]
+
+    confirm = await _press(context, sid, "confirm", "yes")
+    assert confirm.callback_query.edit_message_text.call_args.args[0].startswith("Connected ✅")
+    trip = await ledger.get_binding(-100)
+    assert trip is not None
+    assert (trip.trip_currency, trip.home_currency, trip.timezone) == ("JPY", "SGD", "Asia/Tokyo")
+
+
+async def test_summary_card_escapes_the_trip_name() -> None:
+    deps = _deps()
+    context = _context(deps)
+    await settrip.settrip_command(_command_update(title="A <b> & Co"), context)
+    sid = _only_session_id(deps)
+    await _press(context, sid, "trip_ccy", "JPY")
+    await _press(context, sid, "home_ccy", "SGD")
+    assert _last_edit(context)[0].startswith("<b>A &lt;b&gt; &amp; Co</b>")
+
+
+async def test_other_page_lists_every_supported_code_then_back_restores_short_keyboard() -> None:
+    deps, context, sid = await _started()
+    page = await _press(context, sid, "trip_ccy", "other")
+    page.callback_query.edit_message_text.assert_awaited_once()
+    (text,), kwargs = page.callback_query.edit_message_text.call_args
+    assert text == settrip.TRIP_CCY_TEXT
+    assert _buttons(kwargs["reply_markup"]) == [
+        ["CAD", "IDR", "JPY", "SGD"],
+        ["THB", "USD"],
+        ["◂ Back"],
+    ]
+
+    back = await _press(context, sid, "trip_ccy", "back")
+    assert back.callback_query.edit_message_text.await_count == 0
+    text, buttons = _last_edit(context)
+    assert text == settrip.TRIP_CCY_TEXT
+    assert buttons == [["THB", "MYR", "JPY"], ["CNY"], ["Other…"]]
+
+
+async def test_a_code_from_the_other_page_is_saved() -> None:
+    deps, context, sid = await _started()
+    await _press(context, sid, "trip_ccy", "other")
+    await _press(context, sid, "trip_ccy", "USD")
+    assert _last_edit(context)[0] == settrip.HOME_CCY_TEXT
+    await _press(context, sid, "home_ccy", "other")
+    await _press(context, sid, "home_ccy", "IDR")
+    text, _ = _last_edit(context)
+    assert "Spend in: USD\nPay back in: IDR\nTimezone: America/New_York" in text
+
+
+async def test_a_typed_currency_is_not_read_during_setup() -> None:
+    deps, context, sid = await _started()
+    await _press(context, sid, "trip_ccy", "other")
+    assert deps.settrip_sessions.find_awaiting_text(-100, 1) is None
+    edits_before = context.bot.edit_message_text.await_count
+
+    text_update = MagicMock()
+    text_update.effective_message.text = "thb"
+    text_update.effective_message.reply_text = _yielding()
+    text_update.effective_chat = SimpleNamespace(id=-100)
+    text_update.effective_user = SimpleNamespace(id=1)
+    await settrip.settrip_text_handler(text_update, context)
+
+    text_update.effective_message.reply_text.assert_not_awaited()
+    assert context.bot.edit_message_text.await_count == edits_before
+
+
+async def test_changing_spend_currency_re_picks_timezone_unless_user_chose_one() -> None:
+    deps, context, sid, _ = await _summary()
+    await _press(context, sid, "chg", "trip")
+    assert _last_edit(context)[0] == settrip.TRIP_CCY_TEXT
+    await _press(context, sid, "trip_ccy", "USD")
+    text, _ = _last_edit(context)
+    assert "Spend in: USD" in text and "Timezone: America/New_York" in text
+
+    await _press(context, sid, "chg", "tz")
+    await _press(context, sid, "tzi", "1")
+    assert "Timezone: America/Chicago" in _last_edit(context)[0]
+    await _press(context, sid, "chg", "trip")
+    await _press(context, sid, "trip_ccy", "other")
+    await _press(context, sid, "trip_ccy", "CAD")
+    text, _ = _last_edit(context)
+    assert "Spend in: CAD" in text and "Timezone: America/Chicago" in text
+
+
+async def test_changing_pay_back_currency_returns_to_the_summary_card() -> None:
+    deps, context, sid, _ = await _summary()
+    await _press(context, sid, "chg", "home")
+    assert _last_edit(context)[0] == settrip.HOME_CCY_TEXT
+    await _press(context, sid, "home_ccy", "MYR")
+    text, buttons = _last_edit(context)
+    assert "Pay back in: MYR" in text and "Spend in: JPY" in text
+    assert buttons[0] == ["Change spend currency"]
+
+
+async def test_change_timezone_on_idr_lists_three_and_saves_makassar() -> None:
+    deps, context, sid, ledger = await _summary(trip="IDR")
+    await _press(context, sid, "chg", "tz")
+    text, buttons = _last_edit(context)
+    assert text == "Which timezone? Expense dates use it."
+    assert buttons == [
+        ["Asia/Jakarta"],
+        ["Asia/Makassar (Bali)"],
+        ["Asia/Jayapura"],
+        ["Type it"],
+        ["◂ Back"],
+    ]
+    await _press(context, sid, "tzi", "1")
+    assert "Timezone: Asia/Makassar" in _last_edit(context)[0]
+    await _press(context, sid, "confirm", "yes")
+    trip = await ledger.get_binding(-100)
+    assert trip is not None and trip.timezone == "Asia/Makassar"
+
+
+async def test_change_timezone_without_a_list_shows_the_default_type_it_and_back() -> None:
+    deps, context, sid, _ = await _summary()
+    await _press(context, sid, "chg", "tz")
+    assert _last_edit(context)[1] == [["Asia/Tokyo"], ["Type it"], ["◂ Back"]]
+    summary_before = deps.settrip_sessions.get(sid)
+    await _press(context, sid, "tz", "back")
+    text, buttons = _last_edit(context)
+    assert text.startswith("<b>Japan Trip</b>\nSpend in: JPY")
+    assert buttons[0] == ["Change spend currency"]
+    assert deps.settrip_sessions.get(sid).timezone == summary_before.timezone
+
+
+async def _typed(context: MagicMock, text: str) -> MagicMock:
+    update = MagicMock()
+    update.effective_message.text = text
+    update.effective_message.reply_text = _yielding()
+    update.effective_chat = SimpleNamespace(id=-100)
+    update.effective_user = SimpleNamespace(id=1)
+    await settrip.settrip_text_handler(update, context)
+    return update
+
+
+async def test_type_it_accepts_any_case_and_keeps_waiting_on_a_miss() -> None:
+    deps, context, sid, _ = await _summary()
+    await _press(context, sid, "chg", "tz")
+    typing = await _press(context, sid, "tz", "type")
+    typing.callback_query.edit_message_text.assert_awaited_once_with(
+        "Type the timezone, like Asia/Bangkok.", parse_mode="HTML"
+    )
+
+    miss = await _typed(context, "nowhere")
+    miss.effective_message.reply_text.assert_awaited_once_with(
+        "Unknown timezone. Try again or /cancel.", parse_mode="HTML"
+    )
+    assert deps.settrip_sessions.find_awaiting_text(-100, 1) is not None
+
+    await _typed(context, "asia/bangkok")
+    assert "Timezone: Asia/Bangkok" in _last_edit(context)[0]
+    assert deps.settrip_sessions.find_awaiting_text(-100, 1) is None
+    assert deps.settrip_sessions.get(sid).timezone_chosen is True
+
+
+async def test_a_non_starter_pressing_change_gets_the_toast_and_nothing_changes() -> None:
+    deps, context, sid, _ = await _summary()
+    session_before = deps.settrip_sessions.get(sid)
+    edits = context.bot.edit_message_text.await_count
+    for step, value in (("chg", "trip"), ("chg", "home"), ("chg", "tz"), ("tz", "back")):
+        update = await _press(context, sid, step, value, user_id=999)
+        update.callback_query.answer.assert_awaited_once_with("Only Ada can do this")
+        update.callback_query.edit_message_text.assert_not_awaited()
+    assert deps.settrip_sessions.get(sid) == session_before
+    assert context.bot.edit_message_text.await_count == edits
+
+
+@pytest.mark.parametrize("value", ["9", "-1", "x", ""])
+async def test_an_out_of_range_timezone_index_changes_nothing(value: str) -> None:
+    deps, context, sid, _ = await _summary()
+    await _press(context, sid, "chg", "tz")
+    session_before = deps.settrip_sessions.get(sid)
+    edits = context.bot.edit_message_text.await_count
+    update = await _press(context, sid, "tzi", value)
+    update.callback_query.answer.assert_awaited()
+    assert deps.settrip_sessions.get(sid) == session_before
+    assert context.bot.edit_message_text.await_count == edits
+    update.callback_query.edit_message_text.assert_not_awaited()
+
+
+async def test_an_expired_session_on_a_change_press_gets_the_expired_text() -> None:
+    deps, context, sid, _ = await _summary()
+    deps.settrip_sessions.delete(sid)
+    update = await _press(context, sid, "chg", "trip")
+    update.callback_query.edit_message_text.assert_awaited_once_with(
+        "This setup expired, run /settrip again"
+    )
+
+
+def test_every_setup_callback_fits_telegrams_64_byte_limit() -> None:
+    from ulid import ULID
+
+    from app.bot.keyboards import settrip as kb
+    from app.services.currencies import ISO_CODES, TIMEZONE_CHOICES
+
+    sid = str(ULID())
+    markups = [
+        kb.trip_currency_keyboard(sid),
+        kb.home_currency_keyboard(sid),
+        kb.summary_keyboard(sid),
+        kb.rebind_keyboard(sid),
+        kb.currency_page_keyboard(sid, "trip_ccy", sorted(ISO_CODES)),
+        kb.currency_page_keyboard(sid, "home_ccy", sorted(ISO_CODES)),
+    ]
+    markups += [kb.timezone_list_keyboard(sid, names) for names in TIMEZONE_CHOICES.values()]
+    longest = max((n for names in TIMEZONE_CHOICES.values() for n in names), key=len)
+    markups.append(kb.timezone_list_keyboard(sid, [longest] * 12))
+    for markup in markups:
+        for row in markup.inline_keyboard:
+            for button in row:
+                assert len(button.callback_data.encode()) <= 64, button.callback_data
+
+
+def test_timezone_buttons_carry_the_list_index_and_label_bali() -> None:
+    from app.bot.keyboards.settrip import timezone_list_keyboard
+
+    markup = timezone_list_keyboard("S" * 26, ["Asia/Jakarta", "Asia/Makassar"])
+    assert markup.inline_keyboard[1][0].text == "Asia/Makassar (Bali)"
+    assert markup.inline_keyboard[1][0].callback_data == f"st:{'S' * 26}:tzi:1"
+
+
+@pytest.mark.parametrize("value", ["other", "back"])
+async def test_other_or_back_on_a_currency_step_ends_a_timezone_wait(value: str) -> None:
+    deps, context, sid, _ = await _summary()
+    await _press(context, sid, "chg", "tz")
+    await _press(context, sid, "tz", "type")
+    assert deps.settrip_sessions.find_awaiting_text(-100, 1) is not None
+    await _press(context, sid, "trip_ccy", value)
+    assert deps.settrip_sessions.find_awaiting_text(-100, 1) is None
+
+
+async def _confirm_with_card(*, pin_error: Exception | None = None, status_read_fails=False):
+    """Runs /settrip through Confirm with yielding bot doubles that log call order."""
+    ledger = InMemoryLedgerStore()
+    deps = _deps(ledger)
+    context = _context(deps)
+    order: list[str] = []
+
+    async def _edit_card(*args: object, **kwargs: object) -> None:
+        await asyncio.sleep(0)
+        order.append("edit_card")
+
+    async def _send(*args: object, **kwargs: object) -> SimpleNamespace:
+        await asyncio.sleep(0)
+        order.append("send")
+        return SimpleNamespace(message_id=7)
+
+    async def _pin(*args: object, **kwargs: object) -> None:
+        await asyncio.sleep(0)
+        order.append("pin")
+        if pin_error is not None:
+            raise pin_error
+
+    async def _get_chat(chat_id: int) -> SimpleNamespace:
+        await asyncio.sleep(0)
+        return SimpleNamespace(pinned_message=None)
+
+    context.bot.send_message = AsyncMock(side_effect=_send)
+    context.bot.pin_chat_message = AsyncMock(side_effect=_pin)
+    context.bot.get_chat = AsyncMock(side_effect=_get_chat)
+    context.bot.edit_message_text = AsyncMock(side_effect=_edit_card)
+    await settrip.settrip_command(_command_update(), context)
+    session_id = _only_session_id(deps)
+    await settrip.settrip_callback(_callback_update(session_id, "trip_ccy", "JPY"), context)
+    await settrip.settrip_callback(_callback_update(session_id, "home_ccy", "SGD"), context)
+    order.clear()  # the question screens also edit messages; only Confirm onwards counts
+    context.bot.edit_message_text.reset_mock()
+    confirm = _callback_update(session_id, "confirm", "yes")
+    confirm.effective_chat = SimpleNamespace(id=-100, title="Japan Trip", type="supergroup")
+
+    async def _connected(*args: object, **kwargs: object) -> None:
+        await asyncio.sleep(0)
+        order.append("connected")
+
+    confirm.callback_query.edit_message_text = AsyncMock(side_effect=_connected)
+    if status_read_fails:
+        real_save = ledger.save_binding
+
+        async def _save_then_break_status_read(trip):
+            saved = await real_save(trip)
+            ledger.latest_trip = AsyncMock(side_effect=LedgerUnavailable("down"))
+            return saved
+
+        ledger.save_binding = _save_then_break_status_read
+    await settrip.settrip_callback(confirm, context)
+    return ledger, context, order
+
+
+async def test_creating_a_trip_sends_connected_then_the_card_then_pins_it() -> None:
+    ledger, context, order = await _confirm_with_card()
+
+    assert order == ["connected", "send", "pin"]
+    assert context.bot.pin_chat_message.call_args.kwargs == {"disable_notification": True}
+    assert await ledger.get_binding(-100) is not None
+
+
+async def test_pin_failure_edits_the_card_once_and_sends_nothing_else() -> None:
+    from telegram.error import BadRequest
+
+    ledger, context, order = await _confirm_with_card(pin_error=BadRequest("no rights"))
+
+    assert order == ["connected", "send", "pin", "edit_card"]
+    context.bot.send_message.assert_awaited_once()
+    context.bot.edit_message_text.assert_awaited_once()
+    text = context.bot.edit_message_text.call_args.args[0]
+    assert text.endswith(
+        "\n\nI can't pin this. Make me an admin with 'Pin messages' so I can keep it up "
+        "to date, or pin it yourself."
+    )
+    assert await ledger.get_binding(-100) is not None
+
+
+async def test_a_card_that_blows_up_leaves_the_trip_created() -> None:
+    ledger, context, order = await _confirm_with_card(pin_error=RuntimeError("boom"))
+
+    assert await ledger.get_binding(-100) is not None
+
+
+async def test_the_card_is_posted_even_when_the_trip_status_read_fails() -> None:
+    _, context, order = await _confirm_with_card(status_read_fails=True)
+
+    assert order == ["connected", "send", "pin"]
+    assert context.bot.send_message.call_args.args[1].startswith(
+        "📌 <b>How to use Who Paid For This</b>"
+    )

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -40,17 +41,46 @@ def _callbacks(markup) -> list[list[str | None]]:
 class _Bot:
     """A fake `telegram.Bot`, just enough surface for `post_welcome`/`menu_callback`."""
 
-    def __init__(self, *, pin_error: Exception | None = None, bot_id: int = 999) -> None:
+    def __init__(
+        self,
+        *,
+        pin_error: Exception | None = None,
+        bot_id: int = 999,
+        pinned_message: SimpleNamespace | None = None,
+        get_chat_error: Exception | None = None,
+        unpin_error: Exception | None = None,
+    ) -> None:
         self.id = bot_id
         self.username = "whopaidbot"
         self._pin_error = pin_error
+        self._pinned_message = pinned_message
+        self._get_chat_error = get_chat_error
+        self._unpin_error = unpin_error
+        self.pin_kwargs: list[dict] = []
+        self.unpinned: list[tuple[int, int | None]] = []
+        self.calls: list[str] = []
         self._next_message_id = 0
         self.sent_messages: list[dict] = []
         self.sent_documents: list[dict] = []
         self.pinned: list[tuple[int, int]] = []
         self.edited: list[dict] = []
 
+    async def get_chat(self, chat_id):
+        await asyncio.sleep(0)
+        self.calls.append("get_chat")
+        if self._get_chat_error is not None:
+            raise self._get_chat_error
+        return SimpleNamespace(id=chat_id, pinned_message=self._pinned_message)
+
+    async def unpin_chat_message(self, chat_id, message_id=None):
+        await asyncio.sleep(0)
+        self.calls.append("unpin")
+        if self._unpin_error is not None:
+            raise self._unpin_error
+        self.unpinned.append((chat_id, message_id))
+
     async def send_message(self, chat_id, text, **kwargs):
+        await asyncio.sleep(0)
         self._next_message_id += 1
         self.sent_messages.append({"chat_id": chat_id, "text": text, **kwargs})
         return SimpleNamespace(message_id=self._next_message_id)
@@ -61,11 +91,15 @@ class _Bot:
         return SimpleNamespace(message_id=self._next_message_id)
 
     async def pin_chat_message(self, chat_id, message_id, **kwargs):
+        await asyncio.sleep(0)
+        self.calls.append("pin")
+        self.pin_kwargs.append(kwargs)
         if self._pin_error is not None:
             raise self._pin_error
         self.pinned.append((chat_id, message_id))
 
     async def edit_message_text(self, text, *, chat_id, message_id, **kwargs):
+        await asyncio.sleep(0)
         self.edited.append({"chat_id": chat_id, "message_id": message_id, "text": text, **kwargs})
 
 
@@ -116,19 +150,39 @@ def _callback_update(data: str, presser_id: int, chat_id: int = CHAT_ID) -> Magi
 
 
 def test_welcome_text_no_trip() -> None:
-    text = welcome_text(None, False)
+    text = welcome_text("no_trip")
     assert text.endswith("No trip yet.")
 
 
 def test_welcome_text_closed() -> None:
-    text = welcome_text(None, True)
+    text = welcome_text("closed")
     assert text.endswith("The last trip is closed. Start a new one or export it.")
 
 
-async def test_welcome_text_open_names_the_trip() -> None:
-    _, trip = await _bound_ledger()
-    text = welcome_text(trip, False)
-    assert text.endswith("Trip: Japan Trip (JPY → SGD)")
+_CARD = (
+    "📌 <b>How to use Who Paid For This</b>\n"
+    "Type what you spent, like <code>1200 yen ramen</code>, or send a receipt photo.\n"
+    "/balances who owes whom\n"
+    "/mine what you paid and owe\n"
+    "/settle who pays whom\n"
+    "/undo remove your last expense\n"
+    "/help for everything else"
+)
+
+
+def test_welcome_text_open_is_exactly_the_commands_card() -> None:
+    assert welcome_text("open") == _CARD
+
+
+def test_welcome_text_no_trip_and_closed_are_unchanged() -> None:
+    footer = "Tap a button below. Typed commands work too, see /help."
+    assert welcome_text("no_trip").endswith(f"{footer}\n\nNo trip yet.")
+    assert welcome_text("closed").endswith(
+        f"{footer}\n\nThe last trip is closed. Start a new one or export it."
+    )
+    assert welcome_text("no_trip").startswith(
+        "<b>Who Paid For This</b> records this group's trip expenses."
+    )
 
 
 # --- menu_keyboard: shape per state and page --------------------------------
@@ -338,7 +392,7 @@ async def test_press_settrip_starts_the_flow() -> None:
 
     await menu_callback(update, context)
 
-    assert bot.sent_messages[-1]["text"] == "Trip currency?"
+    assert bot.sent_messages[-1]["text"] == "Which currency will you spend on this trip?"
 
 
 async def test_press_howto_sends_the_pinned_examples() -> None:
@@ -442,6 +496,8 @@ async def test_group_created_with_bot_posts_welcome() -> None:
 
     assert len(bot.sent_messages) == 1
     assert bot.sent_messages[0]["text"].endswith("No trip yet.")
+    assert bot.pinned == [(CHAT_ID, 1)]
+    assert bot.pin_kwargs == [{"disable_notification": True}]
 
 
 async def test_added_to_group_with_bot_in_members_posts_welcome() -> None:
@@ -502,6 +558,100 @@ async def test_post_welcome_pin_forbidden_also_appends_the_pin_line() -> None:
 
     assert len(bot.edited) == 1
     assert bot.edited[0]["text"].endswith(PIN_HINT)
+
+
+_PIN_FAILED = (
+    "I can't pin this. Make me an admin with 'Pin messages' so I can keep it up to date, "
+    "or pin it yourself."
+)
+
+
+def _pinned(message_id: int, sender_id: int) -> SimpleNamespace:
+    return SimpleNamespace(message_id=message_id, from_user=SimpleNamespace(id=sender_id))
+
+
+async def _open_trip_deps():
+    ledger, _ = await _bound_ledger()
+    return make_deps(ledger)
+
+
+async def test_pin_failed_text_is_pinned_verbatim() -> None:
+    bot = _Bot(pin_error=BadRequest("not enough rights"))
+
+    await post_welcome(await _open_trip_deps(), bot, _chat())
+
+    assert bot.edited[0]["text"] == f"{_CARD}\n\n{_PIN_FAILED}"
+    assert len(bot.sent_messages) == 1
+
+
+async def test_pin_is_quiet() -> None:
+    bot = _Bot()
+
+    await post_welcome(await _open_trip_deps(), bot, _chat())
+
+    assert bot.pin_kwargs == [{"disable_notification": True}]
+
+
+async def test_steps_run_in_order_read_pin_unpin() -> None:
+    bot = _Bot(pinned_message=_pinned(5, 999))
+
+    await post_welcome(await _open_trip_deps(), bot, _chat())
+
+    assert bot.calls == ["get_chat", "pin", "unpin"]
+
+
+async def test_old_card_from_the_bot_is_unpinned_by_its_id() -> None:
+    bot = _Bot(pinned_message=_pinned(5, 999))
+
+    await post_welcome(await _open_trip_deps(), bot, _chat())
+
+    assert bot.pinned == [(CHAT_ID, 1)]
+    assert bot.unpinned == [(CHAT_ID, 5)]
+
+
+async def test_old_pinned_message_from_a_user_is_not_unpinned() -> None:
+    bot = _Bot(pinned_message=_pinned(5, 12345))
+
+    await post_welcome(await _open_trip_deps(), bot, _chat())
+
+    assert bot.pinned == [(CHAT_ID, 1)]
+    assert bot.unpinned == []
+    assert "unpin" not in bot.calls
+
+
+async def test_no_pinned_message_means_no_unpin_call() -> None:
+    bot = _Bot()
+
+    await post_welcome(await _open_trip_deps(), bot, _chat())
+
+    assert "unpin" not in bot.calls
+
+
+async def test_get_chat_raising_still_pins_and_never_unpins() -> None:
+    bot = _Bot(get_chat_error=RuntimeError("boom"))
+
+    await post_welcome(await _open_trip_deps(), bot, _chat())
+
+    assert bot.pinned == [(CHAT_ID, 1)]
+    assert "unpin" not in bot.calls
+
+
+async def test_pin_failure_never_unpins_the_old_card() -> None:
+    bot = _Bot(pinned_message=_pinned(5, 999), pin_error=Forbidden("no"))
+
+    await post_welcome(await _open_trip_deps(), bot, _chat())
+
+    assert "unpin" not in bot.calls
+    assert len(bot.edited) == 1
+
+
+async def test_unpin_raising_breaks_nothing() -> None:
+    bot = _Bot(pinned_message=_pinned(5, 999), unpin_error=BadRequest("gone"))
+
+    await post_welcome(await _open_trip_deps(), bot, _chat())
+
+    assert bot.pinned == [(CHAT_ID, 1)]
+    assert not bot.edited
 
 
 # --- private_start_keyboard ---------------------------------------------

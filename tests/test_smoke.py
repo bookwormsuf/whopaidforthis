@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import signal
@@ -9,7 +10,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
 
 import pytest
 from pydantic import ValidationError
@@ -432,3 +433,69 @@ async def test_post_init_startup_error_never_leaks_the_password(
     assert captured.err.strip() == (
         "Could not reach the database (RuntimeError). Check DATABASE_URL."
     )
+
+
+async def test_post_init_sets_both_command_menus() -> None:
+    from telegram import BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
+
+    from app.bot.app import GROUP_MENU_COMMANDS, PRIVATE_MENU_COMMANDS
+
+    deps = _fake_deps()
+    deps.ledger.connect = AsyncMock()
+    application = build_application("123456:fake-token", deps)
+    calls: list[tuple[list[tuple[str, str]], object]] = []
+
+    async def _set(commands, scope=None, **kwargs):
+        await asyncio.sleep(0)
+        calls.append(([(c.command, c.description) for c in commands], scope))
+
+    with (
+        patch.object(type(application.bot), "set_my_commands", side_effect=_set),
+        patch.object(type(application.bot), "username", new_callable=PropertyMock) as name,
+    ):
+        name.return_value = "whopaidbot"
+        await application.post_init(application)
+
+    assert [c[0] for c in calls] == [list(GROUP_MENU_COMMANDS), list(PRIVATE_MENU_COMMANDS)]
+    assert isinstance(calls[0][1], BotCommandScopeAllGroupChats)
+    assert isinstance(calls[1][1], BotCommandScopeAllPrivateChats)
+    assert [c for c, _ in calls[0][0]] == [
+        "balances",
+        "mine",
+        "settle",
+        "recent",
+        "undo",
+        "settrip",
+        "help",
+    ]
+    assert [c for c, _ in calls[1][0]] == ["split", "feedback", "help"]
+    assert dict(calls[0][0])["balances"] == "Everyone's balances"
+    assert dict(calls[1][0])["feedback"] == "Tell the person who built this what to fix"
+
+
+async def test_a_failing_set_my_commands_does_not_stop_startup() -> None:
+    deps = _fake_deps()
+    deps.ledger.connect = AsyncMock()
+    application = build_application("123456:fake-token", deps)
+    attempts: list[int] = []
+
+    async def _boom(*args, **kwargs):
+        await asyncio.sleep(0)
+        attempts.append(1)
+        raise RuntimeError("telegram down")
+
+    with (
+        patch.object(type(application.bot), "set_my_commands", side_effect=_boom),
+        patch.object(type(application.bot), "username", new_callable=PropertyMock) as name,
+    ):
+        name.return_value = "whopaidbot"
+        await application.post_init(application)
+
+    assert len(attempts) == 2
+
+
+def test_every_menu_command_is_a_registered_command() -> None:
+    from app.bot.app import _KNOWN_COMMANDS, GROUP_MENU_COMMANDS, PRIVATE_MENU_COMMANDS
+
+    for name, _ in (*GROUP_MENU_COMMANDS, *PRIVATE_MENU_COMMANDS):
+        assert name in _KNOWN_COMMANDS

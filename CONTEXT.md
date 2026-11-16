@@ -20,10 +20,13 @@ Terms used throughout the code, the spec and the export. Implementation details 
 - **Closed trip** — a trip that takes no new expenses. Closed by `/settrip` starting a new trip or by `Close this trip` after `/settle`. Still readable and exportable.
 - **Trip starter** — the trip user who ran `/settrip` for this trip; the only person who can delete it.
 - **Export** — a spreadsheet file of one trip's records that anyone in the group can download from the chat.
-- **Welcome** — the bot's pinned message in a group carrying the menu. Posted when the bot joins the group, on `/start` and on `/help`.
+- **Welcome** — the bot's pinned message in a group carrying the menu. Posted when the bot joins the group, on `/start`, and when a trip is created. With an open trip it is the **commands card**.
+- **Commands card** — the welcome while a trip is open: how to add an expense and the everyday commands. The one message the bot keeps pinned.
+- **Command menu** — the list Telegram shows when someone taps the menu button or types `/`. Set by the bot on startup, one list for groups and one for private chats.
 - **Menu** — the buttons under the welcome. What it offers depends on whether the group has no trip, an open trip or a closed trip; a press is the same as typing the command.
-- **Trip currency** — the currency merchants are paid in during the trip (JPY for Japan).
-- **Home currency** — the currency friends settle with each other in (SGD). Balances and settlement are computed in home currency.
+- **Trip currency** — the currency merchants are paid in during the trip (JPY for Japan). Users see it as the currency they **spend**.
+- **Home currency** — the currency friends settle with each other in (SGD). Balances and settlement are computed in home currency. Users see it as the currency they **pay each other back** in.
+- **Summary card** — the last `/settrip` card before a trip is saved: spend currency, pay-back currency and timezone, each with a `Change` button.
 - **Original amount / original currency** — the amount exactly as paid. Usually the trip currency or the home currency; since Sprint 15 it may be a **third currency**, with its own rate to the trip currency.
 - **Third currency** — an original currency that is neither the trip's nor the home currency. Shares are worked out in it, then converted to trip and home.
 - **Typed rate** — a third currency's rate to the trip currency given by the payer, when no published rate exists. Used for that expense only.

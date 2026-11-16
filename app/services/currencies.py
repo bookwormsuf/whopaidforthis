@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from typing import Protocol
+from zoneinfo import available_timezones
 
 import httpx
 
@@ -114,12 +115,52 @@ TIMEZONE_DEFAULTS: dict[str, str] = {
     "CHF": "Europe/Zurich",
     "NZD": "Pacific/Auckland",
     "CAD": "America/Toronto",
+    "MXN": "America/Mexico_City",
+    "BRL": "America/Sao_Paulo",
+}
+
+# Sprint 19: currencies whose countries span several timezones. Hand-written; the
+# first entry is the default and equals TIMEZONE_DEFAULTS where that key exists.
+TIMEZONE_CHOICES: dict[str, list[str]] = {
+    "USD": [
+        "America/New_York",
+        "America/Chicago",
+        "America/Denver",
+        "America/Los_Angeles",
+        "Pacific/Honolulu",
+    ],
+    "CAD": ["America/Toronto", "America/Winnipeg", "America/Edmonton", "America/Vancouver"],
+    "AUD": ["Australia/Sydney", "Australia/Brisbane", "Australia/Adelaide", "Australia/Perth"],
+    "IDR": ["Asia/Jakarta", "Asia/Makassar", "Asia/Jayapura"],
+    "MXN": ["America/Mexico_City", "America/Cancun", "America/Tijuana"],
+    "BRL": ["America/Sao_Paulo", "America/Manaus"],
+    "EUR": ["Europe/Paris", "Europe/Lisbon", "Europe/Athens"],
 }
 
 
-def default_timezone_for(code: str) -> str | None:
-    """The conventional IANA timezone for a currency code, or None if not tabulated."""
-    return TIMEZONE_DEFAULTS.get(code.upper())
+def timezone_choices_for(code: str) -> list[str]:
+    """Timezones offered for a currency: its list, else its one default, else UTC.
+    The first entry is the default timezone for a new trip in that currency."""
+    code = code.upper()
+    if code in TIMEZONE_CHOICES:
+        return list(TIMEZONE_CHOICES[code])
+    default = TIMEZONE_DEFAULTS.get(code)
+    return [default] if default else ["UTC"]
+
+
+def match_timezone(raw: str) -> str | None:
+    """The canonical IANA name for typed text, ignoring case, or None."""
+    wanted = raw.strip().casefold()
+    for name in available_timezones():
+        if name.casefold() == wanted:
+            return name
+    return None
+
+
+def default_timezone_for(code: str) -> str:
+    """The timezone a new trip in this currency starts with: the first of its list,
+    else its tabulated default, else UTC."""
+    return timezone_choices_for(code)[0]
 
 
 CURRENCY_SYMBOLS: dict[str, str] = {

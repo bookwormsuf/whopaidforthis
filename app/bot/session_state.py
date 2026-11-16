@@ -25,12 +25,17 @@ class SettripSession:
     initiator_id: int
     initiator_name: str
     trip_name: str
-    step: str  # "rebind" | "trip_ccy" | "home_ccy" | "tz" | "confirm"
+    step: str  # "rebind" | "trip_ccy" | "home_ccy" | "tz" (list) | "confirm" (summary)
     trip_currency: str | None = None
     home_currency: str | None = None
     timezone: str | None = None
     message_id: int | None = None
     awaiting_text_for: str | None = None
+    # Sprint 19: the user picked or typed the timezone, so a new spend currency must
+    # not overwrite it; and a currency step was opened from the summary card, so a
+    # pick returns there instead of moving on.
+    timezone_chosen: bool = False
+    from_summary: bool = False
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
