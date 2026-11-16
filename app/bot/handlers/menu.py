@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from html import escape
 from typing import Literal
 
 from telegram import Bot, Chat, InlineKeyboardButton, InlineKeyboardMarkup, Update, User
@@ -43,7 +42,21 @@ MenuState = Literal["no_trip", "open", "closed"]
 
 NO_TRIP_LINE = "No trip yet."
 CLOSED_TRIP_LINE = "The last trip is closed. Start a new one or export it."
-PIN_HINT = "\n\nPin this message so everyone can find the buttons."
+PIN_FAILED_TEXT = (
+    "I can't pin this. Make me an admin with 'Pin messages' so I can keep it up to date, "
+    "or pin it yourself."
+)
+PIN_HINT = f"\n\n{PIN_FAILED_TEXT}"
+
+COMMANDS_CARD_TEXT = (
+    "📌 <b>How to use Who Paid For This</b>\n"
+    "Type what you spent, like <code>1200 yen ramen</code>, or send a receipt photo.\n"
+    "/balances who owes whom\n"
+    "/mine what you paid and owe\n"
+    "/settle who pays whom\n"
+    "/undo remove your last expense\n"
+    "/help for everything else"
+)
 
 WELCOME_HEADER = (
     "<b>Who Paid For This</b> records this group's trip expenses.\n"
@@ -88,18 +101,12 @@ def _state_for(trip: Trip | None, latest_is_closed: bool) -> MenuState:
 
 
 def welcome_text(trip: Trip | None, latest_is_closed: bool) -> str:
-    """The pinned welcome HTML, with the state line appended: the open trip's
-    name and currencies, the closed-trip line, or "No trip yet."
+    """The welcome HTML: the commands card when a trip is open, else the intro
+    with the closed-trip line or "No trip yet."
     """
     if trip is not None:
-        state_line = (
-            f"Trip: {escape(trip.name)} "
-            f"({escape(trip.trip_currency)} → {escape(trip.home_currency)})"
-        )
-    elif latest_is_closed:
-        state_line = CLOSED_TRIP_LINE
-    else:
-        state_line = NO_TRIP_LINE
+        return COMMANDS_CARD_TEXT
+    state_line = CLOSED_TRIP_LINE if latest_is_closed else NO_TRIP_LINE
     return f"{WELCOME_HEADER}\n\n{WELCOME_FOOTER}\n\n{state_line}"
 
 
@@ -140,11 +147,56 @@ def menu_keyboard(state: MenuState, page: int = 1) -> InlineKeyboardMarkup:
     )
 
 
+async def _old_card_id(bot: Bot, chat_id: int) -> int | None:
+    """The message ID of this bot's own pinned message, or None (another sender's
+    pin, no pin, or `get_chat` failing)."""
+    try:
+        chat = await bot.get_chat(chat_id)
+    except Exception:  # noqa: BLE001 - not knowing the old card only skips the tidy-up
+        logger.exception("pin: could not read the pinned message in chat %s", chat_id)
+        return None
+    pinned = getattr(chat, "pinned_message", None)
+    sender = getattr(pinned, "from_user", None)
+    if pinned is None or sender is None or sender.id != bot.id:
+        return None
+    return pinned.message_id
+
+
+async def pin_welcome(
+    bot: Bot,
+    chat_id: int,
+    message_id: int,
+    text: str,
+    keyboard: InlineKeyboardMarkup,
+) -> None:
+    """Sprint 20 pinning rules: remember the bot's own current pin, pin the new
+    message quietly, then unpin the old one. If the pin fails, edit the new
+    message once with the pin-failed text and unpin nothing.
+    """
+    old_card_id = await _old_card_id(bot, chat_id)
+    try:
+        await bot.pin_chat_message(chat_id, message_id, disable_notification=True)
+    except (BadRequest, Forbidden):
+        logger.info("pin: no right to pin in chat %s", chat_id)
+        await bot.edit_message_text(
+            text + PIN_HINT,
+            chat_id=chat_id,
+            message_id=message_id,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+        return
+    if old_card_id is not None and old_card_id != message_id:
+        try:
+            await bot.unpin_chat_message(chat_id, message_id=old_card_id)
+        except Exception:  # noqa: BLE001 - an old card left pinned is harmless
+            logger.debug("pin: could not unpin the old card in chat %s", chat_id)
+
+
 async def post_welcome(deps: Deps, bot: Bot, chat: Chat) -> None:
-    """Resolves this chat's state, sends the welcome with its menu, then tries to
-    pin it. On `BadRequest`/`Forbidden` (no pin right) logs at INFO and edits the
-    message to append the "Pin this message..." line, keeping the same keyboard.
-    On a store error, sends `LEDGER_UNAVAILABLE_TEXT` instead.
+    """Resolves this chat's state, sends the welcome with its menu, then pins it
+    under the pinning rules (`pin_welcome`). On a store error, sends
+    `LEDGER_UNAVAILABLE_TEXT` instead.
     """
     try:
         trip, latest_is_closed = await resolve_trip_status(deps, chat.id)
@@ -157,18 +209,7 @@ async def post_welcome(deps: Deps, bot: Bot, chat: Chat) -> None:
     text = welcome_text(trip, latest_is_closed)
     keyboard = menu_keyboard(state, page=1)
     message = await bot.send_message(chat.id, text, parse_mode="HTML", reply_markup=keyboard)
-
-    try:
-        await bot.pin_chat_message(chat.id, message.message_id, disable_notification=True)
-    except (BadRequest, Forbidden):
-        logger.info("post_welcome: no right to pin in chat %s", chat.id)
-        await bot.edit_message_text(
-            text + PIN_HINT,
-            chat_id=chat.id,
-            message_id=message.message_id,
-            parse_mode="HTML",
-            reply_markup=keyboard,
-        )
+    await pin_welcome(bot, chat.id, message.message_id, text, keyboard)
 
 
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
