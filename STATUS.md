@@ -29,7 +29,7 @@ fragments. Agents append an entry after material work; Sufyan's sign-off is reco
 | 17 One-off bill | written 2026-11-12 (+ steps 3/6/7 amended at review) | done | green (869) | 2026-11-12, findings fixed | — | — | Merge PR after sprint 16, BotFather `/setcommands`, run the seven-step checklist / Sufyan |
 | 18 Receipt photos on a one-off bill | written 2026-11-12 (+ allowance order, per-user guard, `Edit` amended at review) | done | green (1058) | 2026-11-12, findings fixed (one left for later) | — | — | Merge PR after sprint 17, run the six-step checklist (needs a second account) / Sufyan |
 | 19 Easier trip setup | written 2026-11-17 | done | green (1070) | 2026-11-17, findings fixed (one deferred) | — | — | Merge PR, run the eight-step checklist / Sufyan |
-| 20 Commands card and menu | written 2026-11-17 | not started | — | — | — | — | Build after sprint 19 / agent |
+| 20 Commands card and menu | written 2026-11-17 | done | green (1087) | 2026-11-17, findings fixed (two deferred) | — | — | Merge PR after sprint 19, run the five-step checklist / Sufyan |
 
 Column meanings: **Build** not started / in progress / done. **Tests** green / red with count. **Review**
 `/review` run date and whether findings were addressed. **Manual checklist** the sprint's "After"
@@ -1289,4 +1289,23 @@ list, done by Sufyan, date. **Sign-off** Sufyan's explicit "sign off sprint N", 
 - Tests: 1070 passed, 23 skipped; ruff check and format clean.
 - Limits: not run against Telegram; the checklist is Sufyan's.
 - Next action / owner: merge the sprint 19 PR, run its checklist / Sufyan; build sprint 20 / agent.
+
+### 2026-11-17 — Sprint 20 built: commands card and menu
+
+- Performed by: Claude (Opus 5.5) with Sufyan; a Sonnet agent built; four Opus reviewers
+  (`/review`). Stacked on sprint 19.
+- Scope: the open-trip welcome is now the commands card, posted and pinned right after
+  `Connected ✅`. Pins are quiet; the bot unpins its own older card and never a person's pin. A
+  failed pin adds one line asking to be made an admin with 'Pin messages', once. `Everyone's in`
+  posts nothing new. The bot sets its "/" menu on startup, one list for groups and one for
+  private chats. README and the sprint 17 checklist no longer ask for BotFather `/setcommands`.
+- Review: spec match clean. Fixed: the card after `Connected ✅` is posted without a store read
+  (a store error can no longer replace it with "ledger unavailable"); welcome text keyed on the
+  same state as its buttons; spec §19 lines this sprint replaces are marked; smaller tidy-ups.
+  Deferred: moving the welcome code into its own module (breaks an import loop that predates
+  this sprint); the repo-wide `# noqa: BLE001` codes do nothing because ruff does not select BLE.
+- Tests: 1087 passed, 23 skipped; ruff clean. Mutation checks: unpin only the bot's card, no
+  unpin on a failed pin, quiet pin, command-list drift guard, card without a store read.
+- Limits: not run against Telegram. The "/" menu shows only after a deploy restarts the bot.
+- Next action / owner: merge #56, wait for the deploy, merge this PR, run both checklists / Sufyan.
 
