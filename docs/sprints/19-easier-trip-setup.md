@@ -125,6 +125,17 @@ Keyboard, one button per row, in this order:
 - Trip and pay-back currency may be the same.
 - `Start trip` saves exactly what the summary card shows, then posts `Connected ✅` as today.
 
+### Settled at build (agent's calls, open to change)
+- Callback data beyond the pinned `tzi`: `chg:trip`, `chg:home`, `chg:tz` for the three `Change` buttons; `tz:type` and `tz:back` on the timezone list; `<step>:back` on the `Other…` page (`<step>` is `trip_ccy` or `home_ccy`). The old `tz:<name>` buttons are gone; a stale one is ignored.
+- The default timezone is set when the spend currency is picked (not after step 2), unless the user already chose one. Every pick or change of spend currency goes through the same rule.
+- `◂ Back` on the `Other…` page restores the short keyboard of the same question, also when the step was opened from the summary card. That step has no way back to the summary except picking a currency.
+- The `Type it` prompt has no buttons. Any later button press, or a valid timezone, ends the wait.
+- The typed-text wait now exists only for the timezone. The text handler ignores any session not waiting on `tz`. Typed text is trimmed before matching.
+- `Change timezone` uses the list of the trip currency at the moment of the press. `tzi` index 0 to len-1 only; anything else (negative, text, too big) is a stale button.
+- The `Retry` button after a failed save is unchanged (`confirm:yes`).
+- The catalog fallback is built from `TIMEZONE_DEFAULTS` keys, so adding `MXN` and `BRL` there adds them to the fallback currency page too.
+- `Start a trip` from the menu and `Start new trip` after the rebind prompt now show the new step 1 text (same code path). `tests/test_menu.py` was updated for that.
+
 ## Before you start (you)
 Nothing.
 
