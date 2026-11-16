@@ -134,7 +134,7 @@ async def test_start_in_group_no_longer_joins() -> None:
     update.effective_message.reply_text.assert_not_called()
     context.bot.send_message.assert_awaited_once()
     (_, text), _kwargs = context.bot.send_message.call_args
-    assert "Trip: Trip (JPY → SGD)" in text
+    assert text.startswith("📌 <b>How to use Who Paid For This</b>")
 
 
 async def test_start_with_args_in_group_posts_nothing() -> None:
@@ -516,14 +516,9 @@ async def test_everyones_in_removes_keyboard_and_appends_closing_line() -> None:
     (text,), kwargs = update.callback_query.edit_message_text.call_args
     assert text.endswith("Everyone's in. Latecomers can type /join.")
     assert kwargs["reply_markup"] is None
-    # Sprint 10 amendment: the full menu is posted and pinned once everyone is in.
-    context.bot.send_message.assert_awaited_once()
-    welcome_args, welcome_kwargs = context.bot.send_message.call_args
-    welcome_text = welcome_kwargs.get("text") or welcome_args[1]
-    assert "Trip: Trip (JPY → SGD)" in welcome_text
-    labels = [b.text for row in welcome_kwargs["reply_markup"].inline_keyboard for b in row]
-    assert labels[:2] == ["Mine", "Balances"]
-    context.bot.pin_chat_message.assert_awaited_once()
+    # Sprint 20: `Everyone's in` posts and pins nothing; the card comes at trip creation.
+    context.bot.send_message.assert_not_awaited()
+    context.bot.pin_chat_message.assert_not_awaited()
 
 
 async def test_everyones_in_rejects_non_joined_presser() -> None:
