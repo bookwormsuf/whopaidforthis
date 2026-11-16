@@ -710,3 +710,13 @@ def test_timezone_buttons_carry_the_list_index_and_label_bali() -> None:
     markup = timezone_list_keyboard("S" * 26, ["Asia/Jakarta", "Asia/Makassar"])
     assert markup.inline_keyboard[1][0].text == "Asia/Makassar (Bali)"
     assert markup.inline_keyboard[1][0].callback_data == f"st:{'S' * 26}:tzi:1"
+
+
+@pytest.mark.parametrize("value", ["other", "back"])
+async def test_other_or_back_on_a_currency_step_ends_a_timezone_wait(value: str) -> None:
+    deps, context, sid, _ = await _summary()
+    await _press(context, sid, "chg", "tz")
+    await _press(context, sid, "tz", "type")
+    assert deps.settrip_sessions.find_awaiting_text(-100, 1) is not None
+    await _press(context, sid, "trip_ccy", value)
+    assert deps.settrip_sessions.find_awaiting_text(-100, 1) is None

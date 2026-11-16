@@ -37,7 +37,7 @@ from app.bot.send import SendFn, build_send
 from app.bot.session_state import SettripSession, SettripSessionStore
 from app.models.trip import Trip
 from app.models.user import display_name_for
-from app.services.currencies import match_timezone, timezone_choices_for
+from app.services.currencies import default_timezone_for, match_timezone, timezone_choices_for
 from app.services.ledger_store import LEDGER_UNAVAILABLE_TEXT, LedgerUnavailable
 
 logger = logging.getLogger(__name__)
@@ -113,10 +113,6 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             await message.reply_text("Cancelled.", parse_mode="HTML")
 
 
-def _default_timezone(trip_currency: str | None) -> str:
-    return timezone_choices_for(trip_currency or "")[0]
-
-
 def _render_for_step(session: SettripSession) -> tuple[str, InlineKeyboardMarkup]:
     if session.step == "trip_ccy":
         return TRIP_CCY_TEXT, trip_currency_keyboard(session.session_id)
@@ -157,7 +153,7 @@ async def _apply_currency(
     if step == "trip_ccy":
         changes["trip_currency"] = code
         if not session.timezone_chosen:
-            changes["timezone"] = _default_timezone(code)
+            changes["timezone"] = default_timezone_for(code)
     else:
         changes["home_currency"] = code
     if session.from_summary or step == "home_ccy":
@@ -270,16 +266,17 @@ async def settrip_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     if step in ("trip_ccy", "home_ccy"):
         if value == "other":
-            codes = sorted(await deps.currencies.supported())
-            text, _ = _render_for_step(replace(session, step=step))
+            deps.settrip_sessions.update(session_id, awaiting_text_for=None)
+            codes = list(await deps.currencies.supported())
             await query.edit_message_text(
-                text,
+                TRIP_CCY_TEXT if step == "trip_ccy" else HOME_CCY_TEXT,
                 reply_markup=currency_page_keyboard(session_id, step, codes),
                 parse_mode="HTML",
             )
             return
         if value == "back":
-            await _show(context, replace(session, step=step))
+            deps.settrip_sessions.update(session_id, awaiting_text_for=None)
+            await _show(context, replace(session, step=step, awaiting_text_for=None))
             return
         await _apply_currency(context, session, step, value)
         return

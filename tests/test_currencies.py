@@ -36,8 +36,9 @@ def test_default_timezone_for_known_currencies() -> None:
     assert default_timezone_for("sgd") == "Asia/Singapore"
 
 
-def test_default_timezone_for_unknown_currency_is_none() -> None:
-    assert default_timezone_for("XYZ") is None
+def test_default_timezone_for_unknown_currency_is_utc() -> None:
+    assert default_timezone_for("XYZ") == "UTC"
+    assert default_timezone_for("IDR") == "Asia/Jakarta"
 
 
 def test_resolve_alias_is_case_insensitive() -> None:

@@ -157,9 +157,10 @@ def match_timezone(raw: str) -> str | None:
     return None
 
 
-def default_timezone_for(code: str) -> str | None:
-    """The conventional IANA timezone for a currency code, or None if not tabulated."""
-    return TIMEZONE_DEFAULTS.get(code.upper())
+def default_timezone_for(code: str) -> str:
+    """The timezone a new trip in this currency starts with: the first of its list,
+    else its tabulated default, else UTC."""
+    return timezone_choices_for(code)[0]
 
 
 CURRENCY_SYMBOLS: dict[str, str] = {
