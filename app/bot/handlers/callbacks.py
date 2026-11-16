@@ -151,19 +151,18 @@ async def join_button_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             logger.debug("join button: could not edit message")
 
 
-async def _handle_done(query, deps, trip, presser, current_text: str | None) -> bool:
+async def _handle_done(query, deps, trip, presser, current_text: str | None) -> None:
     """`Everyone's in`: any joined user may press it; it closes joining on this
-    message (removes the keyboard, appends the closing line). Returns True when
-    this press closed joining, False when it was refused or already closed.
+    message (removes the keyboard, appends the closing line).
     """
     if current_text is not None and is_closed(current_text):
         await query.answer()  # already closed; nothing to do
-        return False
+        return
 
     joined_users = await deps.ledger.list_users(trip, joined_only=True)
     if not any(user.user_id == presser.id for user in joined_users):
         await query.answer(_NOT_JOINED_TEXT)
-        return False
+        return
 
     await query.answer()
     if current_text is not None:
@@ -172,4 +171,3 @@ async def _handle_done(query, deps, trip, presser, current_text: str | None) -> 
             await query.edit_message_text(new_text, parse_mode="HTML", reply_markup=None)
         except Exception:  # noqa: BLE001 - editing an already-changed message is not fatal
             logger.debug("join button: could not edit message (done)")
-    return True
