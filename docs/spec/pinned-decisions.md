@@ -205,7 +205,6 @@ Decided with Sufyan after the post-trip review. ADR 0003 records the why; `docs/
 - A press is the typed command by the presser: same coroutine, same gates, same permission checks. State is re-read at press time; old menus are never edited.
 - `/start` in a group no longer joins the sender. Private `/start` and `/help` carry an `Add me to a group` URL button (`?startgroup=true`).
 - Typed commands stay; `/help` keeps its list under the explanation paragraph.
-- **Amended 2026-11-17, Sprint 20:** the open-trip welcome is the **commands card** (text pinned in `docs/sprints/20-commands-card-and-menu.md`), posted and pinned right after `Connected ✅`; `Everyone's in` no longer posts one. Pins are quiet, the bot unpins its own previous card, and a failed pin appends one line asking to be made an admin with 'Pin messages' or to be pinned by hand, once. The bot now sets its command menu with `setMyCommands` on startup: one list for groups, one for private chats. This reverses "no `setMyCommands`" above.
 
 ## 20. Receipt read budget (added 2026-10-16, Sprint 12)
 - Receipt reads are capped per calendar day in `Asia/Singapore`: 40 per chat, 400 across all chats, both settings with env overrides. Counters are in memory and reset on restart.
