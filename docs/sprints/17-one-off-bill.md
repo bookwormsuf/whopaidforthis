@@ -301,7 +301,7 @@ Nothing.
 - No log record contains a description, a name or an amount (caplog).
 
 ## After: your checklist
-0. In BotFather, `/setcommands`: add `split - Split one bill in a private chat`.
+0. ~~In BotFather, `/setcommands`: add `split - Split one bill in a private chat`.~~ No longer needed (amended by Sprint 20: the bot sets its own command menu on startup).
 1. Private chat, `/start`: the new text; the trip button first, `Split a bill now` second.
 2. `Split a bill now`, `84.50 dinner`, `3`, `Ali, Mei`, Next, `Me`, Split equally, Done. The
    summary reads as pinned. Forward it to someone: it makes sense on their phone.

@@ -110,6 +110,25 @@ Set once in `_post_init`, after the store connects, with `set_my_commands`:
   as no longer needed (amended by Sprint 20), do not delete it.
 - `STATUS.md` past entries are history and are not edited.
 
+### Settled at build (agent's calls, open to change)
+- The card after `Connected ✅` goes through `post_welcome`, so it reads the trip state again and
+  uses the update's chat. If that read fails, the group gets the usual "ledger unavailable" line
+  instead of a card (logged, trip stays created).
+- A pinned message with no `from_user`, or from anyone but the bot, counts as "not the bot's".
+- Only `BadRequest` and `Forbidden` from the pin count as "pin failed". Any other error from the
+  pin call is not caught by the helper. `settrip` and the group-add handler already swallow it.
+- A `get_chat` failure is logged with `logger.exception` (ERROR, with traceback).
+- `/start` and the group-add welcome follow the same pinning rules, so they also unpin the bot's
+  older card and send the pin-failed text.
+- `PIN_HINT` stays as a name, now `"\n\n" + PIN_FAILED_TEXT`.
+- `set_my_commands` is tried per scope. If the group list fails, the private list is still tried.
+  Each failure logs one warning naming the scope.
+- README beyond step 4: the "How to use" lines that quoted the old pin hint and said
+  `Everyone's in` posts the menu were updated to match. They were wrong after this sprint.
+- The old `_post_menu_after_done` was deleted, not left unused.
+- Existing tests that expected the old open-trip welcome, the `Everyone's in` menu, or "no message
+  after trip creation" were changed to the new behaviour.
+
 ## Before you start (you)
 Nothing. Merge Sprint 19 first.
 

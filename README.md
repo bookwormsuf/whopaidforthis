@@ -27,7 +27,7 @@ Project status and sign-offs: `STATUS.md`. Settled design decisions: `docs/spec/
 
 Use one Telegram group per trip. A group has one open trip at a time.
 
-1. **Add the bot to the group.** It posts a welcome message with a **Start a trip** button and tries to pin it. If it can't pin, it says "Pin this message so everyone can find the buttons." It never asks to be made an admin.
+1. **Add the bot to the group.** It posts a welcome message with a **Start a trip** button and tries to pin it. If it can't pin, it says "I can't pin this. Make me an admin with 'Pin messages' so I can keep it up to date, or pin it yourself." Once a trip starts, it posts and pins a commands card with how to add an expense and the everyday commands.
 2. **Start the trip.** Tap **Start a trip** or run `/settrip`. The bot asks three questions with buttons:
    - The trip currency: what you pay in (THB, MYR, JPY and CNY are shown first, then **Other…** for any other 3-letter code).
    - The home currency: what you will settle up in.
@@ -36,7 +36,7 @@ Use one Telegram group per trip. A group has one open trip at a time.
    After the timezone, a summary card shows the trip name, currencies and timezone with **Start trip** and **Cancel**. The trip is saved only when you tap **Start trip**.
 
    If the group already has an open trip, the bot first asks "Close the current trip and start a new one?" with **Start new trip** and **Keep current**. The old trip is closed only when the new one is confirmed. It is never deleted and stays exportable.
-3. **Everyone joins.** Each person taps **I'm in too** or sends `/join`. The bot needs to know who is splitting, because Telegram does not let a bot see a group's member list. You join a trip in one of four ways: `/join`, the **I'm in too** button, sending an expense by text or photo, or being @-tagged in an expense or its caption. **Everyone's in** closes joining and posts the full button menu. You can also run `/join` as a reply to someone's message to join them.
+3. **Everyone joins.** Each person taps **I'm in too** or sends `/join`. The bot needs to know who is splitting, because Telegram does not let a bot see a group's member list. You join a trip in one of four ways: `/join`, the **I'm in too** button, sending an expense by text or photo, or being @-tagged in an expense or its caption. **Everyone's in** closes joining. You can also run `/join` as a reply to someone's message to join them.
 
    `/start` in a group shows the welcome menu again. It does not join you.
 4. **Add expenses.** Type an amount and a description, like `1200 yen ramen`. Or send a photo of a receipt. The bot converts the amount to your home currency at that day's rate and shows a card (a message with buttons) for you to check before it saves anything. An unfinished card is called a draft. A draft expires after 30 minutes without a button press or reply.
@@ -303,25 +303,7 @@ You need a Telegram bot token, a Postgres database, an Anthropic API key, and so
 1. In Telegram, open a chat with `@BotFather` and create a bot with `/newbot` (or pick yours with `/mybots`).
 2. **API Token**: copy it into `TELEGRAM_BOT_TOKEN`. Treat it like a password.
 3. **Bot Settings, Group Privacy, Turn off** (see Privacy mode below).
-4. Optional but recommended: **Edit Bot, Edit Commands**, and paste this complete list. It matches the commands the bot registers. The bot does not set its command list itself.
-   ```
-   start - Open the menu in a group, or the intro in a private chat
-   help - What this bot does
-   join - Join this trip
-   settrip - Start a trip for this group
-   cancel - Cancel a trip setup or a one-off bill
-   recent - Last 5 expenses
-   today - Today's expenses
-   summary - Group totals
-   mine - What I paid and owe
-   balances - Everyone's balances
-   settle - Who pays whom
-   undo - Cancel my last expense
-   export - Download this trip's records
-   deletetrip - Delete every trip in this group
-   feedback - Tell the person who built this what to fix
-   split - Split one bill in a private chat
-   ```
+4. No command list is needed here. The bot sets its own command menu on startup.
 5. Open the bot in a private chat and press **Start** once. This lets the bot message you, which feedback needs if you are the owner.
 
 ### Privacy mode
