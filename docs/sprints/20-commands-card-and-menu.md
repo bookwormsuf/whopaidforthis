@@ -111,13 +111,14 @@ Set once in `_post_init`, after the store connects, with `set_my_commands`:
 - `STATUS.md` past entries are history and are not edited.
 
 ### Settled at build (agent's calls, open to change)
-- The card after `Connected ✅` goes through `post_welcome`, so it reads the trip state again and
-  uses the update's chat. If that read fails, the group gets the usual "ledger unavailable" line
-  instead of a card (logged, trip stays created).
+- The card after `Connected ✅` is posted by `post_commands_card(bot, chat_id)` in `menu.py`. It
+  sends the card text with the open-trip menu and pins it, with no store read, using the new
+  trip's chat ID. A ledger failure cannot turn it into a "ledger unavailable" line. Any other
+  failure is logged and swallowed; the trip stays created.
 - A pinned message with no `from_user`, or from anyone but the bot, counts as "not the bot's".
 - Only `BadRequest` and `Forbidden` from the pin count as "pin failed". Any other error from the
   pin call is not caught by the helper. `settrip` and the group-add handler already swallow it.
-- A `get_chat` failure is logged with `logger.exception` (ERROR, with traceback).
+- A `get_chat` failure is logged at WARNING, without a traceback.
 - `/start` and the group-add welcome follow the same pinning rules, so they also unpin the bot's
   older card and send the pin-failed text.
 - `PIN_HINT` stays as a name, now `"\n\n" + PIN_FAILED_TEXT`.

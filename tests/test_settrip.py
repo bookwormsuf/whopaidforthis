@@ -726,7 +726,7 @@ async def test_other_or_back_on_a_currency_step_ends_a_timezone_wait(value: str)
     assert deps.settrip_sessions.find_awaiting_text(-100, 1) is None
 
 
-async def _confirm_with_card(*, pin_error: Exception | None = None):
+async def _confirm_with_card(*, pin_error: Exception | None = None, status_read_fails=False):
     """Runs /settrip through Confirm with yielding bot doubles that log call order."""
     ledger = InMemoryLedgerStore()
     deps = _deps(ledger)
@@ -770,6 +770,15 @@ async def _confirm_with_card(*, pin_error: Exception | None = None):
         order.append("connected")
 
     confirm.callback_query.edit_message_text = AsyncMock(side_effect=_connected)
+    if status_read_fails:
+        real_save = ledger.save_binding
+
+        async def _save_then_break_status_read(trip):
+            saved = await real_save(trip)
+            ledger.latest_trip = AsyncMock(side_effect=LedgerUnavailable("down"))
+            return saved
+
+        ledger.save_binding = _save_then_break_status_read
     await settrip.settrip_callback(confirm, context)
     return ledger, context, order
 
@@ -802,3 +811,12 @@ async def test_a_card_that_blows_up_leaves_the_trip_created() -> None:
     ledger, context, order = await _confirm_with_card(pin_error=RuntimeError("boom"))
 
     assert await ledger.get_binding(-100) is not None
+
+
+async def test_the_card_is_posted_even_when_the_trip_status_read_fails() -> None:
+    _, context, order = await _confirm_with_card(status_read_fails=True)
+
+    assert order == ["connected", "send", "pin"]
+    assert context.bot.send_message.call_args.args[1].startswith(
+        "📌 <b>How to use Who Paid For This</b>"
+    )

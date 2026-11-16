@@ -150,12 +150,12 @@ def _callback_update(data: str, presser_id: int, chat_id: int = CHAT_ID) -> Magi
 
 
 def test_welcome_text_no_trip() -> None:
-    text = welcome_text(None, False)
+    text = welcome_text("no_trip")
     assert text.endswith("No trip yet.")
 
 
 def test_welcome_text_closed() -> None:
-    text = welcome_text(None, True)
+    text = welcome_text("closed")
     assert text.endswith("The last trip is closed. Start a new one or export it.")
 
 
@@ -170,18 +170,17 @@ _CARD = (
 )
 
 
-async def test_welcome_text_open_is_exactly_the_commands_card() -> None:
-    _, trip = await _bound_ledger()
-    assert welcome_text(trip, False) == _CARD
+def test_welcome_text_open_is_exactly_the_commands_card() -> None:
+    assert welcome_text("open") == _CARD
 
 
 def test_welcome_text_no_trip_and_closed_are_unchanged() -> None:
     footer = "Tap a button below. Typed commands work too, see /help."
-    assert welcome_text(None, False).endswith(f"{footer}\n\nNo trip yet.")
-    assert welcome_text(None, True).endswith(
+    assert welcome_text("no_trip").endswith(f"{footer}\n\nNo trip yet.")
+    assert welcome_text("closed").endswith(
         f"{footer}\n\nThe last trip is closed. Start a new one or export it."
     )
-    assert welcome_text(None, False).startswith(
+    assert welcome_text("no_trip").startswith(
         "<b>Who Paid For This</b> records this group's trip expenses."
     )
 

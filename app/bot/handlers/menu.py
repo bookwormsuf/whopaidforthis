@@ -100,13 +100,13 @@ def _state_for(trip: Trip | None, latest_is_closed: bool) -> MenuState:
     return "closed" if latest_is_closed else "no_trip"
 
 
-def welcome_text(trip: Trip | None, latest_is_closed: bool) -> str:
+def welcome_text(state: MenuState) -> str:
     """The welcome HTML: the commands card when a trip is open, else the intro
     with the closed-trip line or "No trip yet."
     """
-    if trip is not None:
+    if state == "open":
         return COMMANDS_CARD_TEXT
-    state_line = CLOSED_TRIP_LINE if latest_is_closed else NO_TRIP_LINE
+    state_line = CLOSED_TRIP_LINE if state == "closed" else NO_TRIP_LINE
     return f"{WELCOME_HEADER}\n\n{WELCOME_FOOTER}\n\n{state_line}"
 
 
@@ -153,7 +153,7 @@ async def _old_card_id(bot: Bot, chat_id: int) -> int | None:
     try:
         chat = await bot.get_chat(chat_id)
     except Exception:  # noqa: BLE001 - not knowing the old card only skips the tidy-up
-        logger.exception("pin: could not read the pinned message in chat %s", chat_id)
+        logger.warning("pin: could not read the pinned message in chat %s", chat_id)
         return None
     pinned = getattr(chat, "pinned_message", None)
     sender = getattr(pinned, "from_user", None)
@@ -162,7 +162,7 @@ async def _old_card_id(bot: Bot, chat_id: int) -> int | None:
     return pinned.message_id
 
 
-async def pin_welcome(
+async def _pin_welcome(
     bot: Bot,
     chat_id: int,
     message_id: int,
@@ -195,7 +195,7 @@ async def pin_welcome(
 
 async def post_welcome(deps: Deps, bot: Bot, chat: Chat) -> None:
     """Resolves this chat's state, sends the welcome with its menu, then pins it
-    under the pinning rules (`pin_welcome`). On a store error, sends
+    under the pinning rules (`_pin_welcome`). On a store error, sends
     `LEDGER_UNAVAILABLE_TEXT` instead.
     """
     try:
@@ -206,10 +206,20 @@ async def post_welcome(deps: Deps, bot: Bot, chat: Chat) -> None:
         return
 
     state = _state_for(trip, latest_is_closed)
-    text = welcome_text(trip, latest_is_closed)
+    text = welcome_text(state)
     keyboard = menu_keyboard(state, page=1)
     message = await bot.send_message(chat.id, text, parse_mode="HTML", reply_markup=keyboard)
-    await pin_welcome(bot, chat.id, message.message_id, text, keyboard)
+    await _pin_welcome(bot, chat.id, message.message_id, text, keyboard)
+
+
+async def post_commands_card(bot: Bot, chat_id: int) -> None:
+    """Sends the commands card with the open-trip menu and pins it. No store read:
+    the caller knows a trip is open (a trip was just created)."""
+    keyboard = menu_keyboard("open", page=1)
+    message = await bot.send_message(
+        chat_id, COMMANDS_CARD_TEXT, parse_mode="HTML", reply_markup=keyboard
+    )
+    await _pin_welcome(bot, chat_id, message.message_id, COMMANDS_CARD_TEXT, keyboard)
 
 
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
