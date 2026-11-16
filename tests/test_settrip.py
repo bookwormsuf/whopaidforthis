@@ -118,8 +118,12 @@ async def test_settrip_happy_path_creates_trip() -> None:
     confirm_update.callback_query.edit_message_text.assert_awaited_once()
     (text,), kwargs = confirm_update.callback_query.edit_message_text.call_args
     assert text.startswith("Connected ✅ Japan Trip")
-    # Sprint 10 amendment: the menu follows `Everyone's in`, not Connected.
-    context.bot.send_message.assert_not_awaited()
+    # Sprint 20: the commands card follows Connected, pinned quietly.
+    context.bot.send_message.assert_awaited_once()
+    assert context.bot.send_message.call_args.args[1].startswith(
+        "📌 <b>How to use Who Paid For This</b>"
+    )
+    context.bot.pin_chat_message.assert_awaited_once_with(-100, 7, disable_notification=True)
     assert "JPY → SGD" in text
     assert "Asia/Tokyo" in text
     assert kwargs["reply_markup"] is not None
@@ -720,3 +724,81 @@ async def test_other_or_back_on_a_currency_step_ends_a_timezone_wait(value: str)
     assert deps.settrip_sessions.find_awaiting_text(-100, 1) is not None
     await _press(context, sid, "trip_ccy", value)
     assert deps.settrip_sessions.find_awaiting_text(-100, 1) is None
+
+
+async def _confirm_with_card(*, pin_error: Exception | None = None):
+    """Runs /settrip through Confirm with yielding bot doubles that log call order."""
+    ledger = InMemoryLedgerStore()
+    deps = _deps(ledger)
+    context = _context(deps)
+    order: list[str] = []
+
+    async def _edit_card(*args: object, **kwargs: object) -> None:
+        await asyncio.sleep(0)
+        order.append("edit_card")
+
+    async def _send(*args: object, **kwargs: object) -> SimpleNamespace:
+        await asyncio.sleep(0)
+        order.append("send")
+        return SimpleNamespace(message_id=7)
+
+    async def _pin(*args: object, **kwargs: object) -> None:
+        await asyncio.sleep(0)
+        order.append("pin")
+        if pin_error is not None:
+            raise pin_error
+
+    async def _get_chat(chat_id: int) -> SimpleNamespace:
+        await asyncio.sleep(0)
+        return SimpleNamespace(pinned_message=None)
+
+    context.bot.send_message = AsyncMock(side_effect=_send)
+    context.bot.pin_chat_message = AsyncMock(side_effect=_pin)
+    context.bot.get_chat = AsyncMock(side_effect=_get_chat)
+    context.bot.edit_message_text = AsyncMock(side_effect=_edit_card)
+    await settrip.settrip_command(_command_update(), context)
+    session_id = _only_session_id(deps)
+    await settrip.settrip_callback(_callback_update(session_id, "trip_ccy", "JPY"), context)
+    await settrip.settrip_callback(_callback_update(session_id, "home_ccy", "SGD"), context)
+    order.clear()  # the question screens also edit messages; only Confirm onwards counts
+    context.bot.edit_message_text.reset_mock()
+    confirm = _callback_update(session_id, "confirm", "yes")
+    confirm.effective_chat = SimpleNamespace(id=-100, title="Japan Trip", type="supergroup")
+
+    async def _connected(*args: object, **kwargs: object) -> None:
+        await asyncio.sleep(0)
+        order.append("connected")
+
+    confirm.callback_query.edit_message_text = AsyncMock(side_effect=_connected)
+    await settrip.settrip_callback(confirm, context)
+    return ledger, context, order
+
+
+async def test_creating_a_trip_sends_connected_then_the_card_then_pins_it() -> None:
+    ledger, context, order = await _confirm_with_card()
+
+    assert order == ["connected", "send", "pin"]
+    assert context.bot.pin_chat_message.call_args.kwargs == {"disable_notification": True}
+    assert await ledger.get_binding(-100) is not None
+
+
+async def test_pin_failure_edits_the_card_once_and_sends_nothing_else() -> None:
+    from telegram.error import BadRequest
+
+    ledger, context, order = await _confirm_with_card(pin_error=BadRequest("no rights"))
+
+    assert order == ["connected", "send", "pin", "edit_card"]
+    context.bot.send_message.assert_awaited_once()
+    context.bot.edit_message_text.assert_awaited_once()
+    text = context.bot.edit_message_text.call_args.args[0]
+    assert text.endswith(
+        "\n\nI can't pin this. Make me an admin with 'Pin messages' so I can keep it up "
+        "to date, or pin it yourself."
+    )
+    assert await ledger.get_binding(-100) is not None
+
+
+async def test_a_card_that_blows_up_leaves_the_trip_created() -> None:
+    ledger, context, order = await _confirm_with_card(pin_error=RuntimeError("boom"))
+
+    assert await ledger.get_binding(-100) is not None

@@ -215,6 +215,25 @@ async def _create_trip(
     await query.edit_message_text(
         text, parse_mode="HTML", reply_markup=joined_keyboard(trip.chat_id)
     )
+    await _post_commands_card(deps, context, update)
+
+
+async def _post_commands_card(
+    deps: Deps, context: ContextTypes.DEFAULT_TYPE, update: Update
+) -> None:
+    """Sprint 20: right after `Connected ✅`, post and pin the commands card. A
+    failure is logged and swallowed; the trip stays created. Local import:
+    menu.py imports this module.
+    """
+    from app.bot.handlers.menu import post_welcome
+
+    chat = update.effective_chat
+    if chat is None:
+        return
+    try:
+        await post_welcome(deps, context.bot, chat)
+    except Exception:  # noqa: BLE001 - the trip exists; a missing card must not crash
+        logger.exception("settrip: could not post the commands card")
 
 
 def _retry_keyboard(session_id: str) -> InlineKeyboardMarkup:
