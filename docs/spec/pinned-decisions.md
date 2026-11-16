@@ -198,9 +198,9 @@ Decided with Sufyan after the post-trip review. ADR 0003 records the why; `docs/
 - Roadmap after Sprint 9: Sprint 10 `/start` menu with buttons (shipped 2026-10-15). Sprint 11 (Google Sheet export, persistent drafts, older-trip export) dropped 2026-10-15 as not core; WhatsApp explored and parked. Sprint 12: receipt read budget before going public (2026-10-16).
 
 ## 19. `/start` welcome menu (added 2026-10-15, Sprint 10)
-- Buttons under messages only; no `setMyCommands`, no persistent reply keyboard.
+- Buttons under messages only; no persistent reply keyboard. (`no setMyCommands` superseded by Sprint 20 on 2026-11-17, below.)
 - The welcome (text pinned in `docs/sprints/10-start-menu.md`) is posted when the bot is added to a group, and on `/start` in a group. `/help` in a group posts the help text with the menu under it, not the welcome, and is never pinned (amended 2026-10-15 after review). The bot tries to pin the welcome; if it lacks the right it appends "Pin this message so everyone can find the buttons." and never asks to be made admin.
-- `Everyone's in` on the Connected message posts and pins a fresh welcome with the open-trip menu (amended 2026-10-15).
+- `Everyone's in` on the Connected message posts and pins a fresh welcome with the open-trip menu (amended 2026-10-15) (superseded by Sprint 20 on 2026-11-17: it posts nothing new; the card is posted when the trip is created).
 - Menu is state-aware (no trip / open / closed), two pages when open, paging edits the keyboard of the same message. Every other press posts a new plain message and leaves the menu alone.
 - A press is the typed command by the presser: same coroutine, same gates, same permission checks. State is re-read at press time; old menus are never edited.
 - `/start` in a group no longer joins the sender. Private `/start` and `/help` carry an `Add me to a group` URL button (`?startgroup=true`).
