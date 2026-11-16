@@ -338,7 +338,7 @@ async def test_press_settrip_starts_the_flow() -> None:
 
     await menu_callback(update, context)
 
-    assert bot.sent_messages[-1]["text"] == "Trip currency?"
+    assert bot.sent_messages[-1]["text"] == "Which currency will you spend on this trip?"
 
 
 async def test_press_howto_sends_the_pinned_examples() -> None:
